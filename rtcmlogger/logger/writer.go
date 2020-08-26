@@ -65,6 +65,9 @@ var _ io.Writer = (*Writer)(nil)
 func New(logDirectory string) io.Writer {
 	clock := clock.NewSystemClock() // The real system clock.
 	writer := NewRTCMWriter(clock, logDirectory)
+	go writer.logControl()
+	go writer.logPusher()
+
 	return writer
 }
 
