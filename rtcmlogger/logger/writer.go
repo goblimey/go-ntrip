@@ -123,10 +123,11 @@ func (lw *Writer) logControl() {
 			secondsToGo := (sleepTime / time.Second) % 60
 			minutesToGo := sleepTime / time.Minute % 60
 			hoursToGo := sleepTime / time.Hour % 24
-			log.Printf("logControl: logging disabled.  Sleeping for %02d:%02d:%02d until %v\n",
+			log.Printf("logControl: Sleeping for %02d:%02d:%02d until %v\n",
 				hoursToGo, minutesToGo, secondsToGo, endOfDay)
 			time.Sleep(sleepTime)
 			// It's end of day.  Turn off logging.
+			log.Printf("logControl: disabling logging.")
 			lw.logWriter.DisableLogging()
 		} else {
 			// The time is between end of day today and start
@@ -140,11 +141,12 @@ func (lw *Writer) logControl() {
 			secondsToGo := (sleepTime / time.Second) % 60
 			minutesToGo := sleepTime / time.Minute % 60
 			hoursToGo := sleepTime / time.Hour % 24
-			log.Printf("logControl: logging enabled.  Sleeping for %02d:%02d:%02d until %v\n",
+			log.Printf("logControl: sleeping for %02d:%02d:%02d until %v\n",
 				hoursToGo, minutesToGo, secondsToGo, startOfDayTomorrow)
 
 			time.Sleep(sleepTime)
 			// It's the next day and time to start logging.
+			log.Printf("logControl: enabling logging.")
 			lw.logWriter.EnableLogging()
 		}
 	}
