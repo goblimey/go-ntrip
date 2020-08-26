@@ -39,10 +39,10 @@ import (
 // format.
 //
 type Writer struct {
-	clock        clock.Clock              // This clock may be a fake during testing.
+	clock        clock.Clock         // This clock may be a fake during testing.
 	logWriter    *dailylogger.Writer // The daily log writer.
-	pushing      bool                     // true if we should check for old logs to push at end of day.
-	logDirectory string                   // The directory in which to create the logs
+	pushing      bool                // true if we should check for old logs to push at end of day.
+	logDirectory string              // The directory in which to create the logs
 }
 
 // Start logging at 00:00:05
@@ -120,7 +120,7 @@ func (lw *Writer) logControl() {
 			secondsToGo := (sleepTime / time.Second) % 60
 			minutesToGo := sleepTime / time.Minute % 60
 			hoursToGo := sleepTime / time.Hour % 24
-			fmt.Printf("logControl: logging disabled.  Sleeping for %02d:%02d:%02d until %v\n",
+			log.Printf("logControl: logging disabled.  Sleeping for %02d:%02d:%02d until %v\n",
 				hoursToGo, minutesToGo, secondsToGo, endOfDay)
 			time.Sleep(sleepTime)
 			// It's end of day.  Turn off logging.
@@ -137,7 +137,7 @@ func (lw *Writer) logControl() {
 			secondsToGo := (sleepTime / time.Second) % 60
 			minutesToGo := sleepTime / time.Minute % 60
 			hoursToGo := sleepTime / time.Hour % 24
-			fmt.Printf("logControl: logging enabled.  Sleeping for %02d:%02d:%02d until %v\n",
+			log.Printf("logControl: logging enabled.  Sleeping for %02d:%02d:%02d until %v\n",
 				hoursToGo, minutesToGo, secondsToGo, startOfDayTomorrow)
 
 			time.Sleep(sleepTime)
@@ -157,7 +157,7 @@ func (lw Writer) logPusher() {
 		secondsToGo := (sleepTime / time.Second) % 60
 		minutesToGo := sleepTime / time.Minute % 60
 		hoursToGo := sleepTime / time.Hour % 24
-		fmt.Printf("logPusher: sleeping for %02d:%02d:%02d until %v\n",
+		log.Printf("logPusher: sleeping for %02d:%02d:%02d until %v\n",
 			hoursToGo, minutesToGo, secondsToGo, midnight)
 		time.Sleep(sleepTime)
 		// It's the next morning.  Push any old logs.
@@ -216,7 +216,7 @@ func getTodaysLogFilename(now time.Time) string {
 }
 
 // pushOldLogs searches the logging directory and pushes all plain files
-// escept for today's log file into the subdirectory for old logs.
+// except for today's log file into the subdirectory for old logs.
 func pushOldLogs(logDirectory string, now time.Time) {
 	logFilename := getTodaysLogFilename(now)
 	files, err := ioutil.ReadDir(logDirectory)
@@ -254,7 +254,7 @@ func pushLogfile(logDirectory, logFilename string) {
 	newLogFilePath := subdirectory + "/" + logFilename
 	err = os.Rename(logFilePath, newLogFilePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "pushLogfile - warning - failed to move logfile %s to directory %s - %v\n",
+		log.Printf("pushLogfile - warning - failed to move logfile %s to directory %s - %v\n",
 			logFilename, newLogFilePath, err)
 	}
 }

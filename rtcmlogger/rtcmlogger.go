@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -40,6 +39,8 @@ func main() {
 
 	buffer := make([]byte, bufferLength)
 
+	loggingErrors := true // log errors only once.
+
 	for {
 
 		// Read a block from stdin, send a copy to the recorder and
@@ -59,8 +60,11 @@ func main() {
 
 		_, err = os.Stdout.Write(buffer[:n])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "write failed\n")
-			log.Fatal(err)
+			if loggingErrors {
+				// Log errors only once.
+				loggingErrors = false
+				log.Printf("write failed %v\n", err)
+			}
 		}
 	}
 }

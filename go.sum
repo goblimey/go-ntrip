@@ -1,0 +1,4 @@
+github.com/goblimey/go-ntrip/rtcmlogger v0.0.0-20200825104214-225f47a7ebb9 h1:h/wMY9V/wMPKTcAKFWe/mFwz8gVdzT9tGzf9TCyB0PE=
+github.com/goblimey/go-ntrip/rtcmlogger v0.0.0-20200825104214-225f47a7ebb9/go.mod h1:xwn4PFOcUgaRehGL8GcfpnpkpUWTrdkSVnWfuKa3ohU=
+github.com/goblimey/go-tools v0.0.6 h1:Nb+rIFXq9SLvXkIAObGt7S/51JIxknSAzJhrskjZzOU=
+github.com/goblimey/go-tools v0.0.6/go.mod h1:Iu094zcr4IQ3Su5HPlQmAvmqP3ojPAeWsan464YWvlg=
