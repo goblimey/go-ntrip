@@ -22,15 +22,21 @@ import (
 // There are tools available to convert an RTCM3 data stream into messages
 // in RINEX format.  That's an open standard and the result is readable by
 // humans.  There is a little bit of useful information scattered around
-// various web pages.  To figure out the format of the message I'm
+// various public web pages.  To figure out the format of the message I'm
 // interested in, I read what I could find, took the RTCM3 messages
 // that my device produced, converted them to RINEX format and examined
-// the result, and I spent a lot of time reading the open source RTKLIB
-// software, which is written in C and gives lots of useful clues as to
-// the detail.
+// the result.  However, most of the information i needed came from the
+// open source RTKLIB software, which is written in C.  I've copied some of
+// the more useful RTKLIB source files into this repository as a reference.
 //
-// Some of my unit tests take the results that this software produces and
+// Some of my unit tests take the results that my software produces and
 // compares it with the results that RINEX tools produced.
+//
+// I claim that this Go software is the most readable public source of
+// detailed information about the RTCM3 format, limited though it is.
+// Onc you've read an understood this, you should be able to follow
+// the more complete RTKLIB implementation to decode any messages not
+// handled here.
 //
 // An RTCM3 message is binary and variable length.  Each message frame
 // is composed of a three-byte header, an embedded message and 3 bytes of
@@ -38,7 +44,7 @@ import (
 // includes the length of the embedded message.  Each message starts with
 // a 12-bit message number which defines the type.  Apart from that
 // message number, each type of message is in a different format.
-// (Fortunately, I only have to worry about two major types)
+// Fortunately, I only have to worry about two major types.
 //
 // For example, this is a hex dump of a complete message frame and the
 // start of another:
@@ -57,12 +63,16 @@ import (
 // d3 00 6d 46 40 00 33 f6  10 22 00 00 02 40 08 16
 //
 // The message starts at byte zero.  That byte has the value d3, which
-// announces the start of the message frame.  The top six bits of byte 1
-// are always zero.  The lower two bits and the bits of byte 2 form the
+// announces the start of the message frame.  The frame is composed of a
+// 3-byte header, and embedded message and 3 bytes of Cyclic Rdundancy
+// Check (CRC) data.
+//
+// Byte 0 of the frame is always d3.  The top six bits of byte 1 are
+// always zero.  The lower two bits and the bits of byte 2 form the
 // message length, in this case hex aa, decimal 176.  So the embedded
-// message is 176 bytes long and the whole message frame is 182 bytes long.
-// As shown above, the embedded message may end with some padding bits,
-// always zero.
+// message is 176 bytes long and therefore the whole message frame is 182
+// bytes long.  As shown above, the embedded message may end with some
+// padding bits which are always zero.
 //
 // The last three bytes of the frame (in this case 4d, f5 and 5a) are the
 // CRC value.  To check the CRC, take the header and the embedded message,
@@ -80,22 +90,28 @@ import (
 //
 // The messages are binary and can contain a d3 byte.  Note the one on the
 // fifth line of the hex dump above.  This is not the start of another
-// message.  One clue is that it's not followed by six zero bits.  To
-// decode a stream of message frames you need to check the header, extract the
-// message length, read the whole message frame and check the CRC bytes.  This
-// matters particularly when you switch on and start to receive a stream of
-// data from a device.  You will come into the data stream part-way through.
-// You can't assume that a d3 byte is the start of a message.
+// message.  One clue is that it's not followed by six zero bits.  To extract
+// a message frame from a stream of data and decode it, you need to read the
+// header and the next two bytes, check the header, find the message length,
+// read the whole message frame and check the CRC value.  This matters
+// particularly when you start to receive a stream of data from a device.  You
+// may come into the data stream part-way through and blunder into a d3 byte.
+// You can't assume that it's the start of a message.
 //
-// Message frames are contiguous with no separators or newlines.  In the
-// example, the last line contains the start of the next message.  My device
-// intersperses other messages in other formats, which this software ignores.
+// The CRC data is there to check that the message has not been corrupted in
+// transit.  If the CRC check fails, the mesage must be discarded.
+//
+// RTCM3 message frames in the data stream are contiguous with no separators or
+// newlines.  In the example, the last line contains the start of the next
+// message.  Other data in other formats may be interspersed between frames.
+// This software discards anything that's not an RTCM3 message frame with a
+// correct CRC value.
 //
 // There are many hundreds of RTCM3 message types, some of which are just
 // different ways of representing the same information.  To get an accurate fix
 // on its position, a rover only needs to know the position of the base station
 // and a recent set of the base's observations of satellite signals, which is to
-// say a tpe 1005 message and a set of MSM7 messages, one for each constellation
+// say a type 1005 message and a set of MSM7 messages, one for each constellation
 // of satellites (GPS, GLONASS or whatever).
 //
 // Message type 1005 gives the position of the base station (or more strictly,
@@ -111,7 +127,8 @@ import (
 //
 // There are other constellations which are only visible in certain parts of
 // the world, and not in the UK where I live.  I don't decode those messages
-// either.  If I tried, I wouldn't be able to test the results.
+// either.  If I tried, I wouldn't have any real data with which to check the
+// results.
 //
 // Each MSM contains readings for satellites in one constellation.  Each
 // satellite in a constellation is numbered.  An MSM allows 64 satellites
@@ -119,7 +136,8 @@ import (
 // be visible.  Signals from some of those may be too weak to register, so the
 // message will contain readings of just some signals from just some satellites.
 // My base station typically sees one or two signals from each of 6-8 satellites
-// in a scan.
+// from each of the four visible constellations in each scan, and produces four
+// MSMs containing those results.
 //
 // An MSM message starts with a header, represented here by an MSMHeader
 // structure.  Following the header is a set of cells listing the satellites
@@ -259,6 +277,17 @@ const CLight = 299792458.0
 // It's used to convert a range in milliseconds to a distance in metres.
 const oneLightMillisecond = (CLight * 0.001)
 
+// GPS signal frequencies.  See https://en.wikipedia.org/wiki/GPS_signals for some
+// clues, for example "In the case of the original GPS design, two frequencies are
+// utilized; one at 1575.42 MHz (10.23 MHz × 154) called L1; and a second at
+// 1227.60 MHz (10.23 MHz × 120), called L2.".  Later the same document describes
+// band L2C and L5.
+//
+// Galileo uses the same frequencies but gives them different names - GPS L5 is
+// Galileo E5a, and so on.
+//
+// The RTKLIB source code defines the bands and frequencies for all constellations.
+
 // freq1 is the L1/E1 signal frequency in Hz.
 const freq1 float64 = 1.57542e9
 
@@ -300,17 +329,6 @@ const freq2BD float64 = 1.20714e9
 
 // freq3BD is the BeiDou B3 frequency (Hz).
 const freq3BD float64 = 1.26852e9
-
-// freqGlo is lookup table for converting a frequency id to a GLONASS frequency.
-var freqGlo = []float64{freq1Glo, freq2Glo, freq3Glo}
-
-// dfreqGlo is a lookup table for converting a GLONASS bias frequency ID to a freqency.
-var dfreqGlo = []float64{dFreq1Glo, dFreq2Glo, 0.0}
-
-// freqGPS is a lookup table for coverting a GPS frequency ID to a frequency.
-var freqGPS = []float64{freq1, freq2, freq5, freq6, freq7, freq8}
-
-var freqBD = []float64{freq1BD, freq2BD, freq3BD}
 
 // dateLayout defines the layout of dates when they
 // are displayed - "yyyy-mm-dd hh:mm:ss.ms timeshift timezone"
@@ -753,7 +771,7 @@ func (rtcm *RTCM) GetMessages(data []byte) []*Message {
 // message, it returns an error.
 func (rtcm *RTCM) GetMessage(data []byte) (*Message, error) {
 
-	messageLength, messageType, err := GetMessageLengthAndType(data)
+	messageLength, messageType, err := rtcm.GetMessageLengthAndType(data)
 	if err != nil {
 		return nil, err
 	}
@@ -786,7 +804,7 @@ func (rtcm *RTCM) GetMessage(data []byte) (*Message, error) {
 // GetMessageLengthAndType extracts the message length and the message type from an
 // RTCMs message frame or returns an error, implying that this is not the start of a
 // valid message.  The data must be at least 5 bytes long.
-func GetMessageLengthAndType(data []byte) (uint, uint, error) {
+func (rtcm *RTCM) GetMessageLengthAndType(data []byte) (uint, uint, error) {
 
 	if len(data) < headerLengthBytes+2 {
 		return 0, 0, errors.New("the message is too short to get the header and the length")
@@ -808,15 +826,6 @@ func GetMessageLengthAndType(data []byte) (uint, uint, error) {
 
 	// The bottom ten bits of the header is the message length.
 	length := uint(Getbitu(data, 14, 10))
-
-	// The message follows the header and is followed by three
-	// bytes of CRC.
-	frameLength := length + headerLengthBytes + crcLengthBytes
-	if frameLength > uint(len(data)) {
-		message := fmt.Sprintf("incomplete message - frame length %d, data length %d",
-			frameLength, len(data))
-		return 0, 0, errors.New(message)
-	}
 
 	// The message type follows the header.
 	messageType := uint(Getbitu(data, 24, 12))
@@ -842,11 +851,11 @@ func (rtcm *RTCM) ReadNextMessageFrame(reader io.Reader) ([]byte, error) {
 
 		// Start the new message frame.
 		frame = append(frame, StartOfMessageFrame)
+		var frameLength uint = 0
 
 		// Get the rest of the message frame.
 		var n uint = 1
 		for {
-			var frameLength uint = 0
 			c, err := getChar(reader)
 			if err != nil {
 				// EOF while reading the final (incomplete) message frame. Abandon it.
@@ -858,7 +867,7 @@ func (rtcm *RTCM) ReadNextMessageFrame(reader io.Reader) ([]byte, error) {
 			if n == headerLengthBytes+2 {
 				// We have enough data to find the length and the type (which we don't need).
 				// Get the expected frame length.
-				messagelength, _, err := GetMessageLengthAndType(frame)
+				messagelength, _, err := rtcm.GetMessageLengthAndType(frame)
 				if err != nil {
 					// We thought we'd found the start of a message, but we haven't.
 					// Abandon the collected data and continue scanning.
@@ -882,6 +891,24 @@ func (rtcm *RTCM) ReadNextMessageFrame(reader io.Reader) ([]byte, error) {
 			}
 		}
 	}
+}
+
+// ReadNextMessage gets the next message frame from a reader, extracts
+// and returns the message.  It returns any read error that it encounters,
+// such as EOF.
+func (rtcm *RTCM) ReadNextMessage(reader io.Reader) (*Message, error) {
+
+	frame, err1 := rtcm.ReadNextMessageFrame(reader)
+	if err1 != nil {
+		return nil, err1
+	}
+
+	message, err2 := rtcm.GetMessage(frame)
+	if err2 != nil {
+		return nil, err2
+	}
+
+	return message, nil
 }
 
 // GetMessage1005 returns a text version of a message type 1005

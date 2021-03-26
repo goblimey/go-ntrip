@@ -66,7 +66,6 @@ func main() {
 	fmt.Printf("\nNote: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)\n")
 	fmt.Printf("18 seconds ahead of UTC\n\n")
 
-	
 	for {
 		rawMessage, err := rtcm.ReadNextMessageFrame(os.Stdin)
 		if err != nil {
@@ -74,9 +73,19 @@ func main() {
 			return
 		}
 
-		// Decode the message.
-		message, err := rtcm.GetMessage(rawMessage)
-		// write the decoded messag.
-		fmt.Printf("%s\n", rtcm.DisplayMessage(message))
+		decode(rtcm, rawMessage)
+
 	}
+}
+
+func decode(rtcm *rtcm.RTCM, rawMessage []byte) {
+
+	message, err := rtcm.GetMessage(rawMessage)
+	if err != nil {
+		fmt.Printf("illegal message - %s", err.Error())
+		return
+	}
+
+	// write the decoded message.
+	fmt.Printf("%s\n", rtcm.DisplayMessage(message))
 }

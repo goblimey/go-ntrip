@@ -48,7 +48,7 @@ func TestGetStartOfday(t *testing.T) {
 	}
 }
 
-// TestGetEndOfDay tests the getStartOfDay method.
+// TestGetEndOfDay tests the getEndOfDay method.
 func TestGetEndOfDay(t *testing.T) {
 	// This replicates the logic of the function under test, so it's
 	// really just a round trip test.
