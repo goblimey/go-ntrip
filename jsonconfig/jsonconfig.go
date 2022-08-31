@@ -35,6 +35,7 @@ package jsonconfig
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -45,28 +46,51 @@ import (
 // Config contains the values from the JSON config file and a
 // pointer to the system log.  To support unit testing, functions
 // that need to write to the log should get it from the config
-// or from an argument.
+// or from an argument.  (we want to control whether a unit test
+// writes to a real log file.)
 type Config struct {
-	Filenames        []string `json:"input"`
-	SendToCaster     bool     `json:"sendtocaster"`
-	WriteOutputLog   bool     `json:"writeoutputLog"`
-	WriteReadableLog bool     `json:"writereadableLog"`
-	CasterHostName   string   `json:"casterhostname"`
-	CasterPort       uint     `json:"casterport"`
-	CasterUserName   string   `json:"casterUserName"`
-	CasterPassword   string   `json:"casterPassword"`
+	// Filenames is a list of filenames to try to open - first one wins.
+	Filenames []string `json:"input"`
+
+	// StopOnEOF says whether or not to stop processing on EOF.  When reading
+	// from a serial USB port, it should be false.  When reading from a plain
+	// file that's not being written by another process, it should be true.
+	StopOnEOF bool `json:"stop_on_eof"`
+
+	// RecordMessages says whether to record a verbatim copy of RTCM messages in a file.
+	RecordMessages bool `json:"record_messages"`
+
+	// MessageLogDirectory specifies the directory in which the file of RTCM
+	// messages is stored
+	MessageLogDirectory string `json:"message_log_directory"`
+
+	// DisplayMessages says whether to write a readable display of the incoming messages.
+	// Note: turning this on will produce a lot of output.
+	DisplayMessages bool `json:"display_messages"`
+
+	// CasterHostName is host name of the NTRIP (broad)caster.
+	CasterHostName string `json:"casterhostname"`
+
+	// CasterPort is port on which the (broad)caster is listening for NTRIP traffic.
+	CasterPort uint `json:"casterport"`
+
+	// CasterUsername is the user name to connect to the NTRIP (broad)caster.
+	CasterUserName string `json:"casterUserName"`
+
+	// CasterPassword is password to connect to the NTRIP (broad)caster.
+	CasterPassword string `json:"casterPassword"`
+
 	// LostInputConnectionTimeout defines the input timeout.
 	LostInputConnectionTimeout uint `json:"timeout"`
+
 	// LostConnectionSleepTime is the time to sleep between connection attempts.
 	LostInputConnectionSleepTime uint `json:"sleeptime"`
 
-	// SystemLog is the Writer used for logging and can be nil.  It's not
-	// supplied in the JSON.  The application should call GetJSONConfigFromFile
-	// and, if there is a log writer, supply it as a parameter.
-	SystemLog *log.Logger
-
-	// logging indicates that logging should be done.
-	logging bool
+	// systemLog is the Writer used for the daily activity log (as opposed to
+	// the log of incoming RTCM messages) and can be nil.  It's not supplied
+	// in the JSON.  The application should call GetJSONConfigFromFile and, if
+	// there is a log writer, supply it as a parameter.
+	systemLog *log.Logger
 }
 
 // GetJSONConfigFromFile gets the config from the file given by configName.
@@ -92,7 +116,12 @@ func getJSONConfig(jsonSource io.Reader, systemLog *log.Logger) (*Config, error)
 	jsonBytes, jsonReadError := ioutil.ReadAll(jsonSource)
 	if jsonReadError != nil {
 		// We can't read the control file - permissions?
-		systemLog.Printf("cannot read the JSON control file - %s\n", jsonReadError.Error())
+		errorMessage1 := fmt.Sprintf("cannot read the JSON control file - %v\n", jsonReadError)
+		if systemLog != nil {
+			systemLog.Println(errorMessage1)
+		} else {
+			log.Println(errorMessage1)
+		}
 		return nil, jsonReadError
 	}
 
@@ -100,43 +129,63 @@ func getJSONConfig(jsonSource io.Reader, systemLog *log.Logger) (*Config, error)
 	// Parse the JSON control file
 	jsonParseError := json.Unmarshal(jsonBytes, &config)
 	if jsonParseError != nil {
-		systemLog.Printf("cannot parse the JSON control file - %s\n", jsonParseError.Error())
+		errorMessage2 := fmt.Sprintf("cannot parse the JSON control file - %v\n", jsonParseError)
+		if systemLog != nil {
+			systemLog.Println(errorMessage2)
+		} else {
+			log.Println(errorMessage2)
+		}
 		return nil, jsonParseError
 	}
 
 	// Set the fields that are not set by the JSON.
-	config.SystemLog = systemLog
-	config.logging = true
+	config.systemLog = systemLog
 
 	return &config, nil
 }
 
+// connectionFailureLogged controls when a connection failure is
+// logged.
+var connectionFailureLogged = false
+
 // WaitAndConnectToInput tries repeatedly (potentially indefinitely)
 // to connect to one of the input files whose names are given.
-func WaitAndConnectToInput(config *Config) io.Reader {
+func (config *Config) WaitAndConnectToInput() io.Reader {
+	sleepTime := time.Duration(config.LostInputConnectionSleepTime) * time.Second
 	for {
-		reader := findInputDevice(config)
+		reader := config.findInputDevice()
 		if reader != nil {
-			if config.logging {
-				config.SystemLog.Println(
-					"waitAndConnect: connected to GNSS source")
+			logEntry1 := "waitAndConnect: connected to GNSS source"
+			if config.systemLog != nil {
+				config.systemLog.Println(logEntry1)
+			} else {
+				log.Println(logEntry1)
 			}
+			// Log the next connection failure.
+			connectionFailureLogged = false
 			return reader // Success!
 		}
-		if config.logging {
-			config.SystemLog.Println(
-				"waitAndConnectToInput: failed to connect to GNSS source.  Retrying")
+
+		if !connectionFailureLogged {
+			// Log only the first of a series of connection failures.
+			logEntry2 := "waitAndConnectToInput: failed to connect to GNSS source.  Retrying"
+			if config.systemLog != nil {
+				config.systemLog.Println(logEntry2)
+			} else {
+				log.Println(logEntry2)
+			}
+			connectionFailureLogged = true
 		}
-		sleeptime := time.Duration(config.LostInputConnectionSleepTime) * time.Second
-		time.Sleep(sleeptime)
+		// Pause and try again.
+		time.Sleep(sleepTime)
 	}
 }
 
-// findInputdevice searches the given list of InputFiles.If one of the named
+// findInputDevice searches the given list of InputFiles.If one of the named
 // files exists and can be opened for reading, it returns a Reader connected
 // to it.  The Reader responds to the supplied Context (which may, for example,
 // contain a read timeout).
-func findInputDevice(config *Config) io.Reader {
+func (config *Config) findInputDevice() io.Reader {
 	// Note:  The device names "/dev/ttyACM0" etc on a Raspberry Pi
 	// DO NOT relate to the physical USB sockets on the circuit board. They
 	// are used in turn. After the Pi boots, the first connection uses
@@ -146,7 +195,7 @@ func findInputDevice(config *Config) io.Reader {
 	// software running on the Pi needs to establish a connection with a serial
 	// USB device, it needs to do this search.
 
-	file := getInputFile(config)
+	file := config.getInputFile()
 	if file == nil {
 		// None of the input file are present. Return nil.
 		return nil
@@ -160,18 +209,21 @@ func findInputDevice(config *Config) io.Reader {
 // that it can open for reading or nil if it can't open any file.  The
 // connection returned has a read deadline set given by the configuration.
 //
-func getInputFile(config *Config) *os.File {
+func (config *Config) getInputFile() *os.File {
 	for _, name := range config.Filenames {
 		file, err := os.Open(name)
 		if err == nil {
-			if config.logging {
-				config.SystemLog.Printf("getInputFile: found %s", name)
-				// Turn off logging after the first successful scan.
-				config.logging = false
+			logEntry := fmt.Sprintf("getInputFile: found %s", name)
+			if config.systemLog != nil {
+				config.systemLog.Println(logEntry)
+			} else {
+				log.Println(logEntry)
 			}
 			// The file exists and we've just opened it for reading.
 			return file
 		}
+
+		// Set the read deadline to the value given in the config.
 		durationToDeadline := time.Duration(config.LostInputConnectionTimeout) *
 			time.Second
 		deadline := time.Now().Add(durationToDeadline)

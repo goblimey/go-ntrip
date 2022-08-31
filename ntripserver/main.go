@@ -251,30 +251,30 @@
 // has probably lost contact with the GNSS device.  The server should
 // close the input channel, reopen it and continue.
 //
-
-//
 package main
 
 import (
 	"context"
+	"log"
 	"os"
 	"time"
 
 	"github.com/goblimey/go-ntrip/jsonconfig"
-	"github.com/goblimey/go-ntrip/rtcm"
+	// "github.com/goblimey/go-ntrip/rtcm"
 	"github.com/goblimey/go-tools/dailylogger"
 )
 
 // controlFileName is the name of the JSON control file that defines
 // the names of the potential input files.
-const controlFileName = "./rtcmserver.json"
+const controlFileName = "./ntripserver.json"
 
 func main() {
 
-	// systemLog is for errors, warnings etc.  It's rolled over every day.
-	systemLog := dailylogger.New(".", "ntripserver.", ".log")
+	// dailyLog is for errors, warnings etc.  It's rolled over every day.
+	dailyLog := dailylogger.New(".", "ntripserver.", ".log")
+	logger := log.New(dailyLog, "", log.LstdFlags|log.Lshortfile)
 
-	config, err := jsonconfig.GetJSONConfigFromFile(controlFileName, systemLog)
+	config, err := jsonconfig.GetJSONConfigFromFile(controlFileName, logger)
 
 	if err != nil {
 		// There is no JSON config file.  We can't continue.
@@ -316,47 +316,46 @@ func main() {
 //
 func ProcessMessages(ctx context.Context, config *jsonconfig.Config) {
 
-	var casterChan, outputLogChan, readableLogChan chan []byte
-	var channels []chan []byte
+	//var casterChan, outputLogChan, readableLogChan chan []byte
+	// var casterChan, outputLogChan, readableLogChan chan []byte
+	// var channels []chan []byte
 
-	if config.SendToCaster {
-		casterChan = make(chan []byte, 1000)
-		// Run the goroutine to send the incoming RTCM
-		// messages on to the caster.
-		go rtcm.SendMessagesToCaster(outputLogChan)
-		channels = append(channels, casterChan)
-	}
+	// // casterChan = make(chan []byte, 1000)
+	// // // Run the goroutine to send the incoming RTCM
+	// // // messages on to the caster.
+	// // go rtcm. .SendMessagesToCaster(outputLogChan)
+	// // channels = append(channels, casterChan)
 
-	if config.WriteOutputLog {
-		outputLog := dailylogger.New(".", "", ".rtcm3")
-		outputLogChan = make(chan []byte, 1000)
-		// We are producing a verbatim log of the messages.
-		// Run the goroutine to do that for the messages
-		// we are about to read.
-		go rtcm.WriteMessages(outputLogChan, outputLog)
-		channels = append(channels, outputLogChan)
-	}
+	// if config.WriteOutputLog {
+	// 	outputLog := dailylogger.New(".", "", ".rtcm3")
+	// 	outputLogChan = make(chan []byte, 1000)
+	// 	// We are producing a verbatim log of the messages.
+	// 	// Run the goroutine to do that for the messages
+	// 	// we are about to read.
+	// 	go rtcm.WriteMessagesToLog(outputLogChan, outputLog)
+	// 	channels = append(channels, outputLogChan)
+	// }
 
-	rtcmHandler := rtcm.New(time.Now(), config.SystemLog)
+	// rtcmHandler := rtcm.New(time.Now(), config.SystemLog)
 
-	if config.WriteReadableLog {
-		readableLog := dailylogger.New(".", "messages.", ".txt")
-		readableLogChan = make(chan []byte, 1000)
-		// We are producing a readable log of the messages.
-		// Run the goroutine to do that for the messages
-		// we are about to read.
-		go rtcm.WriteReadableMessagesToLog(outputLogChan, rtcmHandler, readableLog)
-		channels = append(channels, readableLogChan)
-	}
+	// if config.WriteReadableLog {
+	// 	readableLog := dailylogger.New(".", "messages.", ".txt")
+	// 	readableLogChan = make(chan []byte, 1000)
+	// 	// We are producing a readable log of the messages.
+	// 	// Run the goroutine to do that for the messages
+	// 	// we are about to read.
+	// 	go rtcm.WriteReadableMessagesToLog(outputLogChan, rtcmHandler, readableLog)
+	// 	channels = append(channels, readableLogChan)
+	// }
 
-	for {
-		reader := jsonconfig.WaitAndConnectToInput(ctx, config)
+	// for {
+	// 	reader := jsonconfig.WaitAndConnectToInput(ctx, config)
 
-		// Read and process messages until the connection dies.
-		rtcm.HandleMessages(ctx, rtcmHandler, reader, channels)
+	// 	// Read and process messages until the connection dies.
+	// 	rtcm.HandleMessages(ctx, rtcmHandler, reader, channels)
 
-		// The connection has died.  A long time may have passed, so find
-		// the current time and create a new rtcm handler driven by that.
-		rtcmHandler = rtcm.New(time.Now(), config.SystemLog)
-	}
+	// 	// The connection has died.  A long time may have passed, so find
+	// 	// the current time and create a new rtcm handler driven by that.
+	// 	rtcmHandler = rtcm.New(time.Now(), config.SystemLog)
+	// }
 }

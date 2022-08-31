@@ -42,6 +42,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -50,42 +51,97 @@ import (
 )
 
 func main() {
-	// The format of arg[1] should be yyyy-mm-dd.
+
 	var startDate time.Time
-	var err error
-	if len(os.Args) > 1 {
-		const dateLayout = "2006-01-02"
-		startDate, err = time.Parse(dateLayout, os.Args[1])
-		if err != nil {
-			log.Fatal("usage: go-ntrip yyyy-mm-dd")
+	var reader io.Reader
+	if len(os.Args) < 3 {
+		log.Fatalf("usage: %s file yyyy-mm-dd", os.Args[0])
+	} else {
+		appName := os.Args[0]
+
+		// The format of arg[2] should be yyyy-mm-dd.
+		var timeError error
+		startDate, timeError = getTime(os.Args[2])
+		if timeError != nil {
+			log.Fatalf("usage: %s file yyyy-mm-dd", appName)
 		}
+
+		fileName := os.Args[1]
+		var openError error
+		reader, openError = openFile(fileName)
+		if openError != nil {
+			log.Fatalf("%s: cannot open %s - %v", appName, fileName, openError)
+		}
+
 	}
 
-	rtcm := rtcm.New(startDate)
+	rtcmHandler := rtcm.New(startDate, log.Default())
+	// Process the input file and then stop.
+	rtcmHandler.StopOnEOF = true
+
+	// The output is always to stdout.
+
+	// Write the heading.
 	fmt.Printf("RTCM data\n")
 	fmt.Printf("\nNote: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)\n")
 	fmt.Printf("18 seconds ahead of UTC\n\n")
 
-	for {
-		rawMessage, err := rtcm.ReadNextMessageFrame(os.Stdin)
-		if err != nil {
-			// Probably EOF.
-			return
-		}
+	// Run HandleMessages with a single channel connected to a
+	// goroutine that displays each message in readable form.
+	var channels []chan rtcm.Message
+	const channelCap = 1000
+	stdoutChannel := make(chan rtcm.Message, channelCap)
+	defer close(stdoutChannel)
+	channels = append(channels, stdoutChannel)
+	go writeReadableMessages(stdoutChannel, rtcmHandler, os.Stdout)
 
-		decode(rtcm, rawMessage)
+	rtcmHandler.HandleMessages(reader, channels)
+}
 
+// getTime gets a time from a string in one of three formats,
+// yyyy-mm-dd{:hh:mm:ss{:timezone}}".  Timezones are listed
+// here:  https://en.wikipedia.org/wiki/List_of_tz_database_time_zones.
+// Note that three letter abbreviations such as "CET" are deprecated.
+func getTime(timeStr string) (time.Time, error) {
+	const dateLayout = "2006-01-02"
+
+	if len(dateLayout) == len(timeStr) {
+		dateTime, err := time.Parse(dateLayout, timeStr)
+		return dateTime, err
+	} else {
+		dateTime, err := time.Parse(time.RFC3339, timeStr)
+		return dateTime, err
 	}
 }
 
-func decode(rtcm *rtcm.RTCM, rawMessage []byte) {
-
-	message, err := rtcm.GetMessage(rawMessage)
-	if err != nil {
-		fmt.Printf("illegal message - %s", err.Error())
-		return
+// openFile opens the given file and returns a Reader connected
+// to it.  If the file name is "-" it returns os.Stdin
+func openFile(fileName string) (io.Reader, error) {
+	if fileName == "-" {
+		return os.Stdin, nil
 	}
 
-	// write the decoded message.
-	fmt.Printf("%s\n", rtcm.DisplayMessage(message))
+	file, err := os.Open(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	return file, nil
+}
+
+// writeReadableMessages receives the RTCM messages from the channel,
+// decodes them to readable form and writes the result to the given
+// writer.  If the channel is closed or there is a write error, it
+// terminates.  It can be run in a go routine.
+func writeReadableMessages(ch chan rtcm.Message, rtcmHandler *rtcm.RTCM, writer io.Writer) {
+
+	for {
+		message, ok := <-ch
+		if !ok {
+			return
+		}
+		// Decode the message.  (The result is very verbose!)
+		display := fmt.Sprintf("%s\n", rtcmHandler.DisplayMessage(&message))
+		writer.Write([]byte(display))
+	}
 }

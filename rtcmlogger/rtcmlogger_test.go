@@ -20,7 +20,7 @@ func TestWriteToLog(t *testing.T) {
 
 	// NOTE:  this test uses the filestore.
 
-	const expectedFileContents = "hello world\n"
+	const wantFileContents = "hello world\n"
 
 	workingDirectory, err := createWorkingDirectory()
 	if err != nil {
@@ -35,7 +35,7 @@ func TestWriteToLog(t *testing.T) {
 	// be one logfile so we can just look for it.
 	logWriter := newLogWriter(logDirectory)
 
-	buffer := []byte(expectedFileContents)
+	buffer := []byte(wantFileContents)
 
 	writeBuffer(&buffer, logWriter)
 
@@ -74,16 +74,16 @@ func TestWriteToLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error reading logfile %s back - %v", fileInfo.Name(), err)
 	}
-	if length != len(expectedFileContents) {
+	if length != len(wantFileContents) {
 		t.Fatalf("logfile %s contains %d bytes - expected %d",
 			fileInfo.Name(), length, len(buffer))
 	}
 
-	contents := string(b[:length])
+	gotContents := string(b[:length])
 
-	if contents != expectedFileContents {
+	if gotContents != wantFileContents {
 		t.Fatalf("logfile contains \"%s\" - expected \"%s\"",
-			contents, expectedFileContents)
+			gotContents, wantFileContents)
 	}
 }
 

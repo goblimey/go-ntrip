@@ -1,13 +1,19 @@
 package rtcm
 
 import (
+	"bufio"
 	"bytes"
-	"fmt"
+	"io"
+	"log"
+
+	"os"
 	"testing"
 	"time"
+
+	"github.com/goblimey/go-tools/switchwriter"
 )
 
-// maxEpochTime is the value of a GPS and Beidout epoch time
+// maxEpochTime is the value of a GPS and Beidou epoch time
 // just before it rolls over.
 const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
 
@@ -15,342 +21,752 @@ const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
 // values for equality to three decimal places.
 const testDelta3 = 0.001
 
+// testDelta5 is the delta value used to test floating point
+// values for equality to five decimal places.
+const testDelta5 = 0.00001
+
 var london *time.Location
 var paris *time.Location
 
-// Data contain a batch of RTCM3 messages.  In each message byte 0
-// is 0xd3.  Bytes 1 and 2 form a sixteen bit unsigned number, the
-// message length, but this is limited to 1023 so the top six bits
-// are always 0.  The message follows and then three bytes of CRC.
-var d = [...]byte{
-	0xd3, 0x00, 0x8a, 0x43, 0x20, 0x00, 0x8a, 0x0e, 0x1a, 0x26, 0x00, 0x00, 0x2f, 0x40, 0x00, 0x06,
-	0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x80, 0x00, 0x5f, 0xff, 0xa4, 0xa7, 0x25, 0xa4, 0xa4, 0x22,
-	0xa9, 0x26, 0x30, 0x64, 0xab, 0x9f, 0x4e, 0x1d, 0xef, 0x58, 0xd5, 0x28, 0x60, 0x34, 0x00, 0xff,
-	0xff, 0x98, 0x63, 0x48, 0xb0, 0x91, 0xab, 0x63, 0x4c, 0x72, 0x8c, 0x63, 0xa6, 0x24, 0x26, 0x44,
-	0x04, 0x7f, 0x68, 0xf0, 0xb0, 0x42, 0xa0, 0x51, 0xfc, 0x1f, 0x39, 0x00, 0xc8, 0x90, 0x04, 0x21,
-	0xa0, 0x6c, 0x9e, 0x81, 0x64, 0x7f, 0x06, 0x00, 0xe8, 0x1b, 0xd0, 0x7f, 0x35, 0x6e, 0xbd, 0x20,
-	0x2a, 0x09, 0xcf, 0x34, 0x28, 0xa6, 0x10, 0x80, 0xf6, 0x41, 0xd9, 0xe4, 0x01, 0xa7, 0x20, 0x07,
-	0x4e, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x01, 0x75, 0x14, 0xd7, 0x3d, 0x76,
-	0x65, 0x56, 0x16, 0x4b, 0x35, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0x51, 0xa5,
-	0xd3, 0x00, 0x98, 0x43, 0xc0, 0x00, 0xd1, 0x07, 0x8e, 0xe6, 0x00, 0x00, 0x60, 0xb0, 0x61, 0x80,
-	0x00, 0x00, 0x00, 0x00, 0x20, 0x80, 0x00, 0x00, 0x7f, 0x7f, 0xe8, 0x09, 0x48, 0xc8, 0xa9, 0x28,
-	0xc9, 0xc9, 0xe9, 0x10, 0x6b, 0x10, 0x9d, 0xac, 0x13, 0x6a, 0xdb, 0xd9, 0xa8, 0xc0, 0xa1, 0x5c,
-	0xa2, 0xb0, 0x1f, 0x3b, 0x3e, 0x6e, 0x70, 0xa8, 0xdf, 0xf5, 0x96, 0x87, 0x62, 0x96, 0xc3, 0x52,
-	0x9d, 0x65, 0x05, 0x07, 0x14, 0x0e, 0x07, 0xd6, 0xa1, 0xaf, 0x83, 0x4c, 0x36, 0x96, 0xb0, 0xaf,
-	0xf9, 0xc2, 0xb6, 0x78, 0xfc, 0x34, 0x47, 0xf8, 0x3b, 0xdf, 0x96, 0x90, 0x7e, 0x69, 0x76, 0xf2,
-	0xe2, 0x67, 0xd6, 0xfc, 0x9f, 0x71, 0x76, 0x02, 0xca, 0x91, 0x0a, 0x5d, 0x54, 0x1c, 0xaa, 0x20,
-	0x6c, 0x83, 0x7d, 0x65, 0x1f, 0xf5, 0xd2, 0x8f, 0xd8, 0x04, 0x4f, 0x52, 0x45, 0x7f, 0xff, 0xff,
-	0xff, 0xff, 0xff, 0x32, 0xef, 0xfc, 0x00, 0x01, 0x74, 0xd6, 0xd7, 0x8d, 0x57, 0xe3, 0x56, 0x15,
-	0x51, 0x2c, 0x0d, 0xdf, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc4, 0xc9, 0x01, 0xd3, 0x00,
-	0xdc, 0x44, 0x90, 0x00, 0x8a, 0x0e, 0x1a, 0x26, 0x00, 0x00, 0x54, 0x41, 0x00, 0x81, 0x08, 0x00,
-	0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x3f, 0xff, 0xae, 0x2c, 0x27, 0x26, 0x2a, 0xaa, 0xab, 0xad,
-	0x00, 0x00, 0x00, 0x00, 0x46, 0xf8, 0x52, 0x78, 0x4f, 0x1c, 0xfe, 0x2d, 0x0d, 0x2c, 0x7e, 0x1e,
-	0x0e, 0x50, 0x0d, 0x9f, 0x55, 0x81, 0xae, 0x11, 0xe0, 0x1f, 0x7e, 0xc5, 0xfb, 0x67, 0xfe, 0x88,
-	0x52, 0x68, 0x56, 0x99, 0x89, 0x90, 0x98, 0x44, 0xde, 0xf5, 0xba, 0xef, 0x0e, 0xae, 0x2d, 0x08,
-	0x62, 0x8f, 0xf6, 0x1c, 0x1e, 0x63, 0xd7, 0xd1, 0x30, 0xe1, 0x93, 0x3d, 0x56, 0x9a, 0xa4, 0x6a,
-	0x01, 0xff, 0xe8, 0x88, 0x97, 0xa1, 0x66, 0x9f, 0xa6, 0x31, 0xf8, 0x6a, 0x37, 0x70, 0x6d, 0x55,
-	0xd7, 0xc2, 0x49, 0x77, 0xc5, 0x37, 0x87, 0x8c, 0x67, 0x0f, 0x8d, 0xed, 0x37, 0x76, 0x65, 0x8f,
-	0x94, 0x5a, 0x58, 0x4e, 0x99, 0x88, 0x52, 0x6e, 0x07, 0xa5, 0xd3, 0xaf, 0xa1, 0xb4, 0x44, 0x17,
-	0x15, 0x45, 0xf3, 0x5c, 0xd9, 0x42, 0x50, 0x92, 0x5c, 0x96, 0xe5, 0xc0, 0x12, 0x0c, 0x8b, 0x44,
-	0xd1, 0x20, 0x00, 0x1f, 0x0a, 0x42, 0xd0, 0xc0, 0x2f, 0x0b, 0x82, 0xd0, 0xac, 0x2d, 0x08, 0xc2,
-	0x00, 0xa8, 0x2c, 0x09, 0x42, 0xb0, 0xe4, 0xbe, 0x8c, 0x45, 0x1d, 0x98, 0xc4, 0xf1, 0x8c, 0x3a,
-	0x41, 0xb4, 0x82, 0x1f, 0x84, 0x3e, 0xc0, 0x6c, 0x48, 0xd7, 0x50, 0xd1, 0x11, 0x97, 0xfc, 0xf7,
-	0x39, 0xc2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8e, 0x85, 0xa1,
-	0xd3, 0x00, 0x7b, 0x46, 0x40, 0x00, 0x8a, 0x0d, 0x3f, 0x66, 0x00, 0x00, 0x01, 0x30, 0x04, 0x28,
-	0x08, 0x00, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00, 0x3f, 0x55, 0x0d, 0x0c, 0xaa, 0x98, 0x9e, 0xa6,
-	0xaf, 0x7b, 0x2d, 0xdd, 0x62, 0x1a, 0xdb, 0x3b, 0x26, 0x08, 0xb6, 0x4d, 0xe7, 0x1b, 0x44, 0x30,
-	0xf6, 0x60, 0x40, 0x06, 0xce, 0x4b, 0xbb, 0x0f, 0x87, 0xb5, 0xb0, 0x58, 0xfd, 0xfd, 0xf9, 0xf4,
-	0xf6, 0xff, 0x37, 0xc2, 0x2e, 0x0e, 0xfa, 0xb1, 0x41, 0x37, 0x24, 0x0a, 0x13, 0xfb, 0xc4, 0xad,
-	0xbf, 0xe3, 0x72, 0x3f, 0xff, 0xff, 0xff, 0xf8, 0x00, 0xe4, 0xd1, 0xc7, 0x7e, 0x57, 0x57, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8c, 0x60,
-	0xc0, 0xd3, 0x00, 0xc3, 0x46, 0x70, 0x00, 0x8a, 0x0d, 0x3f, 0x64, 0x00, 0x00, 0x01, 0x30, 0x04,
-	0x28, 0x08, 0x00, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00, 0x3f, 0x55, 0x0d, 0x0c, 0xaa, 0x98, 0x9e,
-	0xa6, 0xae, 0x00, 0x00, 0x00, 0x17, 0xb2, 0xdd, 0xd6, 0x21, 0xad, 0xb3, 0xb2, 0x60, 0x81, 0x4e,
-	0x08, 0xdf, 0xb4, 0x9f, 0x4f, 0x84, 0x64, 0x01, 0x37, 0xc5, 0x22, 0xd8, 0xe9, 0xbc, 0xe0, 0x1b,
-	0x44, 0x21, 0x87, 0xaf, 0xf8, 0x10, 0x0e, 0x0d, 0x9a, 0x04, 0xbb, 0xa1, 0x87, 0xbe, 0x5e, 0xd6,
-	0xa2, 0x0b, 0x1f, 0xbd, 0xef, 0xcf, 0xa5, 0xed, 0xfe, 0x65, 0xe1, 0x17, 0x03, 0xdf, 0x56, 0x2c,
-	0x09, 0xb9, 0x20, 0x14, 0x27, 0xf1, 0xe2, 0x56, 0xdb, 0xfc, 0x6e, 0x40, 0xf3, 0x41, 0xd0, 0xa4,
-	0xe9, 0x3b, 0xd0, 0x51, 0x84, 0x8c, 0xe2, 0x80, 0x1c, 0x09, 0x82, 0x30, 0x8c, 0x2f, 0x0c, 0x82,
-	0xe0, 0xac, 0x20, 0x03, 0x68, 0x08, 0x9d, 0x11, 0x28, 0xf4, 0x0a, 0xe7, 0x37, 0xda, 0xf4, 0xbf,
-	0x9a, 0x0f, 0x9f, 0xb4, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8f, 0x9d, 0x1c,
-}
-
-var data []byte = d[:]
-
-// This is real data collected on the 13th November 2020.
-var realDataArray = [...]byte{
-
-	// type 1077 - GPS.  Converted to RINEX, this gives:
-	//
-	// > 2020 11 13  0  0 23.0000000  0 26
-	// G 4  24410527.355   128278179.264         709.992          40.000
-	// G 9
-	// G16  22915780.724   120423177.179       -3139.070          40.000
-	// G18  21506547.550   113017684.727       -2482.645          44.000
-	// G25  23345103.037   122679365.321        3327.570          40.000
-	// G26  20662003.308   108579565.367       -1538.436          46.000
-	// G29  21136079.188   111070868.860        2016.750          46.000
-	// G31  21670772.711   113880577.055        2325.559          46.000
-	0xd3, 0x00, 0xdc, 0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, 0x00, 0x08, 0x40, 0xa0, 0x65,
-	0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x80, 0x00, 0x6d, 0xff, 0xa8, 0xaa, 0x26, 0x23, 0xa6, 0xa2,
-	0x23, 0x24, 0x00, 0x00, 0x00, 0x00, 0x36, 0x68, 0xcb, 0x83, 0x7a, 0x6f, 0x9d, 0x7c, 0x04, 0x92,
-	0xfe, 0xf2, 0x05, 0xb0, 0x4a, 0xa0, 0xec, 0x7b, 0x0e, 0x09, 0x27, 0xd0, 0x3f, 0x23, 0x7c, 0xb9,
-	0x6f, 0xbd, 0x73, 0xee, 0x1f, 0x01, 0x64, 0x96, 0xf5, 0x7b, 0x27, 0x46, 0xf1, 0xf2, 0x1a, 0xbf,
-	0x19, 0xfa, 0x08, 0x41, 0x08, 0x7b, 0xb1, 0x1b, 0x67, 0xe1, 0xa6, 0x70, 0x71, 0xd9, 0xdf, 0x0c,
-	0x61, 0x7f, 0x19, 0x9c, 0x7e, 0x66, 0x66, 0xfb, 0x86, 0xc0, 0x04, 0xe9, 0xc7, 0x7d, 0x85, 0x83,
-	0x7d, 0xac, 0xad, 0xfc, 0xbe, 0x2b, 0xfc, 0x3c, 0x84, 0x02, 0x1d, 0xeb, 0x81, 0xa6, 0x9c, 0x87,
-	0x17, 0x5d, 0x86, 0xf5, 0x60, 0xfb, 0x66, 0x72, 0x7b, 0xfa, 0x2f, 0x48, 0xd2, 0x29, 0x67, 0x08,
-	0xc8, 0x72, 0x15, 0x0d, 0x37, 0xca, 0x92, 0xa4, 0xe9, 0x3a, 0x4e, 0x13, 0x80, 0x00, 0x14, 0x04,
-	0xc0, 0xe8, 0x50, 0x16, 0x04, 0xc1, 0x40, 0x46, 0x17, 0x05, 0x41, 0x70, 0x52, 0x17, 0x05, 0x01,
-	0xef, 0x4b, 0xde, 0x70, 0x4c, 0xb1, 0xaf, 0x84, 0x37, 0x08, 0x2a, 0x77, 0x95, 0xf1, 0x6e, 0x75,
-	0xe8, 0xea, 0x36, 0x1b, 0xdc, 0x3d, 0x7a, 0xbc, 0x75, 0x42, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfe,
-	0x69, 0xe8,
-
-	// Type 1087 - Glonass
-	//
-	// R 5  23482521.703   125527502.441         886.891          36.000                                                                    23482518.744    97632475.638         689.879          37.000
-	// R12  20829833.360   111269260.007        3266.930          48.000       20829832.826    86542668.996        2540.913          39.000
-	// R13  19220908.037   102638574.587        -569.980          36.000       19220907.074    79830006.582        -443.200          33.000
-	// R14  22228766.616   118491839.342       -3852.575          42.000       22228768.714    92160317.831       -2996.456          39.000
-	// R22  20286899.487   108292911.973        2735.571          42.000       20286900.360    84227771.187        2127.874          29.000
-	// R23  19954308.877   106742118.811       -2561.292          48.000       19954309.753    83021654.098       -1992.063          37.000
-	// R24  22984791.448   122910027.290       -4164.178          40.000       22984791.701    95596674.871       -3238.890          39.000
-	0xd3, 0x00, 0xc3, 0x43, 0xf0, 0x00, 0xa2, 0x93, 0x7c, 0x22, 0x00, 0x00, 0x04, 0x0e, 0x03, 0x80,
-	0x00, 0x00, 0x00, 0x00, 0x20, 0x80, 0x00, 0x00, 0x7f, 0xfe, 0x9c, 0x8a, 0x80, 0x94, 0x86, 0x84,
-	0x99, 0x0c, 0xa0, 0x95, 0x2a, 0x8b, 0xd8, 0x3a, 0x92, 0xf5, 0x74, 0x7d, 0x56, 0xfe, 0xb7, 0xec,
-	0xe8, 0x0d, 0x41, 0x69, 0x7c, 0x00, 0x0e, 0xf0, 0x61, 0x42, 0x9c, 0xf0, 0x27, 0x38, 0x86, 0x2a,
-	0xda, 0x62, 0x36, 0x3c, 0x8f, 0xeb, 0xc8, 0x27, 0x1b, 0x77, 0x6f, 0xb9, 0x4c, 0xbe, 0x36, 0x2b,
-	0xe4, 0x26, 0x1d, 0xc1, 0x4f, 0xdc, 0xd9, 0x01, 0x16, 0x24, 0x11, 0x9a, 0xe0, 0x91, 0x02, 0x00,
-	0x7a, 0xea, 0x61, 0x9d, 0xb4, 0xe1, 0x52, 0xf6, 0x1f, 0x22, 0xae, 0xdf, 0x26, 0x28, 0x3e, 0xe0,
-	0xf6, 0xbe, 0xdf, 0x90, 0xdf, 0xb8, 0x01, 0x3f, 0x8e, 0x86, 0xbf, 0x7e, 0x67, 0x1f, 0x83, 0x8f,
-	0x20, 0x51, 0x53, 0x60, 0x46, 0x60, 0x30, 0x43, 0xc3, 0x3d, 0xcf, 0x12, 0x84, 0xb7, 0x10, 0xc4,
-	0x33, 0x53, 0x3d, 0x25, 0x48, 0xb0, 0x14, 0x00, 0x00, 0x04, 0x81, 0x28, 0x60, 0x13, 0x84, 0x81,
-	0x08, 0x54, 0x13, 0x85, 0x40, 0xe8, 0x60, 0x12, 0x85, 0x01, 0x38, 0x5c, 0x67, 0xb7, 0x67, 0xa5,
-	0xff, 0x4e, 0x71, 0xcd, 0xd3, 0x78, 0x27, 0x29, 0x0e, 0x5c, 0xed, 0xd9, 0xd7, 0xcc, 0x7e, 0x04,
-	0xf8, 0x09, 0xc3, 0x73, 0xa0, 0x40, 0x70, 0xd9, 0x6d,
-
-	//1097 - Galileo
-	0xd3, 0x00, 0xc3, 0x44, 0x90, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, 0x00, 0x21, 0x18, 0x00, 0xc0,
-	0x08, 0x00, 0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x7f, 0xfe, 0xae, 0xbe, 0x90, 0x98, 0xa6, 0x9c,
-	0xb4, 0x00, 0x00, 0x00, 0x08, 0xc1, 0x4b, 0xc1, 0x32, 0xf8, 0x0b, 0x08, 0xc5, 0x83, 0xc8, 0x01,
-	0xe8, 0x25, 0x3f, 0x74, 0x7c, 0xc4, 0x02, 0xa0, 0x4b, 0xc1, 0x47, 0x90, 0x12, 0x86, 0x62, 0x72,
-	0x92, 0x28, 0x53, 0x18, 0x9d, 0x8d, 0x85, 0x82, 0xc6, 0xe1, 0x8a, 0x6a, 0x2f, 0xdd, 0x5e, 0xcd,
-	0xd3, 0xe1, 0x1a, 0x15, 0x01, 0xa1, 0x2b, 0xdc, 0x56, 0x3f, 0xc4, 0xea, 0xc0, 0x5e, 0xdc, 0x40,
-	0x48, 0xd3, 0x80, 0xb2, 0x25, 0x60, 0x9c, 0x7b, 0x7e, 0x32, 0xdd, 0x3e, 0x22, 0xf7, 0x01, 0xb6,
-	0xf3, 0x81, 0xaf, 0xb7, 0x1f, 0x78, 0xe0, 0x7f, 0x6c, 0xaa, 0xfe, 0x9a, 0x7e, 0x7e, 0x94, 0x9f,
-	0xbf, 0x06, 0x72, 0x3f, 0x15, 0x8c, 0xb1, 0x44, 0x56, 0xe1, 0xb1, 0x92, 0xdc, 0xb5, 0x37, 0x4a,
-	0xd4, 0x5d, 0x17, 0x38, 0x4e, 0x30, 0x24, 0x14, 0x00, 0x04, 0xc1, 0x50, 0x3e, 0x0f, 0x85, 0x41,
-	0x40, 0x52, 0x13, 0x85, 0x61, 0x50, 0x5a, 0x16, 0x04, 0xa1, 0x38, 0x12, 0x5b, 0x24, 0x7e, 0x03,
-	0x6c, 0x07, 0x89, 0xdb, 0x93, 0xbd, 0xba, 0x0d, 0x34, 0x27, 0x68, 0x75, 0xd0, 0xa6, 0x72, 0x24,
-	0xe4, 0x88, 0xdc, 0x61, 0xa9, 0x40, 0xb1, 0x9d, 0x0d,
-
-	// Type 1127 - Beidou
-	0xd3, 0x00, 0xaa, 0x46, 0x70, 0x00, 0x66, 0xff, 0xbc, 0xa0, 0x00, 0x00, 0x00, 0x04, 0x00, 0x26,
-	0x18, 0x00, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00, 0x75, 0x53, 0xfa, 0x82, 0x42, 0x62, 0x9a, 0x80,
-	0x00, 0x00, 0x06, 0x95, 0x4e, 0xa7, 0xa0, 0xbf, 0x1e, 0x78, 0x7f, 0x0a, 0x10, 0x08, 0x18, 0x7f,
-	0x35, 0x04, 0xab, 0xee, 0x50, 0x77, 0x8a, 0x86, 0xf0, 0x51, 0xf1, 0x4d, 0x82, 0x46, 0x38, 0x29,
-	0x0a, 0x8c, 0x35, 0x57, 0x23, 0x87, 0x82, 0x24, 0x2a, 0x01, 0xb5, 0x40, 0x07, 0xeb, 0xc5, 0x01,
-	0x37, 0xa8, 0x80, 0xb3, 0x88, 0x03, 0x23, 0xc4, 0xfc, 0x61, 0xe0, 0x4f, 0x33, 0xc4, 0x73, 0x31,
-	0xcd, 0x90, 0x54, 0xb2, 0x02, 0x70, 0x90, 0x26, 0x0b, 0x42, 0xd0, 0x9c, 0x2b, 0x0c, 0x02, 0x97,
-	0xf4, 0x08, 0x3d, 0x9e, 0xc7, 0xb2, 0x6e, 0x44, 0x0f, 0x19, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe5, 0x1e, 0xd8,
-}
-
-var realData []byte = realDataArray[:]
+var logger *log.Logger
 
 func init() {
 
 	london, _ = time.LoadLocation("Europe/London")
 	paris, _ = time.LoadLocation("Europe/Paris")
+	writer := switchwriter.New()
+	logger = log.New(writer, "rtcm_test", 0)
 }
 
-func TestGetChar(t *testing.T) {
+func TestReadValidMessage(t *testing.T) {
+	d := [...]byte{
+		// Message type   --------- 0x449 - 1097.
+		0xd3, 0x00, 0xaa, 0x44, 0x90, 0x00, 0x33, 0xf6, 0xea, 0xe2, 0x00, 0x00, 0x0c, 0x50, 0x00, 0x10,
+		0x08, 0x00, 0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x3f, 0xaa, 0xaa, 0xb2, 0x42, 0x8a, 0xea, 0x68,
+		0x00, 0x00, 0x07, 0x65, 0xce, 0x68, 0x1b, 0xb4, 0xc8, 0x83, 0x7c, 0xe6, 0x11, 0x30, 0x10, 0x3f,
+		0x05, 0xff, 0x4f, 0xfc, 0xe0, 0x4f, 0x61, 0x68, 0x59, 0xb6, 0x86, 0xb5, 0x1b, 0xa1, 0x31, 0xb9,
+		0xd9, 0x71, 0x55, 0x57, 0x07, 0xa0, 0x00, 0xd3, 0x2e, 0x0c, 0x99, 0x01, 0x98, 0xc4, 0xfa, 0x16,
+		0x0e, 0xfa, 0x6e, 0xac, 0x07, 0x19, 0x7a, 0x07, 0x3a, 0xa4, 0xfc, 0x53, 0xc4, 0xfb, 0xff, 0x97,
+		0x00, 0x4c, 0x6f, 0xf8, 0x65, 0xda, 0x4e, 0x61, 0xe4, 0x75, 0x2c, 0x4b, 0x01, 0xe5, 0x21, 0x0d,
+		0x4f, 0xc0, 0x0b, 0x02, 0xb0, 0xb0, 0x2f, 0x0c, 0x02, 0x70, 0x94, 0x23, 0x0b, 0xc3, 0xe9, 0xe0,
+		0x97, 0xd1, 0x70, 0x63, 0x00, 0x45, 0x8d, 0xe9, 0x71, 0xd7, 0xe5, 0xeb, 0x5f, 0xf8, 0x78, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4d, 0xf5, 0x5a,
+	}
+	const wantType = 1097
 
-	r := bytes.NewReader(realData)
-	n := 0
+	validMessage := d[:]
+	r := bytes.NewReader(validMessage)
+	reader := bufio.NewReader(r)
 
-	c, err := getChar(r)
-	if err != nil {
-		t.Fatal(err.Error())
-	}
-	if c != 0xd3 {
-		t.Fatalf("expected d3 got %d", c)
-	}
-	n++
+	now := time.Now()
+	handler := New(now, logger)
+	handler.StopOnEOF = true
 
-	c, err = getChar(r)
-	if err != nil {
-		t.Fatal(err.Error())
+	frame1, readError1 := handler.ReadNextFrame(reader)
+	if readError1 != nil {
+		t.Fatal(readError1)
 	}
-	if c != 0 {
-		t.Fatalf("expected 0 got %x", c)
-	}
-	n++
 
-	c, err = getChar(r)
-	if err != nil {
-		t.Fatal(err.Error())
+	message, messageFetchError := handler.GetMessage(frame1)
+	if messageFetchError != nil {
+		t.Error(messageFetchError)
 	}
-	if c != 0xdc {
-		t.Fatalf("expected dc got %x", c)
-	}
-	n++
 
-	c, err = getChar(r)
-	if err != nil {
-		t.Fatal(err.Error())
+	if !message.Complete {
+		t.Error("not complete")
 	}
-	if c != 0x43 {
-		t.Fatalf("expected 43 got %x", c)
-	}
-	n++
 
-	// We should read exactly 804 bytes
+	if !message.CRCValid {
+		t.Error("CRC check fails")
+	}
+
+	if !message.Valid {
+		t.Error("invalid")
+	}
+
+	gotType := message.MessageType
+	if wantType != gotType {
+		t.Errorf("expected type %d got %d", wantType, gotType)
+	}
+}
+
+func Test(t *testing.T) {
+
+	const wantType = 1077
+
+	f, openError := os.Open("/home/simon/goprojects/go-ntrip/rtcmfilter/data.2022-03-17.rtcm3")
+	if openError != nil {
+		t.Error(openError)
+	}
+
+	reader := bufio.NewReader(f)
+
+	now := time.Now()
+	handler := New(now, logger)
+	handler.StopOnEOF = true
+
+	frame1, readError1 := handler.ReadNextFrame(reader)
+	if readError1 != nil {
+		t.Fatal(readError1)
+	}
+
+	message, messageFetchError := handler.GetMessage(frame1)
+	if messageFetchError != nil {
+		t.Error(messageFetchError)
+	}
+
+	if !message.Complete {
+		t.Error("not complete")
+	}
+
+	if !message.CRCValid {
+		t.Error("CRC check fails")
+	}
+
+	if !message.Valid {
+		t.Error("invalid")
+	}
+
+	gotType := message.MessageType
+	if wantType != gotType {
+		t.Errorf("expected type %d got %d", wantType, gotType)
+	}
+}
+
+// TestHandleMessages tests the handleMessages method.
+func TestHandleMessages(t *testing.T) {
+	// handleMessages reads the given data and writes any valid messages to
+	// the given channel.  The test data contains one valid message of type
+	// 1077 and some junk so the channel should contain a message of type
+	// 1077 and a message of type NonRTCMMessage.
+
+	var messageDataArray = [...]byte{
+
+		// RTCM message type 1077 - signals from GPS satellites:
+		0xd3, 0x00, 0xdc, // header - message length (0xdc - 220)
+		// message, starting with  12-bit message type (0x435 - 1077), padded with null bytes
+		// at the end.
+		0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, 0x00, 0x08, 0x40, 0xa0, 0x65,
+		0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x80, 0x00, 0x6d, 0xff, 0xa8, 0xaa, 0x26, 0x23, 0xa6, 0xa2,
+		0x23, 0x24, 0x00, 0x00, 0x00, 0x00, 0x36, 0x68, 0xcb, 0x83, 0x7a, 0x6f, 0x9d, 0x7c, 0x04, 0x92,
+		0xfe, 0xf2, 0x05, 0xb0, 0x4a, 0xa0, 0xec, 0x7b, 0x0e, 0x09, 0x27, 0xd0, 0x3f, 0x23, 0x7c, 0xb9,
+		0x6f, 0xbd, 0x73, 0xee, 0x1f, 0x01, 0x64, 0x96, 0xf5, 0x7b, 0x27, 0x46, 0xf1, 0xf2, 0x1a, 0xbf,
+		0x19, 0xfa, 0x08, 0x41, 0x08, 0x7b, 0xb1, 0x1b, 0x67, 0xe1, 0xa6, 0x70, 0x71, 0xd9, 0xdf, 0x0c,
+		0x61, 0x7f, 0x19, 0x9c, 0x7e, 0x66, 0x66, 0xfb, 0x86, 0xc0, 0x04, 0xe9, 0xc7, 0x7d, 0x85, 0x83,
+		0x7d, 0xac, 0xad, 0xfc, 0xbe, 0x2b, 0xfc, 0x3c, 0x84, 0x02, 0x1d, 0xeb, 0x81, 0xa6, 0x9c, 0x87,
+		0x17, 0x5d, 0x86, 0xf5, 0x60, 0xfb, 0x66, 0x72, 0x7b, 0xfa, 0x2f, 0x48, 0xd2, 0x29, 0x67, 0x08,
+		0xc8, 0x72, 0x15, 0x0d, 0x37, 0xca, 0x92, 0xa4, 0xe9, 0x3a, 0x4e, 0x13, 0x80, 0x00, 0x14, 0x04,
+		0xc0, 0xe8, 0x50, 0x16, 0x04, 0xc1, 0x40, 0x46, 0x17, 0x05, 0x41, 0x70, 0x52, 0x17, 0x05, 0x01,
+		0xef, 0x4b, 0xde, 0x70, 0x4c, 0xb1, 0xaf, 0x84, 0x37, 0x08, 0x2a, 0x77, 0x95, 0xf1, 0x6e, 0x75,
+		0xe8, 0xea, 0x36, 0x1b, 0xdc, 0x3d, 0x7a, 0xbc, 0x75, 0x42, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		// 24-bit Cyclic Redundancy Check
+		0xfe, 0x69, 0xe8,
+
+		's', 'o', 'm', 'e', ' ', 'j', 'u', 'n', 'k', // junk which should be returned as a non-RTCM message.
+	}
+
+	var messageData []byte = messageDataArray[:]
+
+	const wantNumMessages = 2
+	const wantType0 = 1077
+	const wantLength0 = 226
+	var wantContents0 = messageData[:226]
+	const wantType1 = NonRTCMMessage
+	const wantLength1 = 9
+	var wantContents1 = messageData[226:]
+
+	reader := bytes.NewReader(messageData)
+
+	channels := make([]chan Message, 0)
+	ch := make(chan Message, 10)
+	channels = append(channels, ch)
+	rtcmHandler := New(time.Now(), nil)
+	rtcmHandler.StopOnEOF = true
+
+	// Test
+	rtcmHandler.HandleMessages(reader, channels)
+	// Close the channel so that a channel reader knows when it's finished.
+	close(ch)
+
+	// Check.  Read the data back from the channel and check the message type
+	// and validity flags.
+	messages := make([]Message, 0)
 	for {
-		c, err = getChar(r)
-		if err != nil {
-			if n != 804 {
-				t.Fatalf("expected 804 bytes got %d", n)
-			}
-
-			break // Success!
+		message, ok := <-ch
+		if !ok {
+			// Done - chan is drained.
+			break
 		}
-		n++
+		messages = append(messages, message)
+	}
+
+	if len(messages) != wantNumMessages {
+		t.Errorf("want %d message, got %d messages", wantNumMessages, len(messages))
+	}
+
+	if !messages[0].Complete {
+		t.Error("not complete")
+	}
+
+	if !messages[0].CRCValid {
+		t.Error("CRC check fails")
+	}
+
+	if !messages[0].Valid {
+		t.Error("invalid")
+	}
+
+	if messages[1].Complete {
+		t.Error("should be incomplete")
+	}
+
+	if messages[1].CRCValid {
+		t.Error("CRC check should fail")
+	}
+
+	if messages[1].Valid {
+		t.Error("should be invalid")
+	}
+
+	r0 := bytes.NewReader(messages[0].RawData)
+	resultReader0 := bufio.NewReader(r0)
+	message0, err0 := rtcmHandler.ReadNextMessage(resultReader0)
+	if err0 != nil {
+		t.Fatal(err0)
+	}
+
+	if message0 == nil {
+		t.Errorf("message 0 is empty")
+		return
+	}
+
+	got0 := message0.MessageType
+	if wantType0 != got0 {
+		t.Errorf("want message type %d, got message type %d", wantType0, got0)
+	}
+
+	if message0.RawData == nil {
+		t.Errorf("raw data in message 0 is nil")
+		return
+	}
+
+	gotLength0 := len(message0.RawData)
+
+	if wantLength0 != gotLength0 {
+		t.Errorf("want message length %d got %d", wantLength0, gotLength0)
+	}
+
+	gotContents0 := message0.RawData
+
+	if !bytes.Equal(wantContents0, gotContents0) {
+		t.Error("contents of message 0 is not correct")
+	}
+
+	if !message0.Complete {
+		t.Error("not complete")
+	}
+
+	if !message0.CRCValid {
+		t.Error("CRC check fails")
+	}
+
+	if !message0.Valid {
+		t.Error("invalid")
+	}
+
+	r1 := bytes.NewReader(messages[1].RawData)
+	resultReader1 := bufio.NewReader(r1)
+	message1, err1 := rtcmHandler.ReadNextMessage(resultReader1)
+	if err1 != nil {
+		t.Fatal(err1)
+	}
+
+	if message1 == nil {
+		t.Fatal("message 1 is empty")
+		return
+	}
+
+	got1 := message1.MessageType
+	if wantType1 != got1 {
+		t.Errorf("want message type %d, got message type %d", wantType1, got1)
+	}
+
+	if message0.RawData == nil {
+		t.Errorf("raw data in message 0 is nil")
+		return
+	}
+
+	gotLength1 := len(message1.RawData)
+
+	if wantLength1 != gotLength1 {
+		t.Errorf("want message length %d got %d", wantLength1, gotLength1)
+	}
+
+	gotContents1 := message1.RawData
+
+	if !bytes.Equal(wantContents1, gotContents1) {
+		t.Error("contents of message 1 is not correct")
+	}
+
+	if message1.Complete {
+		t.Error("should be incomplete")
+	}
+
+	if message1.CRCValid {
+		t.Error("CRC check should fail")
+	}
+
+	if message1.Valid {
+		t.Error("should be invalid")
 	}
 }
-func TestReadNextMessageFrame(t *testing.T) {
-	r := bytes.NewReader(realData)
+
+// TestReadIncompleteMessage tests that an incomplete RTCM message is processed
+// correctly.  It should be returned as a non-RTCM message.
+func TestReadIncompleteMessage(t *testing.T) {
+
+	// This is the message contents that should result.
+	want := string(incompleteMessage)
+
+	r := bytes.NewReader(incompleteMessage)
+	imReader := bufio.NewReader(r)
 
 	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
-	rtcm := New(startTime)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
 
-	frame, err1 := rtcm.ReadNextMessageFrame(r)
+	// The first call should read the incomplete message, hit
+	// EOF and ignore it.
+	frame1, readError1 := rtcm.ReadNextFrame(imReader)
+	if readError1 != nil {
+		t.Fatal(readError1)
+	}
+
+	// The message is incomplete so expect an error.
+	message, messageFetchError := rtcm.GetMessage(frame1)
+	if messageFetchError == nil {
+		t.Error("expected to get an error (reading an incomplete message)")
+	}
+
+	if message.MessageType != 1127 {
+		t.Errorf("expected message type %d, got %d",
+			1127, message.MessageType)
+	}
+
+	if message.Valid {
+		t.Error("expected an invalid message")
+	}
+
+	if message.Complete {
+		t.Error("expected an incomplete message")
+	}
+
+	got := string(message.RawData)
+
+	if len(want) != len(got) {
+		t.Errorf("expected a message body %d long, got %d", len(want), len(got))
+	}
+
+	if want != got {
+		t.Errorf("message content doesn't match what we expected value")
+	}
+
+	// The second call should return nil and the EOF.
+	frame2, readError2 := rtcm.ReadNextFrame(imReader)
+	if readError2 == nil {
+		t.Errorf("expected an error")
+	}
+	if readError2 != io.EOF {
+		t.Errorf("expected EOF, got %v", readError2)
+	}
+	if frame2 != nil {
+		t.Errorf("expected no frame, got %s", string(frame2))
+	}
+}
+
+func TestReadAlmostCompleteMessage(t *testing.T) {
+	d := [...]byte{
+		0xd3, 0x00, 0xf4, 0x43, 0x50, 0x00, 0x49, 0x96, 0x84, 0x2e, 0x00, 0x00, 0x40, 0xa0, 0x85, 0x80,
+		0x00, 0x00, 0x00, 0x20, 0x00, 0x80, 0x5f, 0xa9, 0xc8, 0x88, 0xea, 0x08, 0xe9, 0x88, 0x8a, 0x6a,
+		0x60, 0x00, 0x00, 0x00, 0x00, 0xd6, 0x0a, 0x1b, 0xc5, 0x57, 0x9f, 0xf8, 0x92, 0xf2, 0x2e, 0x2d,
+		0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x43,
+		0x50, 0xd3, 0x00, 0xdc, 0x43, 0xf0, 0x00, 0x6e, 0x5c, 0x48, 0xee, 0x00, 0x00, 0x41, 0x83, 0x41,
+		0x80, 0x00, 0x00, 0x00, 0x00, 0x20, 0x80, 0x00, 0xfd, 0xa4, 0x26, 0x22, 0xa4, 0x23, 0xa5, 0x22,
+		0x20, 0x46, 0x68, 0x3d, 0xd4, 0xae, 0xca, 0x74, 0xd2, 0x20, 0x21, 0xc1, 0xf5, 0xcd, 0xa5, 0x85,
+		0x67, 0xee, 0x70, 0x08, 0x9e, 0xd7, 0x80, 0xd6, 0xdf, 0xca, 0x00, 0x3a, 0x1b, 0x5c, 0xb9, 0xd2,
+		0xf5, 0xe6, 0xf7, 0x5a, 0x37, 0x76, 0x78, 0x9f, 0x71, 0xa8, 0x7a, 0xde, 0xf7, 0xb5, 0x77, 0x86,
+		0xa0, 0xd8, 0x6e, 0xbc, 0x60, 0xfe, 0x66, 0xd1, 0x8c, 0xed, 0x42, 0x68, 0x50, 0xee, 0xe8, 0x7b,
+		0xd0, 0xa7, 0xcb, 0xdf, 0xcc, 0x10, 0xef, 0xd3, 0xef, 0xdf, 0xe4, 0xb8, 0x5f, 0xdf, 0xd6, 0x3f,
+		0xe2, 0xad, 0x0f, 0xf6, 0x3c, 0x08, 0x01, 0x8a, 0x20, 0x66, 0xdf, 0x8d, 0x65, 0xb7, 0xbd, 0x9c,
+		0x4f, 0xc5, 0xa2, 0x24, 0x35, 0x0c, 0xcc, 0x52, 0xcc, 0x95, 0x23, 0xcd, 0x93, 0x44, 0x8d, 0x23,
+		0x40, 0x6f, 0xd4, 0xef, 0x32, 0x4c, 0x80, 0x00, 0x2b, 0x08, 0xc2, 0xa0, 0x98, 0x31, 0x0a, 0xc3,
+		0x00, 0xa8, 0x2e, 0x0a, 0xc8, 0x18, 0x8d, 0x72, 0x48, 0x75}
+
+	var data []byte = d[:]
+
+	r := bytes.NewReader(data)
+	imReader := bufio.NewReader(r)
+
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
+
+	// The first call should read the incomplete message, hit
+	// EOF and ignore it.
+	frame1, readError1 := rtcm.ReadNextFrame(imReader)
+	if readError1 != nil {
+		t.Fatal(readError1)
+	}
+
+	// The message is incomplete so expect an error.
+	message, messageFetchError := rtcm.GetMessage(frame1)
+	if messageFetchError == nil {
+		t.Error("expected to get an error (reading an incomplete message)")
+	}
+
+	t.Log(len(message.RawData))
+
+}
+
+// TestReadJunk checks that ReadNextChunk handles interspersed junk correctly.
+func TestReadJunk(t *testing.T) {
+	r := bytes.NewReader(junkAtStart)
+	junkAtStartReader := bufio.NewReader(r)
+	ch := make(chan byte, 100)
+	for _, j := range junkAtStart {
+		ch <- j
+	}
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
+
+	frame, err1 := rtcm.ReadNextFrame(junkAtStartReader)
 	if err1 != nil {
 		t.Fatal(err1.Error())
 	}
 
-	message, err2 := rtcm.GetMessage(frame)
-	if err2 != nil {
-		t.Fatal(err2.Error())
+	message, messageFetchError := rtcm.GetMessage(frame)
+	if messageFetchError != nil {
+		t.Errorf("error getting message - %v", messageFetchError)
 	}
 
-	if message.MessageType != 1077 {
-		t.Fatalf("expected message type 1077, got %d", message.MessageType)
+	if message.MessageType != NonRTCMMessage {
+		t.Errorf("expected message type %d, got %d",
+			NonRTCMMessage, message.MessageType)
+	}
+
+	gotBody := string(message.RawData[:4])
+
+	if wantJunk != gotBody {
+		t.Errorf("expected %s, got %s", wantJunk, gotBody)
 	}
 }
 
-func TestRealData(t *testing.T) {
-	const expectedNumberOfMessages = 4
+func TestReadOnlyJunk(t *testing.T) {
+	r := bytes.NewReader(allJunk)
+	junkReader := bufio.NewReader(r)
 	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
-	rtcm := New(startTime)
-	messages := rtcm.GetMessages(realData)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
 
-	// Examine the first message in detail.  For the others, only examine the values
-	// affected by the frequency map, which is different for each constellation.
-	if expectedNumberOfMessages != len(messages) {
-		t.Fatalf("expected message length %d, got %d",
-			expectedNumberOfMessages, len(messages))
+	frame, err1 := rtcm.ReadNextFrame(junkReader)
+
+	if err1 != nil {
+		t.Fatal(err1.Error())
 	}
 
-	if messages[0].MessageType != 1077 {
-		t.Fatalf("expected message type 1007, got %d", messages[0].MessageType)
+	message, messageFetchError := rtcm.GetMessage(frame)
+	if messageFetchError != nil {
+		t.Errorf("error getting message - %v", messageFetchError)
 	}
 
-	message, ok := messages[0].Readable.(*MSM7Message)
+	if message.MessageType != NonRTCMMessage {
+		t.Errorf("expected message type %d, got %d",
+			NonRTCMMessage, message.MessageType)
+	}
+
+	gotBody := string(message.RawData)
+
+	if wantJunk != gotBody {
+		t.Errorf("expected %s, got %s", wantJunk, gotBody)
+	}
+
+	// Call again - expect EOF.
+
+	frame2, err2 := rtcm.ReadNextFrame(junkReader)
+
+	if err2 == nil {
+		t.Fatal("expected EOF error")
+	}
+	if err2.Error() != "EOF" {
+		t.Errorf("expected EOF error, got %s", err2.Error())
+	}
+
+	if len(frame2) != 0 {
+		t.Errorf("expected frame to be empty, got %s", string(frame2))
+	}
+}
+
+//TestDisplayMSM4 checks that MSM type 4 messages are handled correctly.
+func TestReadMSM4(t *testing.T) {
+	r := bytes.NewReader(msm4Data)
+	msm4Reader := bufio.NewReader(r)
+	// This test uses real data collected on the 17th June 2022.
+	startTime := time.Date(2022, time.June, 17, 0, 0, 0, 0, locationUTC)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
+
+	frame, err1 := rtcm.ReadNextFrame(msm4Reader)
+
+	if err1 != nil {
+		t.Error(err1.Error())
+		return
+	}
+
+	message, messageFetchError := rtcm.GetMessage(frame)
+	if messageFetchError != nil {
+		t.Errorf("error getting message - %v", messageFetchError)
+		return
+	}
+
+	if message.MessageType != 1124 {
+		t.Errorf("expected message type 1124 got %d", message.MessageType)
+		return
+	}
+
+	// Get the message in display form.
+	display, ok := message.Readable(rtcm).(*MSMMessage)
+	if !ok {
+		t.Error("expected the readable message to be *MSMMessage\n")
+		return
+	}
+
+	if len(display.Satellites) != 7 {
+		t.Errorf("expected 7 satellites, got %d", len(display.Satellites))
+	}
+
+	_ = display.Satellites[0].RangeWholeMillis
+
+}
+
+// TestDecode1230GlonassCodeBias checks that a message of type 1230
+// (Glonass code bias) with two bias values is decoded correctly.
+// The test value is taken from real data.  It has an L1 CA bias
+// value of zero and an L2 CA bias value of zero but no l1 P bias
+// value or L2 P bias value.  Experience shows that these messages
+// are common in my location.
+//
+func TestDecode1230GlonassCodeBias(t *testing.T) {
+	const wantType = 1230
+	r := bytes.NewReader(codeBias)
+	codeBiasReader := bufio.NewReader(r)
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcmHandler := New(startTime, logger)
+	rtcmHandler.StopOnEOF = true
+
+	frame, err1 := rtcmHandler.ReadNextFrame(codeBiasReader)
+
+	if err1 != nil {
+		t.Fatal(err1.Error())
+	}
+
+	message, messageFetchError := rtcmHandler.GetMessage(frame)
+	if messageFetchError != nil {
+		t.Errorf("error getting message - %v", messageFetchError)
+		return
+	}
+
+	gotType := message.MessageType
+	if wantType != gotType {
+		t.Errorf("expected type %d, got %d", wantType, gotType)
+		return
+	}
+
+	rtcmHandler.Analyse(message)
+
+	// The message should be a Message1230.
+	m := message.Readable(rtcmHandler).(*Message1230)
+
+	// All code biases should be valid and 0.
+	if !m.L1_C_A_Bias_valid {
+		t.Error("L1_C_A_Bias should be valid")
+
+	}
+	if !m.L1_P_Bias_valid {
+		t.Error("L1_P_Bias should be valid")
+
+	}
+	if !m.L2_C_A_Bias_valid {
+		t.Error("L2_C_A_Bias should be valid")
+
+	}
+	if !m.L2_P_Bias_valid {
+		t.Error("L2_P_Bias should be valid")
+
+	}
+
+	if m.L1_C_A_Bias != 0 {
+		t.Errorf("want L1_C_A_Bias to be 0, got %d", m.L1_C_A_Bias)
+
+	}
+
+	if m.L1_P_Bias != 0 {
+		t.Errorf("want L1_P_Bias to be 0, got %d", m.L1_P_Bias)
+
+	}
+
+	if m.L2_C_A_Bias != 0 {
+		t.Errorf("want L2_C_A_Bias to be 0, got %d", m.L2_C_A_Bias)
+
+	}
+
+	if m.L2_P_Bias != 0 {
+		t.Errorf("want L2_P_Bias to be 0, got %d", m.L2_P_Bias)
+
+	}
+}
+
+func TestReadNextMessageFrame(t *testing.T) {
+	r := bytes.NewReader(realData)
+	realDataReader := bufio.NewReader(r)
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcmHandler := New(startTime, logger)
+	rtcmHandler.StopOnEOF = true
+
+	frame, err1 := rtcmHandler.ReadNextFrame(realDataReader)
+	if err1 != nil {
+		t.Fatal(err1.Error())
+	}
+
+	message, messageFetchError := rtcmHandler.GetMessage(frame)
+	if messageFetchError != nil {
+		t.Errorf("error getting message - %v", messageFetchError)
+		return
+	}
+
+	if message.MessageType != 1077 {
+		t.Errorf("expected message type 1077, got %d", message.MessageType)
+		return
+	}
+}
+
+// TestRealData reads the first message from the real data and checks it in detail.
+func TestRealData(t *testing.T) {
+	r := bytes.NewReader(realData)
+	realDataReader := bufio.NewReader(r)
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
+
+	m, readError := rtcm.ReadNextMessage(realDataReader)
+
+	if readError != nil {
+		t.Errorf("error reading data - %s", readError.Error())
+		return
+	}
+
+	if m.MessageType != 1077 {
+		t.Errorf("expected message type 1007, got %d", m.MessageType)
+		return
+	}
+
+	message, ok := m.Readable(rtcm).(*MSMMessage)
 
 	if !ok {
-		t.Fatalf("expected message 0 to contain a type 1077 message but readable is nil")
+		t.Errorf("expected message 0 to contain a type 1077 message but readable is nil")
+		return
 	}
 
-	fmt.Printf(rtcm.DisplayMessage(messages[0]))
-
 	if message.Header.Constellation != "GPS" {
-		t.Fatalf("expected GPS, got %s", message.Header.Constellation)
+		t.Errorf("expected GPS, got %s", message.Header.Constellation)
+		return
 	}
 
 	if len(message.Satellites) != 8 {
-		t.Fatalf("expected 8 GPS satellites, got %d",
+		t.Errorf("expected 8 GPS satellites, got %d",
 			len(message.Satellites))
+		return
 	}
 
-	if message.Satellites[0].RangeMillisWhole != 81 {
-		t.Fatalf("expected range whole  of 81, got %d",
-			message.Satellites[0].RangeMillisWhole)
+	if message.Satellites[0].RangeWholeMillis != 81 {
+		t.Errorf("expected range whole  of 81, got %d",
+			message.Satellites[0].RangeWholeMillis)
+		return
 	}
 
-	if message.Satellites[0].RangeMillisFractional != 435 {
-		t.Fatalf("expected range fractional 435, got %d",
-			message.Satellites[0].RangeMillisFractional)
+	if message.Satellites[0].RangeFractionalMillis != 435 {
+		t.Errorf("expected range fractional 435, got %d",
+			message.Satellites[0].RangeFractionalMillis)
+		return
 	}
 
 	// There should be one signal list per satellite
 	if len(message.Signals) != len(message.Satellites) {
-		t.Fatalf("expected %d GPS signal lists, got %d",
+		t.Errorf("expected %d GPS signal lists, got %d",
 			len(message.Signals), len(message.Satellites))
+		return
 	}
 
 	numSignals1 := 0
-	for _, list := range message.Signals {
-		for range list {
-			numSignals1++
-		}
+	for i, _ := range message.Signals {
+		numSignals1 += len(message.Signals[i])
 	}
 
 	if numSignals1 != 14 {
-		t.Fatalf("expected 14 GPS signals, got %d", numSignals1)
+		t.Errorf("expected 14 GPS signals, got %d", numSignals1)
+		return
 	}
 
 	// A signal cell contains a Satellite which is an index into the Satellite array.
 	// The satellite has an ID.
 	if message.Satellites[message.Signals[0][0].Satellite].SatelliteID != 4 {
-		t.Fatalf("expected satelliteID 4, got %d",
+		t.Errorf("expected satelliteID 4, got %d",
 			message.Satellites[message.Signals[0][0].Satellite].SatelliteID)
+		return
 	}
 
 	if message.Signals[0][0].RangeDelta != -26835 {
-		t.Fatalf("expected range delta -26835, got %d",
+		t.Errorf("expected range delta -26835, got %d",
 			message.Signals[0][0].RangeDelta)
+		return
 	}
 
 	// Checking the resulting range in metres against the value
 	// in the RINEX data produced from this message.
 
 	if !floatsEqualWithin3(24410527.355, message.Signals[0][0].RangeMetres) {
-		t.Fatalf("expected range 24410527.355 metres, got %3.6f",
+		t.Errorf("expected range 24410527.355 metres, got %3.6f",
 			message.Signals[0][0].RangeMetres)
+		return
 	}
 }
 
 func TestGetbitu(t *testing.T) {
-	i := Getbitu(data, 8, 0)
+	i := Getbitu(testData, 8, 0)
 	if i != 0 {
 		t.Errorf("expected 0, got 0x%x", i)
 	}
 
-	i = Getbitu(data, 16, 4)
+	i = Getbitu(testData, 16, 4)
 	if i != 8 {
 		t.Errorf("expected 8, got 0x%x", i)
 	}
 
-	i = Getbitu(data, 16, 8)
+	i = Getbitu(testData, 16, 8)
 	if i != 0x8a {
 		t.Errorf("expected 0x8a, got 0x%x", i)
 	}
 
-	i = Getbitu(data, 16, 16)
+	i = Getbitu(testData, 16, 16)
 	if i != 0x8a43 {
 		t.Errorf("expected 0x8a43, got 0x%x", i)
 	}
 
 	// try a full 64-byte number
-	i = Getbitu(data, 12, 64)
+	i = Getbitu(testData, 12, 64)
 	if i != 0x08a4320008a0e1a2 {
 		t.Errorf("expected 0x08a4320008a0e1a2, got 0x%x", i)
 	}
@@ -404,32 +820,23 @@ func TestGetbits(t *testing.T) {
 	}
 }
 
+// TestGetMessage checks GetMessage with a valid message.
 func TestGetMessage(t *testing.T) {
 	const expectedLength = 0x8a + 6
 	startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, locationUTC)
-	rtcm := New(startTime)
-	m, err := rtcm.GetMessage(data)
-	if err != nil {
-		t.Fatal(err.Error())
-	}
-	if expectedLength != len(m.RawData) {
-		t.Fatalf("expected message length %d, got %d",
-			expectedLength, len(m.RawData))
-	}
-}
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
 
-func TestGetMessages(t *testing.T) {
-	const expectedNumberOfMessages = 5
-	startTime := time.Date(2020, time.November, 11, 0, 0, 0, 0, locationUTC)
-	rtcm := New(startTime)
-	messages := rtcm.GetMessages(data)
-	if expectedNumberOfMessages != len(messages) {
-		t.Fatalf("expected message length %d, got %d",
-			expectedNumberOfMessages, len(messages))
+	message, messageFetchError := rtcm.GetMessage(testData)
+	if messageFetchError != nil {
+		t.Errorf("error getting message - %v", messageFetchError)
+		return
 	}
 
-	for _, m := range messages {
-		fmt.Println(rtcm.DisplayMessage(m))
+	if expectedLength != len(message.RawData) {
+		t.Errorf("expected message length %d, got %d",
+			expectedLength, len(message.RawData))
+		return
 	}
 }
 
@@ -442,8 +849,9 @@ func TestGetSatellites(t *testing.T) {
 	satellites := GetSatellites(bitstream, 32)
 
 	if !slicesEqual(expectedSatellites, satellites) {
-		t.Fatalf("expected %v, got %v\n",
+		t.Errorf("expected %v, got %v\n",
 			expectedSatellites, satellites)
+		return
 	}
 }
 
@@ -456,29 +864,28 @@ func TestGetSignals(t *testing.T) {
 	signals := GetSignals(bitstream, 32)
 
 	if !slicesEqual(expectedSignals, signals) {
-		t.Fatalf("expected %v, got %v\n",
+		t.Errorf("expected %v, got %v\n",
 			expectedSignals, signals)
+		return
 	}
 }
 
-// TestGetScaled5 tests GetScaled5 with positive and negative values.
-func TestGetScaled5(t *testing.T) {
+// TestScaled5ToFloat tests Scaled5ToFloat with positive and negative values.
+func TestScaled5ToFloat(t *testing.T) {
 	var scaled5 int64 = 9812345
-	whole, part := GetScaled5(scaled5)
-	if !(98 == whole && 12345 == part) {
-		t.Errorf("expected 98.12345, got %d.%d\n", whole, part)
+	fPos := Scaled5ToFloat(scaled5)
+	if !floatsEqualWithin5(981.2345, fPos) {
+		t.Errorf("expected 981.2345, got %f\n", fPos)
 	}
 
-	scaled5 = 0
-	whole, part = GetScaled5(scaled5)
-	if !(0 == whole && 0 == part) {
-		t.Errorf("expected 0.0, got %d.%d\n", whole, part)
+	fZero := Scaled5ToFloat(0)
+	if !floatsEqualWithin5(0.0, fZero) {
+		t.Errorf("expected 0.0, got %f\n", fZero)
 	}
 
-	scaled5 = -7654321
-	whole, part = GetScaled5(scaled5)
-	if !(-76 == whole && 54321 == part) {
-		t.Errorf("expected -76.54321, got %d.%d\n", whole, part)
+	fNeg := Scaled5ToFloat(-7654321)
+	if !floatsEqualWithin5(-765.4321, fNeg) {
+		t.Errorf("expected -765.4321, got %f\n", fNeg)
 	}
 }
 
@@ -493,45 +900,50 @@ func TestGPSEpochTimes(t *testing.T) {
 
 	// Sunday 2020/08/02 BST, just after the start of the GPS epoch
 	dateTime1 := time.Date(2020, time.August, 2, 1, 0, 0, (60 - gpsLeapSeconds), london)
-	rtcm1 := New(dateTime1)
+	rtcm1 := New(dateTime1, logger)
 	if expectedEpochStart != rtcm1.startOfThisGPSWeek {
-		t.Fatalf("expected %s result %s\n",
+		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(dateLayout),
 			rtcm1.startOfThisGPSWeek.Format(dateLayout))
+		return
 	}
 	if expectedNextEpochStart != rtcm1.startOfNextGPSWeek {
-		t.Fatalf("expected %s result %s\n",
+		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(dateLayout),
 			rtcm1.startOfThisGPSWeek.Format(dateLayout))
+		return
 	}
 
 	// Wednesday 2020/08/05
 	dateTime2 := time.Date(2020, time.August, 5, 12, 0, 0, 0, london)
-	rtcm2 := New(dateTime2)
+	rtcm2 := New(dateTime2, logger)
 	if expectedEpochStart != rtcm2.startOfThisGPSWeek {
-		t.Fatalf("expected %s result %s\n",
+		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(dateLayout),
 			rtcm2.startOfThisGPSWeek.Format(dateLayout))
+		return
 	}
 
 	// Sunday 2020/08/02 BST, just before the end of the GPS epoch
 	dateTime3 := time.Date(2020, time.August, 9, 00, 59, 60-gpsLeapSeconds-1, 999999999, london)
-	rtcm3 := New(dateTime3)
+	rtcm3 := New(dateTime3, logger)
 	if expectedEpochStart != rtcm3.startOfThisGPSWeek {
-		t.Fatalf("expected %s result %s\n",
+		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(dateLayout),
 			rtcm3.startOfThisGPSWeek.Format(dateLayout))
+		return
 	}
 
 	// Sunday 2020/08/02 BST, at the start of the next GPS epoch.
 	dateTime4 := time.Date(2020, time.August, 9, 1, 59, 60-gpsLeapSeconds, 0, paris)
 	startOfNext := time.Date(2020, time.August, 8, 23, 59, 60-gpsLeapSeconds, 0, locationUTC)
 
-	rtcm4 := New(dateTime4)
+	rtcm4 := New(dateTime4, logger)
 	if startOfNext != rtcm4.startOfThisGPSWeek {
-		t.Fatalf("expected %s result %s\n",
+		t.Errorf("expected %s result %s\n",
 			startOfNext.Format(dateLayout),
 			rtcm4.startOfThisGPSWeek.Format(dateLayout))
+		return
 	}
 }
 
@@ -551,7 +963,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 
 	// The 9th is Sunday.  This start time should be in the previous week ...
 	startTime1 := time.Date(2020, time.August, 9, 0, 0, 0, 0, locationUTC)
-	rtcm1 := New(startTime1)
+	rtcm1 := New(startTime1, logger)
 
 	if !expectedStartOfPreviousWeek.Equal(rtcm1.startOfThisBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -560,7 +972,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 
 	// ... and so should this.
 	startTime2 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds-1, 999999999, locationUTC)
-	rtcm2 := New(startTime2)
+	rtcm2 := New(startTime2, logger)
 
 	if !expectedStartOfPreviousWeek.Equal(rtcm2.startOfThisBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -569,7 +981,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 
 	// This start time should be in this week.
 	startTime3 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, locationUTC)
-	rtcm3 := New(startTime3)
+	rtcm3 := New(startTime3, logger)
 
 	if !expectedStartOfThisWeek.Equal(rtcm3.startOfThisBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -579,7 +991,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 	// This start time should be just at the end of this Beidou week.
 	startTime4 :=
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds-1, 999999999, locationUTC)
-	rtcm4 := New(startTime4)
+	rtcm4 := New(startTime4, logger)
 
 	if !expectedStartOfThisWeek.Equal(rtcm4.startOfThisBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -589,7 +1001,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 	// This start time should be just at the start of the next Beidou week.
 	startTime5 :=
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds, 0, locationUTC)
-	rtcm5 := New(startTime5)
+	rtcm5 := New(startTime5, logger)
 
 	if !expectedStartOfNextWeek.Equal(rtcm5.startOfThisBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -612,7 +1024,7 @@ func TestGlonassEpochTimes(t *testing.T) {
 
 	startTime1 :=
 		time.Date(2020, time.August, 2, 5, 0, 0, 0, locationUTC)
-	rtcm1 := New(startTime1)
+	rtcm1 := New(startTime1, logger)
 	if expectedEpochStart1 != rtcm1.startOfThisGlonassDay {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart1.Format(dateLayout),
@@ -640,7 +1052,7 @@ func TestGlonassEpochTimes(t *testing.T) {
 	// Tuesday in Moscow - day 2
 	startTime2 :=
 		time.Date(2020, time.August, 3, 22, 59, 59, 999999999, locationUTC)
-	rtcm2 := New(startTime2)
+	rtcm2 := New(startTime2, logger)
 	if expectedEpochStart2 != rtcm2.startOfThisGlonassDay {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart2.Format(dateLayout),
@@ -662,7 +1074,7 @@ func TestGetUTCFromGPSTime(t *testing.T) {
 
 	// Use Monday August 10th BST as the start date
 	startTime := time.Date(2020, time.August, 10, 2, 0, 0, 0, london)
-	rtcm := New(startTime)
+	rtcm := New(startTime, logger)
 
 	// Tha should give an epoch start just before midnight on Saturday 8th August.
 	startOfThisEpoch :=
@@ -763,7 +1175,7 @@ func TestGetUTCFromGlonassTime(t *testing.T) {
 	// Start at 23:00:00 on Monday 10th August Paris, midnight on the Tuesday
 	// 11th in Russia - start of Glonass day 2.
 	startTime1 := time.Date(2020, time.August, 10, 23, 0, 0, 0, paris)
-	rtcm := New(startTime1)
+	rtcm := New(startTime1, logger)
 
 	if expectedGlonassDay1 != rtcm.previousGlonassDay {
 		t.Errorf("expected %d result %d", expectedGlonassDay1, rtcm.previousGlonassDay)
@@ -808,7 +1220,7 @@ func TestGetUTCFromGalileoTime(t *testing.T) {
 	// Galileo time follows GPS time.
 
 	startTime := time.Date(2020, time.August, 9, 23, 0, 0, 0, paris)
-	rtcm := New(startTime)
+	rtcm := New(startTime, logger)
 
 	// 6 am plus 300 ms Paris on Monday is 4am plus 300 ms GMT on Monday.
 	// GPS time is a few seconds earlier.
@@ -840,7 +1252,7 @@ func TestGetUTCFromBeidouTime(t *testing.T) {
 	// Set the start time to the start of a Beidou epoch.
 	startTime1 :=
 		time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, locationUTC)
-	rtcm1 := New(startTime1)
+	rtcm1 := New(startTime1, logger)
 
 	expectedTime1 :=
 		time.Date(2020, time.August, 9, 0, 0, 0, 0, locationUTC).Add(beidouTimeOffset)
@@ -947,40 +1359,50 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	}
 }
 
-func TestGetRange(t *testing.T) {
+// TestGetrangeMSM7 checks that getMSMRangeInMetres works
+// for an MSM7 message.
+func TestGetRangeMSM7(t *testing.T) {
 	const expectedRange float64 = (128.5 + P2_11) * oneLightMillisecond // 38523477.236036
 	var rangeMillisWhole uint = 0x80                                    // 1000 0000
 	var rangeMillisFractional uint = 0x200                              // 10 bits 1000 ...
 	rangeDelta := int(0x40000)                                          // 20 bits 0100 ...
 
-	satellite := MSM7SatelliteCell{
-		RangeMillisWhole:      rangeMillisWhole,
-		RangeMillisFractional: rangeMillisFractional}
+	header := MSMHeader{MessageType: 1077}
 
-	signal := MSM7SignalCell{
-		RangeDelta: rangeDelta}
+	satellite := MSMSatelliteCell{
+		RangeValid:            true,
+		RangeWholeMillis:      rangeMillisWhole,
+		RangeFractionalMillis: rangeMillisFractional}
 
-	rangeM1 := getRangeInMetres(&satellite, &signal)
+	signal := MSMSignalCell{
+		RangeDeltaValid: true,
+		RangeDelta:      rangeDelta}
+
+	rangeM1 := getMSMRangeInMetres(&header, &satellite, &signal)
 
 	if !floatsEqualWithin3(expectedRange, rangeM1) {
-		t.Fatalf("expected %f got %f", expectedRange, rangeM1)
+		t.Errorf("expected %f got %f", expectedRange, rangeM1)
+		return
 	}
 
 	// Test values from real data.
 
 	const expectedRange2 = 24410527.355
 
-	satellite2 := MSM7SatelliteCell{
-		RangeMillisWhole:      81,
-		RangeMillisFractional: 435}
+	satellite2 := MSMSatelliteCell{
+		RangeValid:            true,
+		RangeWholeMillis:      81,
+		RangeFractionalMillis: 435}
 
-	signal2 := MSM7SignalCell{
-		RangeDelta: -26835}
+	signal2 := MSMSignalCell{
+		RangeDeltaValid: true,
+		RangeDelta:      -26835}
 
-	rangeM2 := getRangeInMetres(&satellite2, &signal2)
+	rangeM2 := getMSMRangeInMetres(&header, &satellite2, &signal2)
 
 	if !floatsEqualWithin3(expectedRange2, rangeM2) {
-		t.Fatalf("expected %f got %f", expectedRange2, rangeM2)
+		t.Errorf("expected %f got %f", expectedRange2, rangeM2)
+		return
 	}
 }
 
@@ -994,46 +1416,58 @@ func TestGetPhaseRangeGPS(t *testing.T) {
 	var rangeMillisFractional uint = 0x200 // 10 0000 0000
 	var phaseRangeDelta int = 0x400000     // 24 bits 01000 ...
 
-	header := MSMHeader{Constellation: "GPS"}
+	header := MSMHeader{
+		MessageType:   1077,
+		Constellation: "GPS",
+	}
 
-	satellite1 := MSM7SatelliteCell{
-		RangeMillisWhole:      rangeMillisWhole,
-		RangeMillisFractional: rangeMillisFractional}
+	satellite1 := MSMSatelliteCell{
+		RangeValid:            true,
+		RangeWholeMillis:      rangeMillisWhole,
+		RangeFractionalMillis: rangeMillisFractional}
 
-	signal1 := MSM7SignalCell{
-		SignalID:        signalID,
-		PhaseRangeDelta: phaseRangeDelta}
+	signal1 := MSMSignalCell{
+		PhaseRangeDeltaValid: true,
+		SignalID:             signalID,
+		PhaseRangeDelta:      phaseRangeDelta,
+	}
 
-	rangeCycles1, err := getPhaseRangeCycles(&header, &satellite1, &signal1)
+	rangeCycles1, err := getMSMPhaseRange(&header, &satellite1, &signal1)
 
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Errorf(err.Error())
+		return
 	}
 
 	if !floatsEqualWithin3(expectedPhaseRange1, rangeCycles1) {
-		t.Fatalf("expected %f got %f", expectedPhaseRange1, rangeCycles1)
+		t.Errorf("expected %f got %f", expectedPhaseRange1, rangeCycles1)
+		return
 	}
 
 	// Test using real data.
 
 	const expectedPhaseRange2 = 128278179.264
 
-	satellite2 := MSM7SatelliteCell{
-		RangeMillisWhole:      81,
-		RangeMillisFractional: 435}
+	satellite2 := MSMSatelliteCell{
+		RangeValid:            true,
+		RangeWholeMillis:      81,
+		RangeFractionalMillis: 435}
 
-	signal2 := MSM7SignalCell{
-		SignalID:        2,
-		PhaseRangeDelta: -117960}
+	signal2 := MSMSignalCell{
+		PhaseRangeDeltaValid: true,
+		SignalID:             2,
+		PhaseRangeDelta:      -117960}
 
-	rangeCycles2, err := getPhaseRangeCycles(&header, &satellite2, &signal2)
+	rangeCycles2, err := getMSMPhaseRange(&header, &satellite2, &signal2)
 
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Errorf(err.Error())
+		return
 	}
 
 	if !floatsEqualWithin3(expectedPhaseRange2, rangeCycles2) {
-		t.Fatalf("expected %f got %f", expectedPhaseRange2, rangeCycles2)
+		t.Errorf("expected %f got %f", expectedPhaseRange2, rangeCycles2)
+		return
 	}
 }
 
@@ -1050,22 +1484,26 @@ func TestGetPhaseRangeRate(t *testing.T) {
 	const expectedPhaseRangeRate2 = float64(709.992)
 
 	header2 := MSMHeader{Constellation: "GPS"}
-	satellite2 := MSM7SatelliteCell{
+	satellite2 := MSMSatelliteCell{
 		PhaseRangeRate: -135}
 
-	signal2 := MSM7SignalCell{
+	signal2 := MSMSignalCell{
 		SignalID:            2,
 		PhaseRangeRateDelta: -1070}
 
-	rate2, err := getPhaseRangeRate(&header2, &satellite2, &signal2)
+	rate2, err := getMSMPhaseRangeRate(&header2, &satellite2, &signal2)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Errorf(err.Error())
+		return
 	}
 
 	if floatsEqualWithin3(expectedPhaseRangeRate2, rate2) {
-		t.Fatalf("expected %f got %f", expectedPhaseRangeRate2, rate2)
+		t.Errorf("expected %f got %f", expectedPhaseRangeRate2, rate2)
+		return
 	}
 }
+
+// TestHandleMessages tests the verbatim logging of messages.
 
 // slicesEqual returns true if uint slices a and b contain the same
 // elements.  A nil argument is equivalent to an empty slice.
@@ -1090,4 +1528,14 @@ func floatsEqualWithin3(f1, f2 float64) bool {
 	}
 
 	return (f2 - f1) < testDelta3
+}
+
+// floatsEqualWithin5 returns true if two float values are equal
+// within 5 decimal places.
+func floatsEqualWithin5(f1, f2 float64) bool {
+	if f1 > f2 {
+		return (f1 - f2) < testDelta5
+	}
+
+	return (f2 - f1) < testDelta5
 }

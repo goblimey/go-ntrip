@@ -55,6 +55,10 @@ const endOfDayHour = 23
 const endOfDayMinute = 59
 const endOfDaySecond = 55
 
+// controlFileName is the name of the JSON control file that defines
+// the names of the potential input files.
+const controlFileName = "./ntrip.json"
+
 const subDirectoryForOldLogs = "data.ready"
 
 // This is a compile-time check that Writer implements the io.Writer interface.
@@ -106,7 +110,7 @@ func (lw *Writer) Write(buffer []byte) (n int, err error) {
 }
 
 // logControl disables logging at the end of each day and enables it at
-// the start of the next day.  It should be rumn in a goroutine.
+// the start of the next day.  It should be run in a goroutine.
 func (lw *Writer) logControl() {
 
 	// This should be run in a goroutine.

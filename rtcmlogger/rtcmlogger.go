@@ -1,45 +1,95 @@
+// The rtcmlogger reads RTCM messages on standard input and writes them to standard
+// output.  If the JSON config files sets "record_messages" true then it also
+// creates a file containing a copy of the messages which can be converted into RINEX
+// format for Precise Point Positioning (PPP).  If record_messages is false then the
+// program just acts as a pass-through,  copying stdin to stdout.  The program is
+// intended to run in a pipeline between a device which produces RTCM messages and an
+// NTRIP server which sends the messages to an NTRIP caster.
+//
+// The GNSS community use the word "log" for a copy of the RTCM messages stored
+// in a file.  This program also maintains an event log, where runtime problems
+// are reported.  The names of both contain a datestamp and both are rolled over
+// each day.  The log of RTCM messages is called "data.{date}.log" and the event
+// log is called "rtcmlogger.{date}.log".  If the program dies during the day and
+// is restarted, it picks up the existing log file and appends to it, so the
+// existing log data is preserved.
+//
+// The logger reads and writes the data in blocks.  Around midnight the input block may
+// contain some messages from yesterday and some from today, so those blocks are ignored -
+// logging is disabled just before midnight and a new datestamped log file is created
+// just after midnight the next day.  (For the precise timings, see the logger module.)
+// THs also helps RINEX processors which assume that all the data in a RINEX file was
+// collected within a 24-hour period.  This only applies to the messages written to the
+// logfile, not the ones written to the stdout.  All incoming messages are written to
+// stdout regardless of the time of day.
+//
 package main
 
 import (
-	"flag"
 	"io"
 	"log"
 	"os"
 
+	"github.com/goblimey/go-ntrip/jsonconfig"
 	rtcmLogger "github.com/goblimey/go-ntrip/rtcmlogger/logger"
+	"github.com/goblimey/go-tools/dailylogger"
 )
-
-// The logger runs constantly reading RTCM messages in blocks on standard input and writing
-// to standard output.  It also creates a daily log of the messages.  Each log file is named
-// after the day it was created, for example "data.2020-04-01.rtcm3".  Around midnight the
-// input block may contain some messages from yesterday and some from today, so those blocks
-// are ignored - logging is disabled just before midnight and a new datestamped log file is
-// created just after midnight the next day.  (For the precise timings, see the logger
-// module.)
-//
-// If the application dies during the day and is restarted, the logger picks up the existing
-// existing log file and appends to it, so any existing log data is preserved.
 
 const bufferLength = 8096
 
 var ch chan []byte
 
-// The -l option specifies the directory for RTCM logs.  The default is /ntrip/rtcmlog,
-// which is what the docker version uses.
-var logDirectory = flag.String("l", "/ntrip/rtcmlog", "log directory")
+// controlFileName is the name of the JSON control file that defines
+// the names of the potential input files.
+const controlFileName = "./ntrip.json"
+
+// logDirectory is the directory for RTCM logs.  The default is ".".
+var logDirectory string
+
+// eventLogger writes to the daily event log.
+var eventLog *log.Logger
+
+// These control the logging of failures - a stream of failures is only
+// logged once.
+var reportingWriteErrors = true
+var reportingChannelErrors = true
+var reportingLogWriteFailures = true
+
+func init() {
+	// Create the event log.
+	eventLogger := dailylogger.New(".", "rtcmlogger.", ".log")
+	eventLog = log.New(eventLogger, "rtcmlogger",
+		log.LstdFlags|log.Lshortfile)
+}
 
 func main() {
 
-	flag.Parse()
+	jsonConfig, err := jsonconfig.GetJSONConfigFromFile(controlFileName, eventLog)
+
+	if err != nil {
+		// There is no JSON config file.  We can't continue.
+		eventLog.Fatalf("cannot find config %s", controlFileName)
+		os.Exit(1)
+	}
+
+	// The directory in which to record messages is defined in the JSON control
+	// file, or "." by default.
+	if len(jsonConfig.MessageLogDirectory) == 0 {
+		jsonConfig.MessageLogDirectory = "."
+	}
 
 	ch = make(chan []byte)
 	defer close(ch)
 
-	go recorder()
+	go recorder(jsonConfig.MessageLogDirectory)
 
 	buffer := make([]byte, bufferLength)
 
-	loggingErrors := true // log errors only once.
+	if jsonConfig.RecordMessages {
+		ch = make(chan []byte)
+	defer close(ch)
+	go recorder(jsonConfig.MessageLogDirectory)
+	}
 
 	for {
 
@@ -51,30 +101,42 @@ func main() {
 			break
 		}
 		if err != nil {
-			log.Fatal(err)
+			if reportingWriteErrors {
+				reportingWriteErrors = false // stop logging write failures
+				eventLog.Println(err)
+			}
+		} else {
+			reportingWriteErrors = true // start logging write failures
 		}
 
-		copyBuffer := make([]byte, n)
-		copy(copyBuffer, buffer[:n])
-		ch <- copyBuffer
-
+		// Write the data to stdout
 		_, err = os.Stdout.Write(buffer[:n])
-		if err != nil {
-			if loggingErrors {
-				// Log errors only once.
-				loggingErrors = false
-				log.Printf("write failed %v\n", err)
+
+		if jsonConfig.RecordMessages {
+			// Copy the data and send it to the logging channel.
+			copyBuffer := make([]byte, n)
+			copy(copyBuffer, buffer[:n])
+			ch <- copyBuffer
+			if err != nil {
+				if reportingChannelErrors {
+					reportingChannelErrors = false // Stop logging channel failures.
+					eventLog.Printf("write failed %v\n", err)
+				}
+			} else {
+				reportingChannelErrors = true // Start logging channel failures.
 			}
 		}
 	}
 }
 
 // recorder loops, reading buffers from the channel and writing them to the daily log file.
-func recorder() {
+func recorder(logDirectory string) {
 	// The logWriter handles the timing and naming rules for logging.  It creates a new log
 	// file each morning and over the day it appends to that file.  When logging is disabled
 	// it discards anything written to it.
-	logWriter := newLogWriter(*logDirectory)
+	logWriter := newLogWriter(logDirectory)
+
+	// Receive and write messages the program exits.
 	for {
 		buffer, ok := <-ch
 		if ok {
@@ -89,13 +151,16 @@ func newLogWriter(logDirectory string) io.Writer {
 	return rtcmLogger.New(logDirectory)
 }
 
-// writeBuffer writes the buffer to the log file.  It's separated out to support
-// integration testing.
+// writeBuffer writes the buffer to the RTCM log file.  It's separated out to
+// support integration testing.
 //
 func writeBuffer(buffer *[]byte, writer io.Writer) {
 	n, err := writer.Write(*buffer)
 	if err != nil {
+		reportingLogWriteFailures = false // Stop logging failures.
 		log.Printf("write to daily RTCM log failed - %s\n", err.Error())
+	} else {
+		reportingLogWriteFailures = true // Start logging failures.
 	}
 
 	if n != len(*buffer) {

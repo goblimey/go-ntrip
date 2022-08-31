@@ -14,9 +14,10 @@ import (
 func TestGetJSONControl(t *testing.T) {
 	reader := strings.NewReader(`{
 		"input": ["a", "b"],
-		"sendtocaster": true,
-		"writeoutputlog": false,
-		"writereadablelog": false,
+		"stop_on_eof": true,
+		"record_messages": true,
+		"message_log_directory": "someDirectory",
+		"display_messages": true,
 		"casterhostname": "caster.example.com",
 		"casterport": 2101,
 		"casterUserName": "user",
@@ -51,12 +52,17 @@ func TestGetJSONControl(t *testing.T) {
 		t.Errorf("parsing json, expected file 1 to be b, got %s",
 			config.Filenames[1])
 	}
+
+	if !config.StopOnEOF {
+		t.Error("parsing json, expected StopOnEOF to be true")
+	}
+
 	if config.CasterHostName != "caster.example.com" {
 		t.Errorf("parsing json, expected caster host name to be caster.example.com, got %s",
 			config.CasterHostName)
 	}
 	if config.CasterPort != 2101 {
-		t.Errorf("parsing json, expected caster port to be caster.example.com, got %d",
+		t.Errorf("parsing json, expected caster port to be 2101, got %d",
 			config.CasterPort)
 	}
 	if config.CasterUserName != "user" {
@@ -68,16 +74,17 @@ func TestGetJSONControl(t *testing.T) {
 			config.CasterPassword)
 	}
 
-	if !config.SendToCaster {
-		t.Error("parsing json, expected sendToCaster to be true, got false")
+	if !config.RecordMessages {
+		t.Error("parsing json, expected record_messages to be true")
 	}
 
-	if config.WriteOutputLog {
-		t.Error("parsing json, expected writeoutputLog to be false, got true")
+	if config.MessageLogDirectory != "someDirectory" {
+		t.Errorf("parsing json, expected display_message_directory to be \"someDirectory\", got \"%s\"",
+			config.MessageLogDirectory)
 	}
 
-	if config.WriteReadableLog {
-		t.Error("parsing json, expected readableLog to be false, got true")
+	if !config.DisplayMessages {
+		t.Error("parsing json, expected display_message to be true")
 	}
 
 	if config.LostInputConnectionTimeout != 1 {

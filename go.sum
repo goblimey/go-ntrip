@@ -1,2 +1,4 @@
 github.com/goblimey/go-crc24q v0.0.0-20210107174841-6ea518daa3aa h1:crIt+q/C1L+lDNm3l7Dhptrx1iQFgpA528DweYPHguM=
 github.com/goblimey/go-crc24q v0.0.0-20210107174841-6ea518daa3aa/go.mod h1:lgg7ueDT7pHpbvSm/IscR1RwdZaGC0vls868slx6FS4=
+github.com/goblimey/go-tools v0.0.10 h1:uB625XRmYT/Pkov7XQCfYN7J6sfsHdGdngZ0sHnbjY8=
+github.com/goblimey/go-tools v0.0.10/go.mod h1:xj+Lwg218Sy2BpQs1+S3k/7XUBBl0s8b3L1OwfNFRHw=
