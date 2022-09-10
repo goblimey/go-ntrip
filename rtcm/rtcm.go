@@ -12,196 +12,64 @@ import (
 	crc24q "github.com/goblimey/go-crc24q/crc24q"
 )
 
-// The rtcm package contains the logic to decode and display RTCM3
-// messages produced by GNSS devices such as the U-Blox ZED-F9P.  The
-// format of the messages is described by RTCM STANDARD 10403.3
-// Differential GNSS (Global Navigation Satellite Systems) Services –
-// Version 3 (RTCM3 10403.3).  This is not an open-source standard and
-// it costs about $300 to buy a copy.  RTCM messages are in a very
-// compact binary form and not readable by eye.
+// The rtcm package contains logic to read and decode and display RTCM3
+// messages produced by GNSS devices.  See the README for this repository
+// for a description of the RTCM version 3 protocol.
 //
-// There are tools available to convert an RTCM3 data stream into messages
-// in RINEX format.  That's an open standard and the result is readable by
-// humans.  There is a little bit of useful information scattered around
-// various public web pages.  To figure out the format of the message I'm
-// interested in, I read what I could find, took the RTCM3 messages
-// that my device produced, converted them to RINEX format and examined
-// the result.  However, most of the information i needed came from the
-// open source RTKLIB software, which is written in C.  I've copied some of
-// the more useful RTKLIB source files into this repository as a reference.
+//     handler := rtcm.New(time.Now(), logger)
 //
-// Some of my unit tests take the results that my software produces and
-// compares it with the results that RINEX tools produced.
+// creates an RTCM handler connected to a logger.  RTCM messages
+// contain a timestamp that rolls over each week.  To make sense of the
+// timestamp the handler needs a date within the week in which the data
+// was collected.  If the handler is receiving live data, the current
+// date and time can be used, as in the example.
 //
-// I claim that this Go software is the most readable public source of
-// detailed information about the RTCM3 format, limited though it is.
-// Onc you've read an understood this, you should be able to follow
-// the more complete RTKLIB implementation to decode any messages not
-// handled here.
+// If the logger is non-nil the handler writes material such as error
+// messages to it.
 //
-// An RTCM3 message is binary and variable length.  Each message frame
-// is composed of a three-byte header, an embedded message and 3 bytes of
-// Cyclic Redundancy Check (CRC) data.  The header starts with 0xd3 and
-// includes the length of the embedded message.  Each message starts with
-// a 12-bit message number which defines the type.  Apart from that
-// message number, each type of message is in a different format.
-// Fortunately, I only have to worry about two major types.
+// Given a reader r yielding data, the handler returns the data as a
+// series of rtcm.Message objects containing the raw data of the message
+// and other values such as a flag to say if the data is a valid RTCM
+// message and its message type.  RTCM message types are all greater than
+// zero.  There is also a special type to indicate non-RTCM data such as
+// NMEA messages.
 //
-// For example, this is a hex dump of a complete message frame and the
-// start of another:
+//    message, err := handler.ReadNextMessage(r)
 //
-// d3 00 aa 44 90 00 33 f6  ea e2 00 00 0c 50 00 10
-// 08 00 00 00 20 01 00 00  3f aa aa b2 42 8a ea 68
-// 00 00 07 65 ce 68 1b b4  c8 83 7c e6 11 30 10 3f
-// 05 ff 4f fc e0 4f 61 68  59 b6 86 b5 1b a1 31 b9
-// d9 71 55 57 07 a0 00 d3  2e 0c 99 01 98 c4 fa 16
-// 0e fa 6e ac 07 19 7a 07  3a a4 fc 53 c4 fb ff 97
-// 00 4c 6f f8 65 da 4e 61  e4 75 2c 4b 01 e5 21 0d
-// 4f c0 0b 02 b0 b0 2f 0c  02 70 94 23 0b c3 e9 e0
-// 97 d1 70 63 00 45 8d e9  71 d7 e5 eb 5f f8 78 00
-// 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00
-// 00 00 00 00 00 00 00 00  00 00 00 00 00 4d f5 5a
-// d3 00 6d 46 40 00 33 f6  10 22 00 00 02 40 08 16
+// The raw data in the returned message object is binary and tightly
+// encoded.  The handler can decode some message types and add a
+// much more verbose plain text readable version to the message:
 //
-// The message starts at byte zero.  That byte has the value d3, which
-// announces the start of the message frame.  The frame is composed of a
-// 3-byte header, and embedded message and 3 bytes of Cyclic Rdundancy
-// Check (CRC) data.
+//    handler.DisplayMessage(&message))
 //
-// Byte 0 of the frame is always d3.  The top six bits of byte 1 are
-// always zero.  The lower two bits and the bits of byte 2 form the
-// message length, in this case hex aa, decimal 176.  So the embedded
-// message is 176 bytes long and therefore the whole message frame is 182
-// bytes long.  As shown above, the embedded message may end with some
-// padding bits which are always zero.
+// DisplayMessage can decode RTCM message type 1005, which gives the base
+// station position plus MSM7 and MSM4 messages for GPS, Galileo, GLONASS
+// and Beidou, which carry the base station's observations of signals
+// from satellites.  It also decodes GLONASS code phase bias messages.
+// For reasons I don't claim to understand, these are required as well as
+// the GLONASS MSM messages.  (My equipment consistently returns code bias
+// values of zero.)  These messages are all that a rover needs to find its
+// position accurately.
 //
-// The last three bytes of the frame (in this case 4d, f5 and 5a) are the
-// CRC value.  To check the CRC, take the header and the embedded message,
-// run the CRC calculation over those bytes and compare the result with
-// the given CRC.  If they are different then the message is not RTCM3 or
-// it's been corrupted in transit.
+// For an example of usage, see the rtcmfilter in this repository.
+// The filter reads a stream of message data from a base station and
+// discards any invalid RTCM messages and any non-RTCM data such as NMEA
+// messages.  The result is a stream of just valid RTCM messages on its
+// standard out channel.  That's is useful when dealing with downstream
+// equipment that requires a clean input.  The rtcmdisplay tool does a
+// similar job but emits a readable version of the messages.  That's
+// useful whenever you need to know exactly what your base station is
+// producing.
 //
-// The CRC check is calculated using an algorithm from Qualcomm.  See Mark
-// Rafter's implementation at https://github.com/goblimey/go-crc24q.
-//
-// The first 12 bits of the embedded message give the message number, in
-// this case hex 449, decimal 1097, which is a type 7 Multiple Signal Message
-// (MSM7) containing high resolution observations of signals from Galileo
-// satellites.
-//
-// The messages are binary and can contain a d3 byte.  Note the one on the
-// fifth line of the hex dump above.  This is not the start of another
-// message.  One clue is that it's not followed by six zero bits.  To extract
-// a message frame from a stream of data and decode it, you need to read the
-// header and the next two bytes, check the header, find the message length,
-// read the whole message frame and check the CRC value.  This matters
-// particularly when you start to receive a stream of data from a device.  You
-// may come into the data stream part-way through and blunder into a d3 byte.
-// You can't assume that it's the start of a message.
-//
-// The CRC data is there to check that the message has not been corrupted in
-// transit.  If the CRC check fails, the mesage must be discarded.
-//
-// RTCM3 message frames in the data stream are contiguous with no separators or
-// newlines.  In the example, the last line contains the start of the next
-// message.  Other data in other formats may be interspersed between frames.
-// This software discards anything that's not an RTCM3 message frame with a
-// correct CRC value.
-//
-// There are many hundreds of RTCM3 message types, some of which are just
-// different ways of representing the same information.  To get an accurate fix
-// on its position, a rover only needs to know the position of the base station
-// and a recent set of the base's observations of satellite signals, which is to
-// say a type 1005 message and a set of MSM7 messages, one for each constellation
-// of satellites (GPS, GLONASS or whatever).
-//
-// Message type 1005 gives the position of the base station (or more strictly,
-// of a point in space a few centimetres above its antenna).
-//
-// Message types 1074, 1077, 1084, 1087 and so on are Multiple Signal messages
-// (MSMs).  Each contains observations by the base station of signals from
-// satellites in one constellation.  Type 1077 is in MSM7 format and contains
-// high resolution signal data from GPS satellites.  Type 1074 is in MSM4 format
-// which is simply a lower resolution version of the same data.  Similarly for the
-// other constellations: 1087 messages contain high resolution observations of
-// GLONASS satellites, 1087 is for Galileo and 1127 is for Bediou.
-//
-// There are other constellations which are only visible in certain parts of
-// the world, and not in the UK where I live.  I don't decode those messages
-// either.  If I tried, I wouldn't have any real data with which to check the
-// results.
-//
-// Each MSM contains readings for satellites in one constellation.  Each
-// satellite in a constellation is numbered.  An MSM allows 64 satellites
-// numbered 1-64.  At any point on the Earth's surface only some satellites will
-// be visible.  Signals from some of those may be too weak to register, so the
-// message will contain readings of just some signals from just some satellites.
-// My base station typically sees one or two signals from each of 6-8 satellites
-// from each of the four visible constellations in each scan, and produces four
-// MSMs containing those results.
-//
-// An MSM message starts with a header, represented here by an MSMHeader
-// structure.  Following the header is a set of cells listing the satellites
-// for which signals were observed.  Those data is represented by a
-// []MSM7SatelliteCell.  The message ends with a set of signal readings,
-// at least one per satellite cell and currently no more than two.  Those
-// data are represented by a [][]MSM7SignalCell, one outer slice per
-// satellite - if seven satellites were observed, there will be seven sets
-// of signal cells with one or two entries in each set.
-//
-// The header includes a satellite mask, a signal mask and a cell mask.  These
-// bit masks show how to relate the cells that come after the header, to satellite
-// and signal numbers.  For example, for each of the satellites observed, a bit is
-// set in the 64-bit satellite mask, bit 63 for satellite 1, bit 0 for satellite 64.
-// If the satellite mask is:
-//     0101100000000010000101000000010000000000000000000000000000
-// seven bits are set in the mask so there will be seven satellite cells containing
-// data for satellites, 2, 4, 5 and so on.
-//
-// If the 32-bit signal mask is:
-//     1000000000001000000000000000000
-// then the device observed signal types 1 and 13 from some of the satellites.
-// The standard supports up to 32 types of signal.  Each signal can be on a different
-// frequency, although some signals share the same frequency.  The meaning of each signal
-// type and the frequency that it is broadcast on is defined for each constellation.
-//
-// The cell mask is variable length, nSignals * nSatellites bits, where nSignals
-// is the number of signals (2 in the example) and nSatellites is the number of
-// satellites (7 in the example).  The cell mask is an array of bits with nsatellite
-// elements of nSignals each - in this example 7X2 = 14 bits long, showing which signals
-// were observed for each satellite. For example:
-//     01 11 11 10 10 10 10
-// means that signal 1 from satellite 2 was not observed but signal 13 was not,
-// both signals were observed from satellite 4, and so on.
-//
-// The header is followed by the satellites cell list.  It's m X 36 bits long where m is
-// the number of satellite from which signals were observed.  However, that's NOT 36 bits
-// for the first satellite followed by 36 bits for the next, and so on.  Instead, the bit
-// stream is divided into fields, arranged as m millisecond readings, each 8 bits, m
-// extended data values, each 4 bits, and so on.
-//
-// The signal list is laid out in the same way.  It's an array s X 80 bits where
-// s is the total number of signals arranged by satellite.  For example, if
-// signal 1 was observed from satellite 1, signals 1 and 3 from satellite 3 and
-// signal 3 from satellite 5, there will be four signal cells, once again
-// arranged as s fields of one type followed by s fields of another type and so on.
-//
-// The signal list is followed by any padding necessary to fill the last byte,
-// possibly followed by a few zero bytes of more padding.  Finally comes the 3-byte
-// CRC value.  The next message frame starts immediately after.
-//
-// My base station is driven by a UBlox ZED-F9P device, which operates in a fairly
-// typical way.  It scans for signals from satellites and sends messages at intervals
-// of a multiple of one second.  The useful life of an MSM message is short, so you
-// might configure the device to scan and send a batch of observations once per second.
-// For type 1005 messages, which give the position of the device, the situation is
-// different.  When a rover connects to a base station and starts to receive messages,
-// it needs a type 1005 (base station position) message to make sense of the MSM (signal
-// observation) messages.  The base station doesn't move, so the rover only needs the
-// first the 1005 message.  A good compromise is to configure the device to send one
-// type 1005 message every ten seconds.  That reduces the traffic a little while ensuring
-// that when a rover connects to the data stream it will start to produce position fixes
-// reasonably quickly.
+// It's worth saying that MSM4 messages are simply lower resolution
+// versions of the equivalent MSM7 messages, so a base station only
+// needs to issue MSM4 or MSM7 messages, not both.  I have two base
+// stations, a Sparkfun RTK Express (based on the Ublox ZED-F9P chip)
+// and an Emlid Reach RS2.  The Sparkfun device can be configured to
+// produce MSM4 or MSM7 messages but the Reach only produces MSM4.  Both
+// claim to support 2cm accuracy.  My guess is that MSM7 format is
+// defined ready to support emerging equipment that's expected to give
+// better accuracy in the future.
 
 const u0 uint64 = 0            // 0 as a uint.
 const minLengthMSMHeader = 170 // The minimum length of an MSM header

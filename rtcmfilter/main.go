@@ -9,46 +9,19 @@
 // formats and so on.  Only valid NTRIP messages are passed on to
 // stdout.
 //
-// A typical configuration is a GNSS receiver such as a Sparkfun
-// RTK Express device producing RTCM and other messages, connected
-// via I2C or serial USB to a host computer running this filter.
-// The host could be a Windows machine but something as cheap as
-// a Raspberry Pi single board computer is quite adequate:
-//
-//  -------------          messages          --------------
-// | RTK Express | -----------------------> | Raspberry Pi |
-//  -------------    IRC or serial USB       --------------
-//
-// With a bit more free software that can be used to create an NTRIP
-//  base station:
-//
-//
-//   messages    ------------   RTCM    --------------   RTCM over NTRIP
-// -----------> | rtcmfilter | ------> | NTRIP server | ----------------->
-//               ------------   stdout  --------------      Internet
-//
-// The base station sends RTCM corrections over the Internet using the
-// NTRIP protocol to an NTRIP caster and on to moving GNSS rovers:
-//
-//                                               ---------> rover
-//  ------------                     --------   /
-// | NTRIP base |  RTCM over NTRIP  | NTRIP  | /
-// | station    | ----------------> | caster | \
-//  ------------                     --------   \
-//                                               ----------> rover
-//
-// It's convenient to configure the GNSS device to send out messages
-// in all sorts of formats, but sending them on to a caster is a waste
-// of Internet bandwidth.  Also some casters and rovers only expect to
-// receive RTCM messages.
+// It can be convenient to configure the GNSS device to send out
+// messages in all sorts of formats, but sending them all on to an
+// NTRIP caster is a waste of Internet bandwidth.  Also some casters
+// and rovers only expect to receive RTCM messages.  Sending
+// anything else can cause problems.
 //
 // RTCM is a binary format.  Tools exist to convert it to another
-// format called RINEX which is commonly used for Precise Point
+// format called RINEX which can be used for Precise Point
 // Positioning (ppp).  The program can write a verbatim copy of the
 // valid messages to a daily log file which can be converted into
 // RINEX format and analysed.  It can also produce a separate log
 // file containing the messages in a readable form, which is useful
-// for fault finding when setting up equipment.  (That latter format
+// for fault finding when setting up equipment.  (The readable format
 // is very verbose, so you shouldn't leave the filter running in
 // that mode for too long).  Both log files have datestamped names
 // and they roll over at the end of each day.
@@ -56,19 +29,23 @@
 // The behaviour is controlled by a JSON file "ntrip.json" in the
 // current directory.  For example:
 //
+// {
+//		"input": ["/dev/ttyACM0", "/dev/ttyACM1"],
+//		"stop_on_eof": false,
+//		"record_messages": true,
+//		"message_log_directory": "someDirectory",
+//		"display_messages": true,
+//		"timeout": 1,
+//		"sleeptime": 2
+//	}
 //
-// The filter can be run on a Linux machine Raspberry Pi single-board computer
-// connected to a GNSS device
-// in a configuration like this:
-//
-
 // If the two boards lose contact briefly (for example because the
 // GNSS device has lost power) the file connection may break and need
 // to be re-opened.  In the case of a USB connection, that process is a
 // little complicated.  A Windows machine uses device names com1, com2
 // etc to represent the connection.  An Ubuntu Linux machine uses device
 // names /dev/ttyACM0, /dev/ttyACM1 etc for serial USB connections.
-// HOWEVER neither system uses one device name per  physical port.  The
+// HOWEVER neither system uses one device name per physical port.  The
 // device is only created when the plug is inserted.  If the connection
 // is lost, the device representing it disappears.  If the connection is
 // restored later, the system may use one of the other device names.
@@ -80,19 +57,32 @@
 // directory when it starts up.  This contains a list of devices
 // to try on startup and on reconnection.
 //
+// The StopOnEOF flag in the JSON controls the handling of an EOF
+// condition.  If the input is a serial connection with a live GPS
+// device on the other end, an EOF wll be received whenever all the
+// available bytes have been read.  A little while later the device
+// will write some more bytes and the next read by the filter will
+// succeed.  StopOnEOF should be set false and the filter will run
+// until it's forcibly shut down.  On the other hand, if the input
+// is a text file on the disk, the filter should stop when it
+// encounters the first EOF.
+//
 // A GNSS base station should be configured to send a batch of
 // messages every second,so there should only be a short delay between
 // each batch.  If there is, then the host machine running the filter
 // has probably lost contact with the GNSS device.  The filter should
-// close the input channel, reopen it and continue.
+// close the input channel, reopen it and continue.  The timeout and
+// retry values in the JSON control this behavior.  The device name
+// may change each time this happens, so the filter scans through the
+// list of input devices in the JSON.
 //
 // The filter needs a start time to make sense of the data (see
-// below for why).  The first argument is optional and specifies
-// the start time, if supplied.  The format is "yyyy-mm-dd",
-// meaning midnight UTC at the start of that day, or RFC 3339
-// format, for example "2020-11-13T09:10:11Z", which is a date and
-// time in UTC, or "2020-11-13T09:10:11+01:00" which is a date and
-// time in a timezone one hour ahead of UTC.
+// this repository's README for why).  The first argument is optional
+// and specifies the start time, if supplied.  The format is
+// "yyyy-mm-dd", meaning midnight UTC at the start of that day, or
+// RFC 3339 format, for example "2020-11-13T09:10:11Z", which is a
+// date and time in UTC, or "2020-11-13T09:10:11+01:00" which is a
+// date and time in a timezone one hour ahead of UTC.
 //
 // (Formats using three letter timezone abbreviations such as
 // "CET" are NOT supported.  This is because there is no common
@@ -104,120 +94,17 @@
 // device rather than processing a file that was produced some
 // time before.
 //
-// The filter needs a start time because MSM7 messages contain a
-// timestamp, in most cases milliseconds from the constellation's
-// epoch, which rolls over every week.  (The exception is GLONASS
-// which uses a two-part timestamp containing a day of the week and
-// a millisecond offset from the start of day.)  The filter displays
-// all these timestamps as times in UTC, so given a stream of
-// observations advancing in time, it needs to know which week the
-// first ones are in.
-
-// The timestamps for different constellatons roll over at different
-// times.  For example, the GPS timestamp rolls over to zero a few
-// seconds after midnight UTC at the start of Sunday.  The GLONASS
-// timestamp rolls over to day zero, millisecond zero at midnight at
-// the start of Sunday in the Moscow timezone, which is 21:00 on
-// Saturday in UTC.  So, if the filter is processing a stream of
-// messages which started at 20:45 on a Saturday in UTC, the GLONASS
-// timestamp value will be quite large.  At 21:00 the epoch rolls
-// over and the timestamps start again at (zero, zero).  Meanwhile
-// the GPS timestamps will also be large and they will roll over to
-// zero a few seconds after the next midnight UTC.
-//
-// The filter can keep track of this as long as (a) it knows the time
-// of the first observation, and (b) there are no large gaps in the
-// observations.  If there was a gap, how long was it and has it taken
-// us into a different epoch?
-//
-// All of the timestamps roll over at the weekend, so if the filter is
-// started on a weekday, it just needs a start time in same week as the
-// first observation.  If it's started close to any rollover, it needs a
-// more accurate start time.
-//
-// If the filter is run without supplying a start time, it assumes
-// that the data is coming from a live source and uses the system time
-// when it starts up.  So the system clock needs to be correct.  For
-// example, if you start the filter near midnight at the start of Sunday
-// UTC and your system clock is out by a few seconds, the filter might
-// assume the wrong GPS week.
-//
-// An rtcm message (strictly a message frame) is a stream of
-// bits starting with 0xd3.  That's the start of a 24-bit (3 byte)
-// header.  Bit 0 is the top bit of the first byte, so the 0xd3 is
-// bits 0 to 7 of the bitstream.  Bits 8-13 are always zero, bits
-// 14-23 are a 10-bit unsigned value giving the length in bytes
-// of the embedded message.  That message comes next, followed by
-// a 24-bit Cyclic Redundancy Check (CRC) value:
-//
-//     < message frame  >
-//     header message CRC
-//
-// The CRC is created using an algorithm published by Qalcomm.  The
-// integrity of the message can be checked by taking the frame up to
-// but not including the CRC, calculating its CRC value and comparing
-// that with the given value.
-//
 // The incoming stream of data can be a mixture of RTCM and other
 // messages.  It's assumed to come from a GNSS device which is
-// issuing messages continuously on some noisy channel. (In my
-// case it's a Ublox ZED-FP9 sending data on a serial USB or IRC
-// connection.  These are both prone to dropping or scrambling
-// the occasional character.)  When the filter starts up, it picks
-// up the messages at some arbitrary point and scans for a 0xd3
-// byte.  This may or may not be the start of a valid message.
-// It reads the next two bytes, assumes that it's the header,
-// gets the length and reads the rest of the message.  It checks
-// the CRC.  That check may fail if the 0xd3 byte was not the
-// start of a message or if the message was scrambled in transit.
-//
-// The embedded rtcm message is binary so it may contain 0xd3
-// values by simple coincidence.  If you read this byte, you
-// can't be certain that it's the start of a message frame.  You
-// need to read the next two bytes to get what you assume is the
-// header, check that bits 8-13 are zero, get the message length,
-// read the whole message frame and check the CRC.
+// issuing messages continuously on some noisy channel. (For
+// example a Ublox ZED-FP9 sending data on a serial USB or IRC
+// connection.  These media are both prone to dropping or scrambling
+// the occasional character.)  Dropped characters will cause the
+// message to fail its CRC check and be deemed invalid.
 //
 // If the message is valid, it's written to standard output and
 // the filter scans for the next one.  Intervening text and message
 // frames that fail the CRC check are discarded.
-//
-// The first 12 bits of the embedded message (bits 24-35 of the
-// message frame) contain the message number (message type) a
-// value in the range 0 - 4095.  Each message type starts with the
-// type number in that position but apart from that, they all have
-// different formats.  For the purposes of finding an accurate
-// position, only a few type matter: 1005, which gives the position
-// of the base station, and a Multiple Signal Message type 7 (MSM7)
-// for each satellite constellation:
-//
-// Type 1005: base station position
-// type 1077: high-resolution GPS signals
-// type 1087: high-resolution Glonass signals
-// type 1097: high resolution Galileo signals
-// tupe 1107: high resolution SBAS signals
-// type 1117: high resolution QZSS signals
-// type 1127: high resolution Beidou signals
-// type 1137: high resolution NavIC/IRNSS signals
-//
-
-//
-
-//
-// My device scans the satellites once every second for signals
-// and issues one MSM7 message for each constellation.  It also
-// sends a type 1005 (base position) message every five seconds.
-// Here in the UK it can see four constellations, GPS, Glonass,
-// Galileo and Beidou.  An MSM7 message lists the signals sent
-// by each satellite that's in view.  My receiver is a dual-band
-// device, so I get up to 2 signals from each satellite.  The result
-// is a batch of four MSM7 messages every second, each 500 to 1,000
-// bytes long, plus a type 1005 message very five seconds.
-//
-// I can only test the handling of messages that my device can see,
-// so I've only tested types 1005, 1077, 1087, 1097 and 1227.
-// In particular, I can't test the handling of timestamps in other
-// MSM7 messages.
 //
 package main
 
