@@ -34,12 +34,12 @@ The signals from the positioning satellites suffer distortion, particularly as t
 The receivers on the ground use these signals to figure out their position,
 but the distortions produce inaccuracies.
 
-Each RTCM base station is in a known location.  
+Each RTCM base station is in a known location.
 The GNSS satellites currently broadcast signals on two frequency bands,
 one for unencrypted public data and another for encrypted data meant for the owner's police force, military etc.
 A dual-band base station scans for signals from all the satellites it can see for signals.
 A base station that you and I can buy
-can't decrypt the encrypted signals but analysing the effect of the ionosphere on the carrier wave allows a rover to better estimate the the distortion.
+can't decrypt the encrypted signals but analysing the effect of the ionosphere on the carrier wave allows a rover to better estimate the distortion.
 
 The base passes its observations to any rovers that have subscribed to receive them, along with its known real position.
 A rover close to the base sees the same satellites with the same distortions and it use the information from the base to correct the calculation of its own position.
@@ -58,15 +58,15 @@ which is close to what the rover can achieve without help.
 Unfortunately, we don't live in ideal conditions.
 Here in the real world we get less accuracy,
 but typically at least 100cm.
-
-That'ss still better than traditional surveying techniques using theodolites - 
+That's still better than traditional surveying techniques using theodolites - 
 they achieve accuracy of around 1m at best.
 
 Accurate GNSS systems are also easier and faster to use than theodolites.
 The UK's mapping authority the Ordnance Survey has been using them
 for many years.
 In the early days they were expensive but now
-a base and rover communicating via RTCM can cost as little as $2,000.
+a base and rover communicating via RTCM can cost as little as $2,000
+and one base can support many rovers.
 
 For RTCM correction to work properly, the operator has to tell the base station its position.  If that's wrong by, say,
 1.5m to the North,
@@ -123,6 +123,8 @@ This is my setup:
 My base station is composed of an antenna on the roof of my garden shed
 and a GNSS receiver and a Raspberry Pi in the shed.
 The Raspberry Pi connects to my Internet router via WiFi.
+The RTCM filter cleans up the data received from the GNSS receiver
+and passes it to the NTRIP server, which sends it on to my caster.
 
 My NTRIP caster is the free open source version from IGS.
 It runs on a Digital Ocean droplet which costs $5 per month to rent.
@@ -138,7 +140,7 @@ NTRIP protocol to the NTRIP caster which sends them on to moving GNSS rovers:
  ------------                       --------     /
 | NTRIP base |   RTCM over NTRIP   | NTRIP  | __/
 | station    | ------------------> | caster |   \
- ------------                       --------     \   NTRIP
+ ------------                       --------     \  NTRIP
                                                   ---------> rover
 ```
 
@@ -277,7 +279,7 @@ Similarly for the
 other constellations: 1084 and 1087 for
 GLONASS satellites, 1084 and 1087 for Galileo and 1124 and 1127 for Bediou.
 
-MSM4 resolution is sufficient for 2cm accuracy.  
+MSM4 resolution is sufficient for 2cm accuracy.
 My guess is that MSM7 is ready for satellites in the future that will deliver more accuracy.
 
 
@@ -340,10 +342,10 @@ It may have observed signal type 1 from satellite,
 signal type 13 from another,
 signals of both types from a third, and so on.
 
-The cell mask shows what signals were observed
+The cell mask shows what signals were observed.
 It's variable length, nSignals X nSatellites bits long, where nSignals
 is the number of signal types observed (2 in the above example) and nSatellites is the number of
-satellites (7 in the example).  The cell mask is an array of bits with nsatellite
+satellites (7 in the example).  The cell mask is an array of bits with nSatellite
 elements of nSignals each - in this example 7X2 = 14 bits long. 
 For example,
 if the satellite mask and signal mask are as above and the cell mask is
@@ -354,8 +356,8 @@ if the satellite mask and signal mask are as above and the cell mask is
 
 the first pair of bits 01 means that the receiver did not pick up 
 signal 1 from satellite 2 but it did pick up signal 13.
-The second pair 11 means that
-both signals were observed from satellite 4, and so on.
+The second pair 11 means that it observed
+both signals from satellite 4, and so on.
 
 The cell mask is the last item in the header.
 
@@ -392,10 +394,10 @@ It's an array of s X 80 bits where
 s is the total number of signals satellite by satellite.  For example, if
 signal 1 was observed from satellite 1, signals 1 and 3 from satellite 3 and
 signal 3 from satellite 5, 
-that's four signals altogether.
-There will be four signal cells.
+that's four signals altogether so
+there will be four signal cells.
 
-To make sense of these two lists,
+To make sense of the satellite cell list and signal cell list,
 the software needs to look at the masks while it's reading them.
 
 The signal list is followed by any padding necessary to fill the last byte.
@@ -406,14 +408,14 @@ CRC value.
 
 The next message frame starts immediately after,
 with no intervening newline byte.
-That could be a few lines of NMEA messages,
+That could be a few NMEA messages,
 each separated from the next by a newline,
 or it could be another RTCM messages,
 signalled by the special 0xd3 byte.
 
 Whe observing GLONASS satellites,
 the rover also needs GLONASS code phase bias messages
-to supplement the MSMs.
+to supplement the GLONASS MSMs.
 They contain a single value,
 the bias.
 My equipment consistently produces bias values of zero.
@@ -426,7 +428,7 @@ defined by UBlox.
 My guess is that this is useful when I connect my UBlox control software to the device to configure it.
 
 As I said earlier, there are many other RTCM message types,
-but they simply repeat the information in the MSMs
+but the ones relevant to finding your location simply repeat the information in the MSMs,
 so they are now redundant.
 The RTKLIB software has functionality to decode them.
 My equipment uses MSMs so I don't bother with the other types.
