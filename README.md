@@ -21,6 +21,19 @@ Receivers are available that can use any and all of them.
 
 Strictly these constellations are called Global Navigation Satellite Systems (GNSS) rather than GPS, which is just the first and best known. 
 
+A GNSS device's position can be expressed in all sorts of ways.
+This paper from the UK's mapping authority the Ordnance Survey
+gives an excellent introduction https://www.ordnancesurvey.co.uk/documents/resources/guide-coordinate-systems-great-britain.pdf
+
+Since the satellites are orbiting around the centre of the Earth,
+ECEF format is a fairly natural way to represent a position.
+That uses cartesian coordinates measured in metres from the centre of the Earth.  As shown in the Ordnance Survey paper,
+the X axis runs from the North Pole to the South Pole, the Y axis runs from the point where zero latitude meets the Equator
+to the centre.  The Z axis is perpendicular to the other two.
+
+The Earth spins on its axis, which stretches it slightly at the Equator.
+Geographers have defined a perfect elipsoid that's close to its real shape.  A position in ECEF format can be converted to Longitude, latitude and the height above or below this elipsoid.
+
 A GNSS device on the ground receives signals from the satellites and uses trigonometry to find its position.  It needs signals from 4 satellites to do that.  A multi-constellation receiver can use signals from all of the constellation.  In good conditions a receiver can see upwards of twenty satellites at any time.  
 
 Given signals from four satellites a single receiver can find its position to within about 3 metres.
@@ -29,10 +42,23 @@ but other purposes such as land surveying
 require greater accuracy.  Seeing more satellites doesn't produce more accuracy,
 but it does allow a faster fix.
 
+
+
 More accuracy is possible using two receivers within a few kilometers of each other.
 The signals from the positioning satellites suffer distortion, particularly as they pass through the ionosphere on their way to the Earth.
 The receivers on the ground use these signals to figure out their position,
 but the distortions produce inaccuracies.
+
+About twenty years ago, Geoffrey Blewitt of Newcastle University
+published his paper "Basics of the GPS Technique: Observation Equations".
+He's now Professor at the Nevada Bureau of Mines and geology and you can download his paper from there:
+
+https://nbmg.unr.edu/staff/pdfs/blewitt%20basics%20of%20gps.pdf
+
+or just search for title on Google.
+
+Some readers might find the maths in the paper a bit advanced for some people,
+so here is a simple explanation:
 
 Each RTCM base station is in a known location.
 The GNSS satellites currently broadcast signals on two frequency bands,
@@ -64,7 +90,7 @@ they achieve accuracy of around 1m at best.
 Accurate GNSS systems are also easier and faster to use than theodolites.
 The UK's mapping authority the Ordnance Survey has been using them
 for many years.
-In the early days they were expensive but now
+In the early days such equipment was expensive but now
 a base and rover communicating via RTCM can cost as little as $2,000
 and one base can support many rovers.
 
@@ -176,14 +202,73 @@ that my device produced, used the tools to convert them into RINEX format and ex
 the result. 
 These data form some of my unit and integration tests.
 
-The rtcm package in this repo contains the logic to decode and display RTCM3
-messages produced by GNSS devices such as the U-Blox ZED-F9P.
-I've used this to create a few ready-made tools such as the RTCM filter.  
+There are many hundreds of RTCM3 message types,
+but they are not all required to find an accurate position,
+and some that can be used for that are redundant,
+replaced by Multiple Signal Messages (MSMs),
+which carry the observations of signals from satellites.
+There is an MSM for each constellation, so I'm interested in:
 
-The RTKLIB source code does a very good job of decoding RTCM messages,
-but comments are scant and the code is opaque in places.
-Developers may find my Go source code easier
-to understand.
+* 1074 type 4 (low resolution) observations of signals from GPS satellites
+* 1077 type 7 (high resolution) observations of signals from GPS satellites
+* 1084 type 4 for GLONASS
+* 1087 type 7 for GLONASS
+* 1094 type 4 for Galileo
+* 1097 type 7 for Galileo
+* 1124 type 4 for Beidou
+* 1127 type 7 for Beidou
+
+A base station should be configured to send either MSM4 or MSM7 messages.
+Sending both just wastes bandwidth.
+
+MSM type 7 messages
+include the same fields as their MSM4 equivalents
+but to higher resolution,
+and they have some extra fields,
+so they take up a little more network bandwidth.
+Both types are sufficient for 2cm accuracy
+and many operators use MSM4 instead of MSM7.
+I don't know if MSM7 messages have any operational advantage over MSM4
+for 2cm accurate working.
+
+UBlox advises that if a rover based on their technology uses GLONASS MSMs (type 4 or 7)
+the base station should also send
+messages of type 1230
+GLONASS code-phase bias values.
+Unfortunately
+the RTKLIB software doesn't have functionality to decode one of those.
+
+Apart from MSM material, a rover also needs type 1005 messages,
+which give the position of the base station.
+
+UBlox also advises that base stations using their techology
+should also be configured to send type 4072 messages.
+These are in a proprietary unpublished format defined by UBlox.
+My guess is that they are useful to the configuration software that UBlox supplies.
+
+So a working base station might be configured to send out messages of type 1005, 1074, 1084, 1094, 1124, 1230 and 4072.  Alternatively it could use high resolution MSMs, so 1005, 1077, 1087, 1097, 1127, 1230 and 4072.
+
+Ideally the base should send most of those messages once per second.
+Type 1005 can be sent out less often.
+For a particular base those messages will always contain the same values
+so a rover only needs to receive one of them
+at the start of a session to work properly.
+The advice is to send one every ten seconds,
+so when a rover subscribes to an endpoint on a caster
+it will receive a type 1005 within a few seconds.
+It takes a while for it to download the information it needs from the satellites,
+so a short wait for a base position message is OK.
+
+The rtcm package in this repo contains the logic to decode and display
+those message types,
+except for 1230 and 4072, the formats of which are opaque to me. 
+
+The RTKLIB source code has functionality to decode most RTCM messages,
+so if you need to understand other message types, go there.
+However, that code can be difficult to follow and comments are scant.
+
+RTCM Format
+=======
 
 An RTCM3 message is binary and variable length.  Each message frame
 is composed of a three-byte header, an embedded message and 3 bytes of
@@ -191,7 +276,6 @@ Cyclic Redundancy Check (CRC) data.  The header starts with 0xd3 and
 includes the length of the embedded message.  Each message starts with
 a 12-bit message number which defines the type.  Apart from that
 message number, each type of message is in a different format.
-Fortunately, I only have to worry about a few types.
 
 This is a hex dump of a complete RTCM3 message frame and the
 start of another:
@@ -213,16 +297,19 @@ d3 00 6d 46 40 00 33 f6  10 22 00 00 02 40 08 16
 
 The message starts at byte zero.  That byte has the value d3, which
 announces the start of the message frame.  The frame is composed of a
-3-byte header, and embedded message and 3 bytes of Cyclic Rdundancy
+3-byte header, an embedded message and 3 bytes of Cyclic Redundancy
 Check (CRC) data.
 
-Byte 0 of the frame is always d3.  The top six bits of byte 1 are
+Byte 0 of an RTCM frame is always d3.  The top six bits of byte 1 are
 always zero.  The lower two bits of byte 1 and the bits of byte 2 form the 10-bit
 message length, in this case hex 0aa, decimal 176.  So the embedded
 message is 176 bytes long.  With the header and CRC
 the whole message frame is 182
-bytes long.  As shown above, the embedded message may end with some
-zero padding bits to complete the last byte and possibly a few zero padding bytes.
+bytes long.  
+
+The bit string in the embedded message may end with some
+zero padding bits to complete the last byte and that can be followed
+by a few zero padding bytes, as in the first message in the example.
 
 The last three bytes of the frame (in this case 4d, f5 and 5a) are the
 CRC value.  To check the CRC, take the header and the embedded message,
@@ -238,7 +325,9 @@ the example hex 449, decimal 1097, which is a type 7 Multiple Signal Message
 (MSM7) containing high resolution observations of signals from Galileo
 satellites.
 
-The messages are binary and can contain a d3 byte.  Note the one on the
+A d3 byte marks the start of each message but
+the data within can also contain one.
+Note the d3 value on the
 fifth line of the hex dump above.  This is not the start of another
 message.  One clue is that it's not followed by six zero bits.  To extract
 a message frame from a stream of data and decode it, you need to read the
@@ -248,86 +337,240 @@ particularly when you start to receive a stream of data from a device.  You
 may come into the data stream part-way through and blunder into a d3 byte.
 You can't assume that it's the start of a message.
 
-The CRC data is there to check that the message has not been corrupted in
+The CRC data is also used to check that the message has not been corrupted in
 transit.  If the CRC check fails, the mesage must be discarded.
 
 RTCM3 message frames in the NTRIP data stream are contiguous with no separators or
 newlines.
 The last line of the example contains the start of the next
-message.  Other data in other formats (such as NMEA) may be interspersed between frames.
-My rtcm software discards anything that's not an RTCM3 message frame with a
-correct CRC value.
-
-There are many hundreds of RTCM3 message types, some of which are just
-different ways of representing the same information.  To get an accurate fix
-on its position, a rover only needs the position of the base station
-and a recent set of the base's observations of satellite signals, which is to
-say a type 1005 message and a set of MSM7 or MSM4 messages, one for each constellation
-of satellites (GPS, GLONASS or whatever).
-
-Message type 1005 gives the position of the base station (or more strictly,
-of a point in space a few centimetres above its antenna).
-
-Message types 1074, 1084 and so on are MSM type 4 messages.
-Message types 1077, 1087 and so on are the equivalent MSM type 7 messages.
-They contain the same data as their MSM4 equivalents
-but to higher resolution.
-Each contains observations by the base station of signals from
-satellites in one constellation.  Type 1074 and type 1077 contain
-signal data from GPS satellites.
-Similarly for the
-other constellations: 1084 and 1087 for
-GLONASS satellites, 1084 and 1087 for Galileo and 1124 and 1127 for Bediou.
-
-MSM4 resolution is sufficient for 2cm accuracy.
-My guess is that MSM7 is ready for satellites in the future that will deliver more accuracy.
-
+message.  Data in other formats (such as NMEA) may be interspersed between frames.
 
 Each
-satellite in a constellation is numbered.  An MSM allows 64 satellites
-numbered 1-64.  At any point on the Earth's surface only some satellites will
+satellite in a constellation is numbered.
+The standard allows 64 satellites
+numbered 1-64 in each constellation,
+sending up to 32 types of signal
+on different frequencies.
+At any point on the Earth only some satellites will
 be visible.  Signals from some of those may be too weak to register, so the
-message will contain readings of just some signals from just some satellites.
+resulting
+message may contain readings of just some signals from just some satellites.
 My base stations are dual band
-and can see one or two signals from each satellite.  They typically see signals from 6-8 satellites
-from each of the four constellations in each scan, and produce four
-MSMs every second containing those results. 
+and can receive up to two signals from each satellite.  They typically see signals from 6-8 satellites
+from each of the four constellations in each scan. 
 
-An MSM message starts with a header, represented in my RTCM software by an MSMHeader
-structure.  Following the header is a set of cells listing the satellites
-for which signals were observed.  Those data is represented by a
-[]NSM4SatelliteCell object (a list of satellite cells)
-or for an MSM7 message, a []MSM7SatelliteCell.  
-The message ends with a set of signal readings,
-at least one per satellite cell and currently no more than two.
-Those
-are represented by a [][]MSM4SignalCell or a [][]MSM7SignalCell
-(a list of lists of signal cells, one outer list per
-satellite).
-If signals from seven satellites were observed, there will be seven sets
-of signal cells with one or two entries in each set.
+By careful reading of the RTKLIB software,
+it's possible to reverse-engineer the format of the messages.
+(I include copies of the relevant C code in this repository as a handy reference.)
+More clues can be found in the source code of the IGS reference software
+such as the BNC tool.
 
-The header includes a satellite mask, a signal mask and a cell mask.  These
-bit masks show how to relate the cells that come after the header to satellite
-and signal numbers.  For example, for each of the satellites observed a bit is
-set in the 64-bit satellite mask, the first bit, bit 63, for satellite 1, bit 0 for satellite 64.
+Type 1005 - Stationary RTK Reference Station ARP
+----------------
+
+See decode_type1005() in rtcm3.c at line 375.
+
+That function defines an object of type sta_t, defined in rtklib.h at line 833:
+
+```
+typedef struct {        /* station parameter type */
+    char name   [MAXANT]; /* marker name */
+    char marker [MAXANT]; /* marker number */
+    char antdes [MAXANT]; /* antenna descriptor */
+    char antsno [MAXANT]; /* antenna serial number */
+    char rectype[MAXANT]; /* receiver type descriptor */
+    char recver [MAXANT]; /* receiver firmware version */
+    char recsno [MAXANT]; /* receiver serial number */
+    int antsetup;       /* antenna setup id */
+    int itrf;           /* ITRF realization year */
+    int deltype;        /* antenna delta type (0:enu,1:xyz) */
+    double pos[3];      /* station position (ecef) (m) */
+    double del[3];      /* antenna position delta (e/n/u or x/y/z) (m) */
+    double hgt;         /* antenna height (m) */
+} sta_t;
+```
+
+So amongst other things, the message contains the antenna position expressed in ECEF format.
+
+Reading the function, the format of the message is:
+
+```
+message type - 12 bit unsigned integer
+Station ID - 12 bit unsigned integer
+ITRF realisation year- 6 bit unsigned integer
+? - 4 bits
+ECEF X position - 38 bit signed integer to be converted to floating point
+? - 2 bits
+ECEF Y position - 38 bit signed integer to be converted to floating point
+? - 2 bits
+ECEF Z position - 38 bit signed integer to be converted to floating point
+```
+
+(The RTKLIB software ignores the fields marked by "?".
+If you need to know what's in them,
+you will have to buy a copy of the standard.)
+
+The 38 bit values are the distance from the centre of the Earth 
+along the axis (positive or negative) in tenth millimeters.
+to convert to meters, divide by 0.0001.
+
+That granularity is much smaller than the accuracy
+that the current equipment provides - 2cm.
+It's obviously intended to be always more than is needed.
+
+
+
+MSM format
+----------
+
+Multiple Signal Messages (MSMs)
+contain the data from the signals received (observed) from the satellites.
+Each message gives the signals observed from a particular constellation.
+My equipment is configured to send four every second,
+on for GPS, one for Galilaeo, etc. 
+
+Distance information (range) in the message is giving as
+the transit time from the satellite to the base station in milliseconds.
+To convert this into a distance in metres,
+multiply by the speed of light per millisecond.
+
+Ranges and other values may be represented by an approximate value
+in one part of the message and delta value in another part,
+both scaled integers.
+The delta is a signed integer.
+Adjust the scales and add the delta to the approximate value to correct it.
+
+An MSM message starts with a header which  
+includes three masks, the satellite mask, the signal mask and
+the cell mask.
+These indicate indicate how many satellite and signal cells there are
+in the message and show
+which satellites and signals numbers they relate to.
+
+The cell mask is variable length,
+so the header is variable length.
+
+All MSM message types use a common header format.
+In the RTKLIB code, line of rtcm3.c defines a type msm_h_t
+with some useful comments on the right-hand side:
+
+```
+typedef struct {                    /* multi-signal-message header type */
+    unsigned char iod;              /* issue of data station */
+    unsigned char time_s;           /* cumulative session transmitting time */
+    unsigned char clk_str;          /* clock steering indicator */
+    unsigned char clk_ext;          /* external clock indicator */
+    unsigned char smooth;           /* divergence free smoothing indicator */
+    unsigned char tint_s;           /* smoothing interval */
+    unsigned char nsat,nsig;        /* number of satellites/signals */
+    unsigned char sats[64];         /* satellites */
+    unsigned char sigs[32];         /* signals */
+    unsigned char cellmask[64];     /* cell mask */
+} msm_h_t;
+```
+
+Line 1745 of rtcm3.c defines a function decode_msm_head which reads the bitstream and
+creates an msm_h_t object.
+
+The getbitu() function reads a given set of bits from the bit stream,
+interprets them as an unsigned integer of that size and returns the value.
+
+The getbits() function interprets the bit field as a signed two's complement integer.
+
+So we can see that the format of the bitstream is:
+
+```
+Message Type - 12 bit unsigned integer
+Station ID - 12 bit unsigned integer
+timestamp - 30 bit unsigned integer
+sync - 1 bit
+issue of data station - 3 bit unsigned integer
+cumulative session transmitting time - 7 bit unsigned integer
+clock steering indicator - 2 bit unsigned integer
+external clock indicator - 2 bit unsigned integer
+divergence free smoothing indicator - 1 bit
+smoothing interval - 3 bit unsigned integer
+satellite mask - 64 bit unsigned integer, one bit per satellite for which signals were observed
+signal mask - 32 bit unsigned integer, one bit for each signal type observed
+cell mask - nSatellitesXnSignals bits(variable length but <= 64)
+```
+
+In most constellations, the timestamp is milliseconds from the start of the week.
+
+The week for each constellation starts at different times.
+
+The GPS week starts at midnight at the start of Sunday
+but GPS time is ahead of UTC by a few leap seconds, so in
+UTC terms the GPS week starts on Saturday a few seconds before midnight.
+Since 2017/01/01, GPS time is ahead of UTC by 18 leap seconds
+so in UTC terms the timestamp rolls over on Saturday 18 seconds before midnight
+at the start of Sunday.
+An extra leap
+second may be added every four years.  The start of 2021 was a
+candidate for adding another leap second but it was not necessary.
+One may be added in 2025.
+
+Galileo time is currently (2022) the same as GPS time.
+
+The Beidou timestamp rolls over in UTC terms at 14 seconds after 
+midnight at the start of Sunday.
+
+For the GLONASS constellation, the timestamp is in two parts,
+the top 3 bits giving the day and the lower 27 bits giving
+milliseconds since the start of the day.  The day is 0: Sunday,
+1: Monday and so on.
+The Glonass day starts at midnight but in the Moscow timezone,
+which is three hours ahead of UTC,
+so day 6 rolls over to day 0 at 9pm on Saturday in UTC terms.
+
+Following the header comes the list of satellite cells
+giving data about the satellites that sent the observed signals..  
+The message ends with a set of signal cells
+giving data about the observed signals.
+If a constellation sends two types of signal
+and signals were observed from 7 satellites,
+there will be seven sets
+of satellite cells in the message,
+followed by up to 14 signal cells.
+However, if the base station only received one signal from two of the satellites,
+there will only be 12 signal cells.
+The three masks in the header
+show how to relate the data in the cells
+to satellites and signals.
+
+The signal mask is 64 bits long.
+The satellites in a constellation are numbered 1-64,
+so the standard supports 64 satellites in each constellation.
+For each of the satellites observed a bit is
+set in the mask, the first bit for satellite 1, the last bit for satellite 64.
+(Confusingly, viewed as a 64-bit integer,
+the first bit is the top bit, so bit 63 represents satellite 1
+and bit 0 represents satellite 64.)
 For example, if the satellite mask is
 
 ```
 0101100000000010000101000000010000000000000000000000000000
 ```
 
-seven bits are set in that mask.
-There will be seven satellite cells and they will contain
-data for satellites, 2, 4, 5 and so on.
+Bits 2, 4, 5 etc, seven bits in all are set in that mask
+so signals were observed from the seven satellites,
+with those numbers.
+There will be seven satellite cells in the message,
+each containing data about one satellite.
+The first will be for satellite 2,
+the second for satellite 4,
+and so on.
 
-The standard supports up to 32 types of signal numbered 1-32.  
-Each signal can be on a different
-frequency, although some signals share the same frequency. 
-Currently the satellites are dual-band and only send two signal types,
-one in each frequency band. 
+The signal mask is 32 bits,
+laid out in the same way,
+so the standard supports 32 types of signal
+numbered 1-32.
+Signals can share the same frequency.
 The RTCM standard defines the meaning of each signal
-type and the frequency that it is broadcast on.
+type and the frequency that it's broadcast on.
+Currently the satellites are dual-band and only send two signals,
+one in each frequency band. 
+
 
 If the 32-bit signal mask is
 
@@ -336,72 +579,161 @@ If the 32-bit signal mask is
 ```
 
 Bits 1 and 13 are set
-which means that the device observed 
-signal types 1 and 13 from the satellites that it can see.
-It may have observed signal type 1 from satellite,
+which means that the bas station observed 
+signal types 1 from at least one of the satellites that it can see,
+and signal 13 from at least one, not necessarily the same one.
+It may have observed signal type 1 from one satellite,
 signal type 13 from another,
 signals of both types from a third, and so on.
 
 The cell mask shows what signals were observed.
 It's variable length, nSignals X nSatellites bits long, where nSignals
 is the number of signal types observed (2 in the above example) and nSatellites is the number of
-satellites (7 in the example).  The cell mask is an array of bits with nSatellite
-elements of nSignals each - in this example 7X2 = 14 bits long. 
-For example,
-if the satellite mask and signal mask are as above and the cell mask is
+satellites (7 in the example).
+The cell mask is an array of bits with nSatellite
+elements of nSignals each,
+so with the satellite and signal masks as in the example it will be 14 bits long. 
+For example:
 
 ```
 01 11 11 10 10 10 10
 ```
 
-the first pair of bits 01 means that the receiver did not pick up 
+The first pair of bits 01 means that the receiver did not pick up 
 signal 1 from satellite 2 but it did pick up signal 13.
 The second pair 11 means that it observed
 both signals from satellite 4, and so on.
+Nine bits in the cll mask are set
+so the signal cell list in the message will contain nine cells.
 
-The cell mask is the last item in the header.
+The cell mask is the last field in the header.
+All the other fields are fixed length but the cell mask
+is variable length,
+so the header is variable length.
 
-The header is followed by the satellite cell list.  It's m X 36 bits long where m is
-the number of satellite from which signals were observed.  However,
-it's not simply an array of those data.
+The header is followed by a list of satellite cells,
+then a list of signal cells,
+both variable length.
+
+The cells in an MSM7 message are bigger than the ones in an MSM4
+and contain extra data.
+
+MSM4 Satellite and Signal Cells
+-----
+
+The cells contain the data about satellites and signals,
+but the order is not what a programmer might expect.
 The bit
 stream is divided into fields
-and we get all of the first fields for the satellites,
-followed by all of the second fields,
+starting with all of the values of the first field,
+followed by all of the values of the second field,
 and so on.
-Also, the range (the distance to the satellite)
-is expressed in milliseconds transit time
-(at the speed if light)
-and we get it them as an approximate value and a separate delta
-to be added or subtracted to correct the first value.
 
-So for m satellites the stream contains sets of m values:
+Some fields have a special value indicating that the value is invalid and should be ignored.
+In the raw binary number,
+the top bit of an invalid value is a one and the rest of the digits in the bit stream are 0.
+Onc the binary has been read and converted, the meaning will depend on the data type.
+If the top bit of a signed integer is set,
+the number is negative.
+For example, if the bits of the field represent a 22 bit two's complement signed integer,
+the invalid value is 100000000000000000, which is decimal -2097152.
 
-* m approximate range values in milliseconds
-* m extended data values
-* m range delta values
-* m approximate phase range rate values
+The fields used in MSMs that can contain invalid values are:
 
-Distances are given in milliseconds.
-(To turn them into distances in metres, multiply by the speed of light.)
+```
+ 8 bits unsigned: 10000000 0x80 255
+14 bits signed: -8192 
+15 bits signed: -16384
+20 bits signed: -524288
+22 bits signed: -2097152
+24 bits signed: -8388608
+```
 
-The signal list that follows includes deltas for the phase range rate values.
-That list is laid out in the same way,
-the value of the first field for the each satellite
-followed by the value for the second field for each satellite
-and so on.
-It's an array of s X 80 bits where
-s is the total number of signals satellite by satellite.  For example, if
-signal 1 was observed from satellite 1, signals 1 and 3 from satellite 3 and
-signal 3 from satellite 5, 
-that's four signals altogether so
-there will be four signal cells.
+In the message, the ranges (the distance from the satellite to the receiver)
+are given as transit time in milliseconds and in three parts.
+The satellite cells contains an approximate range as
+whole milliseconds and fractional milliseconds -
+The signal cells contain deltas.
 
-To make sense of the satellite cell list and signal cell list,
-the software needs to look at the masks while it's reading them.
+If signals were observed from n satellites,
+the satellite cell data are:
+
+* n whole milliseconds of approximate range - 8 bit unsigned integers (invalid if 0xff)
+* n fractional milliseconds of approximate range - 10 bit unsigned integers
+
+The fractional value is valid if the whole value is valid.
+
+if the total number of signal cells is m
+then the signal cell data are:
+
+* m range delta values - 15 bit signed integers (invalid if -16384)
+* m phase range values - 22 bit signed integer (invalid if -2097152)
+* m lock time values - 4 bit unsigned integer
+* m half-cycle ambiguity values - 1 bit boolean
+* m CNR values - 6 bit unsigned integer
+
+
+MSM7 Satellite and Signal Cells
+----
+
+After the header comes a list of satellite cells
+followed by a list of signal cells.
+
+The MSM7 cells contain all the fields of the MSM4 cells but some
+have more bits.
+There are also some extra fields in the MSM7 cells,
+including the phase range and the phase range rate.
+According to Blewitt's paper,
+the latter is the velocity at which the satellite is approaching
+the receiver (if positive) or moving away from it (if negative). 
+
+If there are nSatellite satellites,
+the satellite cell data are:
+
+* nSatellite whole milliseconds of approximate range - 8 bit unsigned integers (invalid if 255)
+* nSatellite extended information - 4 bit unsigned integers
+* nSatellite fractional milliseconds of approximate range - 10 bit unsigned integers
+* nSatellite phase range rate values - 14 bit signed integers (invalid if -8192)
+
+The fractional value and the deltas are  invalid if the value of the whole milliseconds field is invalid.
+
+The signal cells follow.
+if the total number of signal cells nSignals X nSatellites is T,
+then the signal cell data are:
+
+```
+* T range delta values - 20 bit signed integers (invalid if -524288)
+* T phase range values - 24 bit signed integers (invalid if -8388608)
+* T lock time values - 10 bit unsigned integers
+* T half-cycle ambiguity values - 1 bit booleans
+* T CNR values - 10 bit unsigned integers
+* T phase range rate delta values - 15 bit signed integers (invalid if -16384)
+```
+
+Note that the satellite cells contain the approximate range value
+and the signal cells contain the delta values. 
+That makes sense because the range values for all of the signals from the same satellite will only be a little bit different,
+the difference being due to a small amount of distortion as they come
+close to the Earth.
+That arrangement of data saves a bit of space in the message
+compared with having a complete range value in each signal,
+especially if future versions of the satellites send more of them.
 
 The signal list is followed by any padding necessary to fill the last byte.
-The GNSS receiver can then add a few zero bytes on the end if it wishes.
+In the example message shown above, the last non-zero byte of the first message is 0x78, in binary 01111000.
+
+The GNSS receiver can then add a few zero bytes on the end of the message if it wishes.
+The example message has some of those.
+
+MSM7 Message Format
+---------
+
+```
+nSatellite whole milliseconds of approximate range - 8 bit unsigned integers (invalid if 0xff)
+nSatellite extended satellite info - 4 bit unsigned integers
+nSatellite fractional milliseconds of approximate range - 10 bit unsigned integers
+nSatellite approximate range rate - 14 bit unsigned integers (invalid if 0x2000)
+```
 
 Finally comes the 3-byte
 CRC value.
@@ -413,55 +745,23 @@ each separated from the next by a newline,
 or it could be another RTCM messages,
 signalled by the special 0xd3 byte.
 
-Whe observing GLONASS satellites,
-the rover also needs GLONASS code phase bias messages
-to supplement the GLONASS MSMs.
-They contain a single value,
-the bias.
-My equipment consistently produces bias values of zero.
-(That pretty much summarises what I know about those messages.
-I have no clue what they are represent.)
-
-Finally, UBlox advises that my UBlox ZD-F9P base station receiver emits one extra message type.
-It's in an unpublished proprietary format
-defined by UBlox.
-My guess is that this is useful when I connect my UBlox control software to the device to configure it.
-
-As I said earlier, there are many other RTCM message types,
-but the ones relevant to finding your location simply repeat the information in the MSMs,
-so they are now redundant.
-The RTKLIB software has functionality to decode them.
-My equipment uses MSMs so I don't bother with the other types.
-
-I have a base station driven by a UBlox ZED-F9P device, which operates in a fairly
-typical way.  It scans for signals from satellites and sends messages at intervals
-of a multiple of one second.  The useful life of an MSM message is short, so you
-might configure the device to scan and send a batch of observations once per second.
-For type 1005 messages, which give the position of the device, the situation is
-different.  When a rover connects to a base station and starts to receive messages,
-it needs a type 1005 (base station position) message to make sense of the MSM (signal
-observation) messages.  The base station doesn't move, so the rover only needs one type 1005 message
-during the session,
-but it can't work properly until it receives it.
-To avoid using unnecessary bandwidth,
-a good compromise is to configure the device to send one
-type 1005 message every ten seconds.  That reduces the traffic a little while ensuring
-that when a rover connects to the data stream it will start to produce accurate position fixes
-reasonably quickly.
-
 
 Timestamps
 ========
 
 To analyse a set of RTCM messages,
 the handler needs to know when they were collected.
-That's because MSM7 messages contain a
-timestamp, in most cases milliseconds from the constellation's
-epoch, which rolls over every week.  (The exception is GLONASS
-which uses a two-part timestamp containing a day of the week and
-a millisecond offset from the start of day.)  The handler displays
+That's because MSM messages contain a
+timestamp.
+Except for GLONASS messages it's a single integer value,
+milliseconds from the constellation's
+epoch, which rolls over every week.
+GLONASS
+uses a two-part integer timestamp containing a day of the week and
+a millisecond offset from the start of day.
+The handler displays
 all these timestamps as times in UTC, so given a stream of
-observations advancing in time, it needs to know which week the
+observations advancing in time, it needs to know in which week the
 first one was taken.
 
 The handler takes a start date and time when it's created.

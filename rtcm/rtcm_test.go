@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"io"
 	"log"
-
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -16,14 +16,6 @@ import (
 // maxEpochTime is the value of a GPS and Beidou epoch time
 // just before it rolls over.
 const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
-
-// testDelta3 is the delta value used to test floating point
-// values for equality to three decimal places.
-const testDelta3 = 0.001
-
-// testDelta5 is the delta value used to test floating point
-// values for equality to five decimal places.
-const testDelta5 = 0.00001
 
 var london *time.Location
 var paris *time.Location
@@ -538,7 +530,7 @@ func TestReadMSM4(t *testing.T) {
 	}
 
 	// Get the message in display form.
-	display, ok := message.Readable(rtcm).(*MSMMessage)
+	display, ok := message.PrepareForDisplay(rtcm).(*MSMMessage)
 	if !ok {
 		t.Error("expected the readable message to be *MSMMessage\n")
 		return
@@ -550,83 +542,6 @@ func TestReadMSM4(t *testing.T) {
 
 	_ = display.Satellites[0].RangeWholeMillis
 
-}
-
-// TestDecode1230GlonassCodeBias checks that a message of type 1230
-// (Glonass code bias) with two bias values is decoded correctly.
-// The test value is taken from real data.  It has an L1 CA bias
-// value of zero and an L2 CA bias value of zero but no l1 P bias
-// value or L2 P bias value.  Experience shows that these messages
-// are common in my location.
-//
-func TestDecode1230GlonassCodeBias(t *testing.T) {
-	const wantType = 1230
-	r := bytes.NewReader(codeBias)
-	codeBiasReader := bufio.NewReader(r)
-	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
-	rtcmHandler := New(startTime, logger)
-	rtcmHandler.StopOnEOF = true
-
-	frame, err1 := rtcmHandler.ReadNextFrame(codeBiasReader)
-
-	if err1 != nil {
-		t.Fatal(err1.Error())
-	}
-
-	message, messageFetchError := rtcmHandler.GetMessage(frame)
-	if messageFetchError != nil {
-		t.Errorf("error getting message - %v", messageFetchError)
-		return
-	}
-
-	gotType := message.MessageType
-	if wantType != gotType {
-		t.Errorf("expected type %d, got %d", wantType, gotType)
-		return
-	}
-
-	rtcmHandler.Analyse(message)
-
-	// The message should be a Message1230.
-	m := message.Readable(rtcmHandler).(*Message1230)
-
-	// All code biases should be valid and 0.
-	if !m.L1_C_A_Bias_valid {
-		t.Error("L1_C_A_Bias should be valid")
-
-	}
-	if !m.L1_P_Bias_valid {
-		t.Error("L1_P_Bias should be valid")
-
-	}
-	if !m.L2_C_A_Bias_valid {
-		t.Error("L2_C_A_Bias should be valid")
-
-	}
-	if !m.L2_P_Bias_valid {
-		t.Error("L2_P_Bias should be valid")
-
-	}
-
-	if m.L1_C_A_Bias != 0 {
-		t.Errorf("want L1_C_A_Bias to be 0, got %d", m.L1_C_A_Bias)
-
-	}
-
-	if m.L1_P_Bias != 0 {
-		t.Errorf("want L1_P_Bias to be 0, got %d", m.L1_P_Bias)
-
-	}
-
-	if m.L2_C_A_Bias != 0 {
-		t.Errorf("want L2_C_A_Bias to be 0, got %d", m.L2_C_A_Bias)
-
-	}
-
-	if m.L2_P_Bias != 0 {
-		t.Errorf("want L2_P_Bias to be 0, got %d", m.L2_P_Bias)
-
-	}
 }
 
 func TestReadNextMessageFrame(t *testing.T) {
@@ -673,7 +588,7 @@ func TestRealData(t *testing.T) {
 		return
 	}
 
-	message, ok := m.Readable(rtcm).(*MSMMessage)
+	message, ok := m.PrepareForDisplay(rtcm).(*MSMMessage)
 
 	if !ok {
 		t.Errorf("expected message 0 to contain a type 1077 message but readable is nil")
@@ -711,7 +626,7 @@ func TestRealData(t *testing.T) {
 	}
 
 	numSignals1 := 0
-	for i, _ := range message.Signals {
+	for i := range message.Signals {
 		numSignals1 += len(message.Signals[i])
 	}
 
@@ -720,11 +635,9 @@ func TestRealData(t *testing.T) {
 		return
 	}
 
-	// A signal cell contains a Satellite which is an index into the Satellite array.
-	// The satellite has an ID.
-	if message.Satellites[message.Signals[0][0].Satellite].SatelliteID != 4 {
+	if message.Signals[0][0].Satellite.SatelliteID != 4 {
 		t.Errorf("expected satelliteID 4, got %d",
-			message.Satellites[message.Signals[0][0].Satellite].SatelliteID)
+			message.Signals[0][0].Satellite.SatelliteID)
 		return
 	}
 
@@ -737,84 +650,86 @@ func TestRealData(t *testing.T) {
 	// Checking the resulting range in metres against the value
 	// in the RINEX data produced from this message.
 
-	if !floatsEqualWithin3(24410527.355, message.Signals[0][0].RangeMetres) {
-		t.Errorf("expected range 24410527.355 metres, got %3.6f",
-			message.Signals[0][0].RangeMetres)
+	rangeMetres, rangeError := message.Signals[0][0].RangeInMetres()
+
+	if rangeError != nil {
+		t.Error(rangeError)
+	}
+
+	if !equalWithin(3, 24410527.355, rangeMetres) {
+		t.Errorf("expected range 24410527.355 metres, got %3.6f", rangeMetres)
 		return
 	}
 }
 
 func TestGetbitu(t *testing.T) {
-	i := Getbitu(testData, 8, 0)
+	i := GetBitsAsUint64(testData, 8, 0)
 	if i != 0 {
 		t.Errorf("expected 0, got 0x%x", i)
 	}
 
-	i = Getbitu(testData, 16, 4)
+	i = GetBitsAsUint64(testData, 16, 4)
 	if i != 8 {
 		t.Errorf("expected 8, got 0x%x", i)
 	}
 
-	i = Getbitu(testData, 16, 8)
+	i = GetBitsAsUint64(testData, 16, 8)
 	if i != 0x8a {
 		t.Errorf("expected 0x8a, got 0x%x", i)
 	}
 
-	i = Getbitu(testData, 16, 16)
+	i = GetBitsAsUint64(testData, 16, 16)
 	if i != 0x8a43 {
 		t.Errorf("expected 0x8a43, got 0x%x", i)
 	}
 
 	// try a full 64-byte number
-	i = Getbitu(testData, 12, 64)
+	i = GetBitsAsUint64(testData, 12, 64)
 	if i != 0x08a4320008a0e1a2 {
 		t.Errorf("expected 0x08a4320008a0e1a2, got 0x%x", i)
 	}
 }
 
 func TestGetbits(t *testing.T) {
-	var b1 = [...]byte{
+	var bitStream1 = []byte{
+		// 63 bits - 111 1111 0000 0000 1111 1111 0000 0000 1111 1111 0000 0000 1111 1111 0000 0000
 		0x7f, 0x00, 0xff, 0x00, 0xff, 0x00, 0xff, 0x00,
 	}
-	var testdata1 []byte = b1[:]
 
-	i := Getbits(testdata1, 0, 64)
+	i := GetbitsAsInt64(bitStream1, 0, 64)
 	if i != 0x7f00ff00ff00ff00 {
 		t.Errorf("expected 0x7f00ff00ff00ff00, got 0x%x", i)
 	}
 
-	var b2 = [...]byte{
+	var bitStream2 = []byte{
 		0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	}
-	var testdata2 []byte = b2[:]
 
-	i = Getbits(testdata2, 0, 64)
+	i = GetbitsAsInt64(bitStream2, 0, 64)
 	if i != 0x7fffffffffffffff {
 		t.Errorf("expected 0x7fffffffffffffff, got 0x%x", i)
 	}
 
-	var b3 = [...]byte{0xfb /* 1111 1011 */}
-	var testdata3 []byte = b3[:]
+	var bitStream3 = []byte{0xfb /* 1111 1011 */}
 
-	i = Getbits(testdata3, 0, 8)
+	i = GetbitsAsInt64(bitStream3, 0, 8)
 	if i != -5 {
 		t.Errorf("expected -5, got %d, 0x%x", i, i)
 	}
 
-	var b4 = [...]byte{0xff, 0xff}
-	var testdata4 []byte = b4[:]
+	var bitStream4 = []byte{0xff, 0xff}
 
-	i = Getbits(testdata4, 0, 16)
+	i = GetbitsAsInt64(bitStream4, 0, 16)
 	if i != -1 {
 		t.Errorf("expected -1, got %d, 0x%x", i, i)
 	}
 
-	var b5 = [...]byte{
+	var bitStream5 = []byte{
+		// 64 bits containing -1
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	}
-	var testdata5 []byte = b5[:]
 
-	i = Getbits(testdata5, 0, 64)
+	i = GetbitsAsInt64(bitStream5, 0, 64)
 	if i != -1 {
 		t.Errorf("expected -1, got %d, 0x%x", i, i)
 	}
@@ -846,7 +761,7 @@ func TestGetSatellites(t *testing.T) {
 	// mask with bit 63 (sat 1) 55 (sat 9) and 0 (sat 64)
 	var bitstream = []byte{'j', 'u', 'n', 'k', 0x80, 0x80, 0, 0, 0, 0, 0, 1}
 	var expectedSatellites = []uint{1, 9, 64}
-	satellites := GetSatellites(bitstream, 32)
+	satellites := getSatellites(bitstream, 32)
 
 	if !slicesEqual(expectedSatellites, satellites) {
 		t.Errorf("expected %v, got %v\n",
@@ -861,31 +776,12 @@ func TestGetSignals(t *testing.T) {
 	// mask with bit 31 (sat 1) 23 (sat 9) and 0 (sat 32).
 	var bitstream = []byte{'j', 'u', 'n', 'k', 0x80, 0x80, 0, 1}
 	var expectedSignals = []uint{1, 9, 32}
-	signals := GetSignals(bitstream, 32)
+	signals := getSignals(bitstream, 32)
 
 	if !slicesEqual(expectedSignals, signals) {
 		t.Errorf("expected %v, got %v\n",
 			expectedSignals, signals)
 		return
-	}
-}
-
-// TestScaled5ToFloat tests Scaled5ToFloat with positive and negative values.
-func TestScaled5ToFloat(t *testing.T) {
-	var scaled5 int64 = 9812345
-	fPos := Scaled5ToFloat(scaled5)
-	if !floatsEqualWithin5(981.2345, fPos) {
-		t.Errorf("expected 981.2345, got %f\n", fPos)
-	}
-
-	fZero := Scaled5ToFloat(0)
-	if !floatsEqualWithin5(0.0, fZero) {
-		t.Errorf("expected 0.0, got %f\n", fZero)
-	}
-
-	fNeg := Scaled5ToFloat(-7654321)
-	if !floatsEqualWithin5(-765.4321, fNeg) {
-		t.Errorf("expected -765.4321, got %f\n", fNeg)
 	}
 }
 
@@ -1359,147 +1255,81 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	}
 }
 
-// TestGetrangeMSM7 checks that getMSMRangeInMetres works
-// for an MSM7 message.
-func TestGetRangeMSM7(t *testing.T) {
-	const expectedRange float64 = (128.5 + P2_11) * oneLightMillisecond // 38523477.236036
-	var rangeMillisWhole uint = 0x80                                    // 1000 0000
-	var rangeMillisFractional uint = 0x200                              // 10 bits 1000 ...
-	rangeDelta := int(0x40000)                                          // 20 bits 0100 ...
+// TestGetRangeMSM7WitRealData checks that getMSMRangeInMetres works
+// for an MSM7 message using real data.
+// func TestGetRangeMSM7WitRealData(t *testing.T) {
+// 	// These data were taken from a UBlox base station.
+// 	// They were converted to RINEX format and the wanted value
+// 	// taken from that.
 
-	header := MSMHeader{MessageType: 1077}
+// 	const want = 24410527.355
 
-	satellite := MSMSatelliteCell{
-		RangeValid:            true,
-		RangeWholeMillis:      rangeMillisWhole,
-		RangeFractionalMillis: rangeMillisFractional}
+// 	satellite := MSMSatelliteCell{
+// 		RangeWholeMillis:      81,
+// 		RangeFractionalMillis: 435}
 
-	signal := MSMSignalCell{
-		RangeDeltaValid: true,
-		RangeDelta:      rangeDelta}
+// 	signal := MSMSignalCell{
+// 		RangeDelta: -26835}
 
-	rangeM1 := getMSMRangeInMetres(&header, &satellite, &signal)
+// 	scaledRange := GetScaledRange(satellite.RangeWholeMillis, satellite.RangeFractionalMillis,
+// 		signal.RangeDelta)
 
-	if !floatsEqualWithin3(expectedRange, rangeM1) {
-		t.Errorf("expected %f got %f", expectedRange, rangeM1)
-		return
+// 	got := getMSMRangeInMetres(scaledRange)
+
+// 	if !equalWithin(3, want, got) {
+// 		t.Errorf("expected %f got %f", want, got)
+// 		return
+// 	}
+// }
+
+
+
+// TestScaled5ToFloat tests scaled5ToFloat with positive and negative values.
+func TestScaled5ToFloat(t *testing.T) {
+	fZero := scaled5ToFloat(0)
+	const scaled5 = 9812345
+	fPos := scaled5ToFloat(scaled5)
+
+	if !equalWithin(5, 981.2345, fPos) {
+		t.Errorf("expected 981.2345, got %f\n", fPos)
 	}
 
-	// Test values from real data.
-
-	const expectedRange2 = 24410527.355
-
-	satellite2 := MSMSatelliteCell{
-		RangeValid:            true,
-		RangeWholeMillis:      81,
-		RangeFractionalMillis: 435}
-
-	signal2 := MSMSignalCell{
-		RangeDeltaValid: true,
-		RangeDelta:      -26835}
-
-	rangeM2 := getMSMRangeInMetres(&header, &satellite2, &signal2)
-
-	if !floatsEqualWithin3(expectedRange2, rangeM2) {
-		t.Errorf("expected %f got %f", expectedRange2, rangeM2)
-		return
-	}
-}
-
-func TestGetPhaseRangeGPS(t *testing.T) {
-	wavelength := CLight / freq2
-	range1 := (128.5 + P2_9)
-	range1M := range1 * oneLightMillisecond
-	expectedPhaseRange1 := range1M / wavelength
-	var signalID uint = 16
-	var rangeMillisWhole uint = 0x80       // 1000 0000
-	var rangeMillisFractional uint = 0x200 // 10 0000 0000
-	var phaseRangeDelta int = 0x400000     // 24 bits 01000 ...
-
-	header := MSMHeader{
-		MessageType:   1077,
-		Constellation: "GPS",
+	if !equalWithin(5, 0.0, fZero) {
+		t.Errorf("expected 0.0, got %f\n", fZero)
 	}
 
-	satellite1 := MSMSatelliteCell{
-		RangeValid:            true,
-		RangeWholeMillis:      rangeMillisWhole,
-		RangeFractionalMillis: rangeMillisFractional}
-
-	signal1 := MSMSignalCell{
-		PhaseRangeDeltaValid: true,
-		SignalID:             signalID,
-		PhaseRangeDelta:      phaseRangeDelta,
-	}
-
-	rangeCycles1, err := getMSMPhaseRange(&header, &satellite1, &signal1)
-
-	if err != nil {
-		t.Errorf(err.Error())
-		return
-	}
-
-	if !floatsEqualWithin3(expectedPhaseRange1, rangeCycles1) {
-		t.Errorf("expected %f got %f", expectedPhaseRange1, rangeCycles1)
-		return
-	}
-
-	// Test using real data.
-
-	const expectedPhaseRange2 = 128278179.264
-
-	satellite2 := MSMSatelliteCell{
-		RangeValid:            true,
-		RangeWholeMillis:      81,
-		RangeFractionalMillis: 435}
-
-	signal2 := MSMSignalCell{
-		PhaseRangeDeltaValid: true,
-		SignalID:             2,
-		PhaseRangeDelta:      -117960}
-
-	rangeCycles2, err := getMSMPhaseRange(&header, &satellite2, &signal2)
-
-	if err != nil {
-		t.Errorf(err.Error())
-		return
-	}
-
-	if !floatsEqualWithin3(expectedPhaseRange2, rangeCycles2) {
-		t.Errorf("expected %f got %f", expectedPhaseRange2, rangeCycles2)
-		return
+	fNeg := scaled5ToFloat(-7654321)
+	if !equalWithin(5, -765.4321, fNeg) {
+		t.Errorf("expected -765.4321, got %f\n", fNeg)
 	}
 }
 
-func TestGetPhaseRangeRate(t *testing.T) {
-	// wavelength := CLight / freq2
-	// range1 := (128.5 + P2_9)
-	// range1M := range1 * oneLightMillisecond
-	// expectedPhaseRangeRate1 := range1M / wavelength
-	// var signalID uint = 16
-	// var rangeMillisWhole uint = 0x80       // 1000 0000
-	// var rangeMillisFractional uint = 0x200 // 10 0000 0000
-	// var phaseRangeDelta int = 0x400000     // 24 bits 01000 ...
+// TestEqualWithin checks the equalWithin test helper function.
+func TestEqualWithin(t *testing.T) {
 
-	const expectedPhaseRangeRate2 = float64(709.992)
-
-	header2 := MSMHeader{Constellation: "GPS"}
-	satellite2 := MSMSatelliteCell{
-		PhaseRangeRate: -135}
-
-	signal2 := MSMSignalCell{
-		SignalID:            2,
-		PhaseRangeRateDelta: -1070}
-
-	rate2, err := getMSMPhaseRangeRate(&header2, &satellite2, &signal2)
-	if err != nil {
-		t.Errorf(err.Error())
-		return
+	var testData = []struct {
+		N    uint
+		F1   float64
+		F2   float64
+		Want bool
+	}{
+		{0, 100.1, 100.04, true},
+		{1, 0.01, 0.04, true},
+		{1, 0.01, 0.09, false}, // 0.09 will b rounded up to 0.1.
+		{1, 0.5, 0.6, false},
+		{1, 1, 2, false},
+		{2, 1.111, 1.113, true},
+		{2, 2.222, 2.232, false},
+		{3, 9.9991, 9.9992, true},
 	}
 
-	if floatsEqualWithin3(expectedPhaseRangeRate2, rate2) {
-		t.Errorf("expected %f got %f", expectedPhaseRangeRate2, rate2)
-		return
+	for _, td := range testData {
+		got := equalWithin(td.N, td.F1, td.F2)
+
+		if got != td.Want {
+			t.Errorf("%d %f %f: want %v, got %v",
+				td.N, td.F1, td.F2, td.Want, got)
+		}
 	}
 }
 
@@ -1520,22 +1350,17 @@ func slicesEqual(a, b []uint) bool {
 	return true
 }
 
-// floatsEqualWithin3 returns true if two float values are equal
-// within 3 decimal places.
-func floatsEqualWithin3(f1, f2 float64) bool {
-	if f1 > f2 {
-		return (f1 - f2) < testDelta3
-	}
+// equalWithin return true if the given float64 values are equal
+// within (precision) decimal places after rounding.  (This can fail if
+// either of the numbers or the difference between them are too large.)
+func equalWithin(precision uint, f1, f2 float64) bool {
 
-	return (f2 - f1) < testDelta3
-}
+	// see http://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html
 
-// floatsEqualWithin5 returns true if two float values are equal
-// within 5 decimal places.
-func floatsEqualWithin5(f1, f2 float64) bool {
-	if f1 > f2 {
-		return (f1 - f2) < testDelta5
-	}
+	var scaleFactor float64 = math.Pow(10, float64(precision))
 
-	return (f2 - f1) < testDelta5
+	f1 = math.Round(f1 * scaleFactor)
+	f2 = math.Round(f2 * scaleFactor)
+
+	return math.Abs(f1-f2) <= 0.1
 }

@@ -42,23 +42,24 @@ import (
 //
 //    handler.DisplayMessage(&message))
 //
-// DisplayMessage can decode RTCM message type 1005, which gives the base
-// station position plus MSM7 and MSM4 messages for GPS, Galileo, GLONASS
-// and Beidou, which carry the base station's observations of signals
-// from satellites.  It also decodes GLONASS code phase bias messages.
-// For reasons I don't claim to understand, these are required as well as
-// the GLONASS MSM messages.  (My equipment consistently returns code bias
-// values of zero.)  These messages are all that a rover needs to find its
-// position accurately.
+// DisplayMessage can decode RTCM message type 1005 (which gives the base
+// station position) plus MSM7 and MSM4 messages for GPS, Galileo, GLONASS
+// and Beidou (which carry the base station's observations of signals
+// from satellites).  The structure of these messages is described in the
+// RTCM standard, which is not open source.  However, the structure can be
+// reverse-engineered by looking at existing software such as the RTKLIB
+// library, which is written in the C programming language.
 //
-// For an example of usage, see the rtcmfilter in this repository.
+// I tested the software using UBlox equipment.  For accurate positioning
+// a UBlox rover requires message type 1005 and the MSM messages.  It also
+// requires type 1230 (GLONASS code/phase biases) and type 4072, which is
+// in a proprietary unpublished UBlox format.  I cannot currently decipher
+// either of these messages.
+//
+// For an example of usage, see the rtcmdisplay tool in this repository.
 // The filter reads a stream of message data from a base station and
-// discards any invalid RTCM messages and any non-RTCM data such as NMEA
-// messages.  The result is a stream of just valid RTCM messages on its
-// standard out channel.  That's is useful when dealing with downstream
-// equipment that requires a clean input.  The rtcmdisplay tool does a
-// similar job but emits a readable version of the messages.  That's
-// useful whenever you need to know exactly what your base station is
+// emits a readable version of the messages.  That's useful when you are
+// setting up a base station and need to know exactly what it's
 // producing.
 //
 // It's worth saying that MSM4 messages are simply lower resolution
@@ -71,21 +72,23 @@ import (
 // defined ready to support emerging equipment that's expected to give
 // better accuracy in the future.
 
-const u0 uint64 = 0            // 0 as a uint.
-const minLengthMSMHeader = 170 // The minimum length of an MSM header
-const satelliteMaskLength = 64 // The mask is 64 bits
-const signalMaskLength = 32    // The mask is 32 bits.
-const headerLengthBytes = 3
-const crcLengthBytes = 3
+const leaderLengthBytes = 3
+const leaderLengthInBits = leaderLengthBytes * 8
 
 // HeaderLengthBits is the length of the RTCM header in bits.
-const HeaderLengthBits = headerLengthBytes * 8
+const HeaderLengthBits = leaderLengthBytes * 8
 
-// CRCLengthBits is the length of the Cyclic Redundancy Check value in bits.
-const CRCLengthBits = crcLengthBytes * 8
+// crcLengthBytes is the length of the Cyclic Redundancy check value in bytes.
+const crcLengthBytes = 3
 
 // StartOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
 const StartOfMessageFrame byte = 0xd3
+
+// lenSatelliteMask is the length in bits of the satellite mask in an MSM header.
+const lenSatelliteMask = 64
+
+// lenSatelliteMask is the length in bits of the signal mask in an MSM header.
+const lenSignalMask = 32
 
 // NonRTCMMessage indicates a Message that does contain RTCM data.  Typically
 // it will be a stream of data in other formats (NMEA, UBX etc).
@@ -93,86 +96,33 @@ const StartOfMessageFrame byte = 0xd3
 // seen messages of type 0.
 const NonRTCMMessage = -1
 
-// rangeMillisWholeInvalidValue in the satellite's RangeWhole value
-// indicates that the value is invalid.
-const rangeMillisWholeInvalidValue = 0xff
+// invalidRange is the invalid value for the whole millis range in an MSM
+// satellite cell.
+const invalidRange = 0xff
 
-// phaseRangeRateInvalidValue in the satellite phase range rate
-// indicates that the value is invalid.
-const phaseRangeRateInvalidValue = 0x2000
+// invalidRangeDeltaMSM4 is the invalid value for the delta in an MSM4
+// signal cell. 15 bit two's complement 100 0000 0000 0000
+const invalidRangeDeltaMSM4 = -16384
 
-// msm4SignalRangeDeltaInvalidValue in the signal's pseudorange delta
-// indicates that the value is invalid.
-const msm4SignalRangeDeltaInvalidValue = 0x4000
+// invalidRangeDeltaMSM7 is the invalid value for the range delta in an MSM7
+// signal cell. 20 bit two's complement 1000 0000 0000 0000 0000
+const invalidRangeDeltaMSM7 = -524288
 
-// msm4PhaseRangeDeltaInvalidValue in the MSM4 signal fine pseudorange
-// indicates that the value is invalid.
-const msm4PhaseRangeDeltaInvalidValue = 0x200000
+// invalidPhaseRangeDeltaMSM4 is the invalid value for the phase range delta
+// in an MSM4 signal cell.  22 bit two's complement: 10 0000 0000 0000 0000 0000
+const invalidPhaseRangeDeltaMSM4 = -2097152
 
-// msmSignalCMRInvalidValue in any MSM signal's CNR value indicates that
-// the reading is invalid.
-const msmSignalCMRInvalidValue = 0
+// invalidPhaseRangeDeltaMSM7 is the invalid value for the phase range delta
+// in an MSM4 signal cell.  24 bit two's complement: 1000 0000 0000 0000 0000 0000
+const invalidPhaseRangeDeltaMSM7 = -8388608
 
-// msm7SignalRangeDeltaInvalidValue in an MSM7 signal's range delta indicates
-// that the value is invalid.
-const msm7SignalRangeDeltaInvalidValue = 0x80000
+// invalidPhaseRangeRate is the invalid value for the phase range rate in an
+// MSM7 Satellite cell.  14 bit two's complement 10 0000 0000 0000
+const invalidPhaseRangeRate = -8192
 
-// msm4SignalPhaseRangeDeltaInvalidValue in the MSM4 signal phase range
-// delta indicates that the value is invalid.
-const msm4SignalPhaseRangeDeltaInvalidValue = 0x200000
-
-// msm7SignalPhaseRangeDeltaInvalidValue in the MSM7 signal phase range
-// delta indicates that the value is invalid.
-const msm7SignalPhaseRangeDeltaInvalidValue = 0x800000
-
-// msm7PhaseRangeRateDeltaInvalidValue in the MSM7 signal's phase range
-// rate delta value indicates that the reading is invalid.
-const msm7PhaseRangeRateDeltaInvalidValue = 0x4000
-
-const glonassCodeBiasInvalidValue = 0x8000
-
-// P2_5 is 2^-5.
-const P2_5 = 0.03125
-
-// P2_6 is 2^-6.
-const P2_6 = 0.015625
-
-// P2_7 is 2^-7.
-const P2_7 = P2_6 / 2.0
-
-// P2_8 is 2^-8.
-const P2_8 = P2_6 / 4.0
-
-// P2_9 is 2^-9.
-const P2_9 = P2_6 / 8.0
-
-// P2_10 is 2^-10.
-const P2_10 = P2_6 / 16.0
-
-// P2_11 is 2^-11.
-const P2_11 = P2_6 / 32.0
-
-// P2_24 is 2^-24
-const P2_24 = 5.960464477539063e-08
-
-// P2_29 is 2^-29.
-const P2_29 = 1.862645149230957e-09
-
-// P2_31 is 2^-31.
-const P2_31 = 4.656612873077393e-10
-
-// P2_33 is 2^-33.
-const P2_33 = P2_31 / 4.0
-
-// P2_34 is 2^-34.
-const P2_34 = P2_31 / 8.0
-
-// CLight is the speed of light in metres per second
-const CLight = 299792458.0
-
-// oneLightMillisecond is the distance in metres traveled by light in one millisecond.
-// It's used to convert a range in milliseconds to a distance in metres.
-const oneLightMillisecond = (CLight * 0.001)
+// invalidPhaseRangeRateDelta is the invalid value for the delta in an MSM7
+// signal cell. 15 bit two's complement 100 0000 0000 0000
+const invalidPhaseRangeRateDelta = -16384
 
 // GPS signal frequencies.  See https://en.wikipedia.org/wiki/GPS_signals for some
 // clues, for example "In the case of the original GPS design, two frequencies are
@@ -227,8 +177,52 @@ const freq2BD float64 = 1.20714e9
 // freq3BD is the BeiDou B3 frequency (Hz).
 const freq3BD float64 = 1.26852e9
 
-// dateLayout defines the layout of dates when they
-// are displayed - "yyyy-mm-dd hh:mm:ss.ms timeshift timezone"
+// P2_5 is 2^-5.
+const P2_5 = 0.03125
+
+// P2_6 is 2^-6.
+const P2_6 = 0.015625
+
+// P2_7 is 2^-7.
+const P2_7 = P2_6 / 2.0
+
+// P2_8 is 2^-8.
+const P2_8 = P2_6 / 4.0
+
+// P2_9 is 2^-9.
+const P2_9 = P2_6 / 8.0
+
+// P2_10 is 2^-10.
+const P2_10 = P2_6 / 16.0
+
+// P2_11 is 2^-11.
+const P2_11 = P2_6 / 32.0
+
+// P2_24 is 2^-24
+const P2_24 = 5.960464477539063e-08
+
+// P2_29 is 2^-29.
+const P2_29 = 1.862645149230957e-09
+
+// P2_31 is 2^-31.
+const P2_31 = 4.656612873077393e-10
+
+// P2_33 is 2^-33.
+const P2_33 = P2_31 / 4.0
+
+// P2_34 is 2^-34.
+const P2_34 = P2_31 / 8.0
+
+// Clight is the speed of light in metres per second.
+const cLight = 299792458.0
+
+// oneLightMillisecond is the distance in metres traveled by light in one
+// millisecond.  The value can be used to convert a range in milliseconds to a
+// distance in metres.  The speed of light is 299792458.0 metres/second.
+const oneLightMillisecond float64 = 299792.458
+
+// dateLayout defines the layout of dates when they are displayed.  It
+// produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone".
 const dateLayout = "2006-01-02 15:04:05.000 -0700 MST"
 
 // defaultWaitTimeOnEOF is the default value for RTCM.WaitTimeOnEOF.
@@ -262,19 +256,8 @@ var locationUTC *time.Location
 var locationGMT *time.Location
 var locationMoscow *time.Location
 
-// pushBackData stores a character that has been pushed back.
-// See the getChar and Pushback methods.
-type pushedBackData struct {
-	pushed bool // a byte has been pushed back
-	b      byte // the byte that was pushed back
-}
-
 // RTCM is the object used to fetch and analyse RTCM3 messages.
 type RTCM struct {
-
-	// bufferedreader is connected to the source of the messages,
-	// set up on the first call of getChar.
-	bufferedReader *bufio.Reader
 
 	// StopOnEOF indicates that the RTCM should stop reading data and
 	// terminate if it encounters End Of File.  If the data stream is
@@ -339,91 +322,59 @@ type RTCM struct {
 
 // Message1005 contains a message of type 1005 - antenna position.
 type Message1005 struct {
+	// Some bits in the message are ignored by the RTKLIB decoder so
+	// we're not sure what they are.  We just store them for display.
+
 	// MessageType - uint12 - always 1005.
-	MessageType uint
+	MessageType uint `json:"message_type,omitempty"`
 
 	// station ID - uint12.
-	StationID uint
+	StationID uint `json:"station_id,omitempty"`
 
 	// Reserved for ITRF Realisaton Year - uint6.
-	ITRFRealisationYear uint
+	ITRFRealisationYear uint `json:"itrf_realisation_year,omitempty"`
 
-	// GPS bit - bit(1).  True if the device is configured to observe GPS satellites.
-	GPS bool
+	// Ignored 1 represents the next four bits which are ignored.
+	Ignored1 uint `json:"ignored1,omitempty"`
 
-	// Glonass bit - bit(1).  True if the device is configured to observe Glonass satellites.
-	Glonass bool
+	// AntennaRefX is the antenna Reference Point coordinate X in ECEF - int38.
+	// Scaled integer in 0.00001 m units (tenth mm).
+	AntennaRefX int64 `json:"antenna_ref_x,omitempty"`
 
-	// Galileo bit - bit(1).  True if the device is configured to observe Galileo satellites.
-	Galileo bool
+	// Ignored2 represents the next two bits which are ignored.
+	Ignored2 uint `json:"ignored2,omitempty"`
 
-	// Reference-Station Indicator - bit(1)
-	ReferenceStation bool
+	// AntennaRefY is the antenna Reference Point coordinate Y in ECEF - int38.
+	AntennaRefY int64 `json:"antenna_ref_y,omitempty"`
 
-	// Single Receiver Oscillator Indicator - 1 bit
-	Oscilator bool
+	// Ignored3 represents the next two bits which are ignored.
+	Ignored3 uint `json:"ignored3,omitempty"`
 
-	// Quarter Cycle Indicator - 2 bits
-	QuarterCycle uint
-
-	// Reserved - 1 bit.
-	ReservedBit bool
-
-	// Antenna Reference Point coordinates in ECEF - int38.
-	// Scaled integers in 0.00001 m units (tenth mm).
-	AntennaRefX int64
-	AntennaRefY int64
-	AntennaRefZ int64
-}
-
-// Message1230 contains a message of type 1230 - GLONASS code-phase
-// biases.  It's used to correct an associated GLONASS MSM message.
-type Message1230 struct {
-	// MessageType - uint12 - always 1230.
-	MessageType uint
-	// Station ID - uint12.
-	StationID uint
-	// Valid - Code-phase bias indicator - true if the values here
-	// should be used.
-	Aligned bool
-	// SignalMask - 4-bit list of the signals included.
-	Signalmask uint
-
-	// L1_C_A_Bias_supplied - the L1 C/A Bias value is supplied.
-	L1_C_A_Bias_supplied bool
-	// L1_C_A_Bias_valid - the L1 C/A Bias value is valid.
-	L1_C_A_Bias_valid bool
-	// L1_C_A_Bias - L1 C/A Bias.
-	L1_C_A_Bias int
-
-	// L1_P_Bias_supplied - the L1 P Bias value is supplied.
-	L1_P_Bias_supplied bool
-	// L1_P_Bias_valid - the L1 P Bias value is valid.
-	L1_P_Bias_valid bool
-	// L1_P_Bias - L1 P Bias.
-	L1_P_Bias int
-
-	// L2_C_A_Bias_supplied - the L C/A Bias value is supplied.
-	L2_C_A_Bias_supplied bool
-	// L2_C_A_Bias_valid - the L2 C/A Bias value is valid.
-	L2_C_A_Bias_valid bool
-	// L2_C_A_Bias - L2 P Bias.
-	L2_C_A_Bias int
-
-	// L2_P_Bias_supplied - the L2 P Bias value is supplied.
-	L2_P_Bias_supplied bool
-	// L2_p_Bias_valid - the L2 P Bias value is valid.
-	L2_P_Bias_valid bool
-	// L2_P_Bias - L2 P Bias.
-	L2_P_Bias int
+	// AntennaRefZ is the antenna Reference Point coordinate X in ECEF - int38.
+	AntennaRefZ int64 `json:"antenna_ref_z,omitempty"`
 }
 
 // MSMHeader holds the header for MSM Messages.  Message types 1074,
 // 1077, 1084, 1087 etc have an MSM header at the start.
 type MSMHeader struct {
 
+	// The C code in rtklib (rtcm3.c) gives the field names:
+	//
+	// typedef struct {                    /* multi-signal-message header type */
+	// 	   unsigned char iod;              /* issue of data station */
+	// 	   unsigned char time_s;           /* cumulative session transmitting time */
+	// 	   unsigned char clk_str;          /* clock steering indicator */
+	// 	   unsigned char clk_ext;          /* external clock indicator */
+	// 	   unsigned char smooth;           /* divergence free smoothing indicator */
+	// 	   unsigned char tint_s;           /* soothing interval */
+	// 	   unsigned char nsat,nsig;        /* number of satellites/signals */
+	// 	   unsigned char sats[64];         /* satellites */
+	// 	   unsigned char sigs[32];         /* signals */
+	// 	   unsigned char cellmask[64];     /* cell mask */
+	// } msm_h_t;
+
 	// MessageType - uint12 - one of 1074, 1077 etc.
-	MessageType uint
+	MessageType int
 
 	// Constellation - one of "GPS, "BeiDou" etc.
 	Constellation string
@@ -449,7 +400,8 @@ type MSMHeader struct {
 	// with the same epoch time.
 	MultipleMessage bool
 
-	// SequenceNumber - uint3.
+	// SequenceNumber - uint3. (Presumably for position of the message in a
+	// multiple message sequence.)
 	SequenceNumber uint
 
 	// SessionTransmissionTime - uint7.
@@ -464,7 +416,7 @@ type MSMHeader struct {
 	// GNSSDivergenceFreeSmoothingIndicator - bit(1).
 	GNSSDivergenceFreeSmoothingIndicator bool
 
-	// GNSSSmoothingInterval - bit(3).
+	// GNSSSmoothingInterval - uint3.
 	GNSSSmoothingInterval uint
 
 	// SatelliteMaskBits is 64 bits, one bit per satellite.  Bit 63
@@ -509,9 +461,11 @@ type MSMHeader struct {
 
 	// CellMask is a slice of slices representing the cell mask.  For example, if
 	// signals 1,2,3 and 5 were observed from satellites 1 and 3, the CellMask might
-	// be arranged like so: {{1,0,1,1}, {1,1,0,0}}, meaning that signals 1, 3 and 5
-	// were observed from satellite 1 and signals 1 and 2 were observed from
-	// satellite 3.
+	// be arranged like so: {{t,f,t,t}, {t,t,f,f}}, meaning that signals 1, 3 and 5
+	// were observed from satellite 1, no signals were observed from Satellite 2 and
+	// signals 1 and 2 were observed from satellite 3.  (At present (2022) the
+	// satellites are dual band, so actually they will send two signals and the
+	// receiver might observe zero, one or both of them.)
 	CellMask [][]bool
 
 	// NumSignalCells is the total number of signal cells in the message.  Creating
@@ -520,8 +474,85 @@ type MSMHeader struct {
 	NumSignalCells int
 }
 
-// MSMSatelliteCell holds the MSM7 data for one satellite.
+// Display return a text version of the MSMHeader.
+func (header *MSMHeader) Display(rtcm *RTCM) string {
+
+	const titleMSM4 = "Full Pseudoranges and PhaseRanges plus CNR"
+	const titleMSM7 = "Full Pseudoranges and PhaseRanges plus CNR (high resolution)"
+
+	var title string
+
+	switch header.MessageType {
+	case 1074:
+		title = titleMSM4
+		header.Constellation = "GPS"
+		header.UTCTime = rtcm.GetUTCFromGPSTime(header.EpochTime)
+	case 1077:
+		title = titleMSM7
+		header.Constellation = "GPS"
+		header.UTCTime = rtcm.GetUTCFromGPSTime(header.EpochTime)
+	case 1084:
+		title = titleMSM4
+		header.Constellation = "GLONASS"
+		header.UTCTime = rtcm.GetUTCFromGlonassTime(header.EpochTime)
+	case 1087:
+		title = titleMSM7
+		header.Constellation = "GLONASS"
+		header.UTCTime = rtcm.GetUTCFromGlonassTime(header.EpochTime)
+	case 1094:
+		title = titleMSM4
+		header.Constellation = "Galileo"
+		header.UTCTime = rtcm.GetUTCFromGalileoTime(header.EpochTime)
+	case 1097:
+		title = titleMSM7
+		header.Constellation = "Galileo"
+		header.UTCTime = rtcm.GetUTCFromGalileoTime(header.EpochTime)
+	case 1124:
+		title = titleMSM4
+		header.Constellation = "BeiDou"
+		header.UTCTime = rtcm.GetUTCFromBeidouTime(header.EpochTime)
+	case 1127:
+		title = titleMSM7
+		header.Constellation = "BeiDou"
+		header.UTCTime = rtcm.GetUTCFromBeidouTime(header.EpochTime)
+	default:
+		header.Constellation = "Unknown"
+	}
+
+	line := fmt.Sprintf("type %d %s %s\n",
+		header.MessageType, header.Constellation, title)
+
+	timeStr := header.UTCTime.Format(dateLayout)
+	line += fmt.Sprintf("time %s (epoch time %d)\n", timeStr, header.EpochTime)
+	mode := "single"
+	if header.MultipleMessage {
+		mode = "multiple"
+	}
+	line += fmt.Sprintf("stationID %d, %s message, sequence number %d, session transmit time %d\n",
+		header.StationID, mode, header.SequenceNumber, header.SessionTransmissionTime)
+	line += fmt.Sprintf("clock steering %d, external clock %d ",
+		header.ClockSteeringIndicator, header.ExternalClockIndicator)
+	line += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
+		header.GNSSDivergenceFreeSmoothingIndicator, header.GNSSSmoothingInterval)
+	line += fmt.Sprintf("%d satellites, %d signals, %d signal cells\n",
+		len(header.Satellites), len(header.Signals), header.NumSignalCells)
+
+	return line
+}
+
+// MSMSatelliteCell holds the data for one satellite from an MSM message,
+// type MSM4 (message type 1074, 1084 ...) or type MSM7 (1077, 1087 ...).
+// An MSM4 cell has RangeWholeMillis and RangeFractionalMillis.  An MSM4
+// cell has those plus ExtendedInfo and PhaseRangeRate.
+//
 type MSMSatelliteCell struct {
+	// The field names, types and sizes and invalid values are shown in comments
+	// in rtklib rtcm3.c - see the function decode_msm7().
+
+	// MessageType is the type number from the message, which defines whether
+	// it's an MSM4 or an MSM7.
+	MessageType int
+
 	// SatelliteID is the satellite ID, 1-64.
 	SatelliteID uint
 
@@ -531,83 +562,739 @@ type MSMSatelliteCell struct {
 	// delta value in the signal cell.
 	RangeWholeMillis uint
 
-	// RangeValid is true when the RangeMillisWhole valid.
-	RangeValid bool
-
-	// ExtendedInfo - uint4.  Extended Satellite Information.
+	// ExtendedInfo - uint4.  Extended Satellite Information.  MSM7 only.
 	ExtendedInfo uint
 
 	// RangeFractionalMillis - unit10.  The fractional part of the range
 	// in milliseconds.
 	RangeFractionalMillis uint
 
-	// PhaseRangeRate - int14 - GNSS Satellite phase range rate.  See also
-	// the PhaseRangeRateDelta and PhaseRangeRateMS in the signal data.
+	// PhaseRangeRate - int14.  The approximate phase range rate for all signals
+	// that come later in this message.  MSM7 only.  Invalid if the top bit is
+	// set and all the others are zero.  (The value is signed, so the invalid
+	// value is a negative number.)  The true phase range rate for a signal is
+	// derived by merging this (positive or negative) scaled value with the
+	// signal's PhaseRangeRateDelta value.
 	PhaseRangeRate int
-
-	// PhaseRangeRateValid is true when the PhaseRangeRate value is valid.
-	PhaseRangeRateValid bool
 }
 
-// MSMSignalCell holds the data for one signal from one satellite, plus
-// values gathered from the satellite and signal data and merged together.
-type MSMSignalCell struct {
-	// Satellite is the index into the satellite cell list of the satellite
-	// that was observed.
-	Satellite int
+func (cell *MSMSatelliteCell) Display() string {
 
-	// SignalID is the ID of the signal that was observed from the satellite.
-	// Each signalID has an associated frequency.
+	var rangeMillis string
+	if cell.RangeWholeMillis == invalidRange {
+		rangeMillis = "invalid"
+	} else {
+		rangeMillis = fmt.Sprintf("%d.%d",
+			cell.RangeWholeMillis, cell.RangeFractionalMillis)
+	}
+
+	if MSM4(cell.MessageType) {
+		return fmt.Sprintf("%2d {%s}\n", cell.SatelliteID, rangeMillis)
+	} else {
+		// An MSM7 has an extended info and a phase range rate field.
+		var phaseRangeRate string
+		if cell.PhaseRangeRate == invalidPhaseRangeRate {
+			phaseRangeRate = "invalid"
+		} else {
+			phaseRangeRate = fmt.Sprintf("%d", cell.PhaseRangeRate)
+		}
+		return fmt.Sprintf("%2d {%s %d %s}\n",
+			cell.SatelliteID, rangeMillis, cell.ExtendedInfo, phaseRangeRate)
+	}
+}
+
+// MSMSignalCell holds the data from an MSM4 or MSM7 message for one signal
+// from one satellite, plus values gathered from the satellite and signal data
+// and merged together.
+type MSMSignalCell struct {
+	// Field names, sizes, invalid values etc are derived from rtklib rtcm3.c
+	// (decode_msm7 function) plus other clues from the igs BNC application.
+
+	// Header is the header of the Multiple Signal Message  cell
+	Header *MSMHeader
+	// Satellite is the Satellite cell for the satellite from which this signal
+	// was observed.
+	Satellite *MSMSatelliteCell
+
+	// SignalID is the ID of the signal that was observed.
 	SignalID uint
 
-	// RangeDelta - int20 in an MSM7 message (0x80000 indicates an invalid value),
-	// uint15 in an MSM4 message (0x4000 indicates an invalid value).  Merged with the
-	// range values from the satellite cell to give RangeMetres.
+	// RangeDelta - in the original message, top bit 1 and all the others zero
+	// indicate an invalid value.  (The value is a two's complement signed integer
+	// so that's a negative number).  The original value is 15 bits including sign
+	// in an MSM4 message or 20 bits including sign in an MSM7, but this software
+	// scales the MSM4 value immediately, so in this object it always looks like a
+	// positive or negative int set from a 20-bit signed value (ie between plus or
+	// minus 2 to the power of 19.)
+	//
+	// The range is expressed as the transit time of the signal in milliseconds.  To
+	// get that, merge this value with the approximate range value from the satellite
+	// cell.  To get the range in metres, multiply the result by one light
+	// millisecond, the distance light travels in a millisecond.
 	RangeDelta int
 
-	// RangeDeltaValid set false indicates that at least one of the range values is invalid.
-	RangeDeltaValid bool
-
-	// PhaseRangeDelta - int24 - to be merged with the range values and
-	// converted to cycles to create PhaseRangeCycles.  0x800000 indicates an
-	// invalid value.
+	// PhaseRangeDelta - in an MSM4, int22, in an MSM7, int24.  Invalid if the top
+	// bit is set and the others are all zero.  The true phase range for the signal
+	// is derived by merging this with the approximate value in the satellite cell.
 	PhaseRangeDelta int
 
-	// PhaseRangeDeltaValid is true if the PhaseRangeDelta is valid.
-	PhaseRangeDeltaValid bool
-
-	// LockTimeIndicator - uint10.
+	// LockTimeIndicator - uint4 in an MSM4, uint10 in an MSM7.
 	LockTimeIndicator uint
 
 	// HalfCycleAmbiguity flag - 1 bit.
 	HalfCycleAmbiguity bool
 
-	// CNR - uint10 - Carrier to Noise Ratio.  0 means invalid value.
+	// CNR - uint6 in an MSM4, uint10 in an MSM7 - Carrier to Noise Ratio.
 	CNR uint
 
-	// CNRValid indicates that the CNR value is valid.
-	CNRValid bool
-
-	// PhaseRangeRateDelta - int15 - the offset to the satellite's phase
-	// range rate.  This value is in ten thousands of a millisecond.
+	// PhaseRangeRateDelta - int15 - invalid if the top bit is set and the others are
+	// all zero.  Only present in an MSM7.  This value is in ten thousands of a
+	// millisecond. The true value of the signal's phase range rate is derived by
+	// adding this (positive or negative) value to the approximate value in the
+	// satellite cell.
 	PhaseRangeRateDelta int
 
-	// PhaseRangeRateDeltaValid is true if the phase range rate delta value is valid.
-	PhaseRangeRateDeltaValid bool
-
-	// RangeMetres is the range derived from the satellites range values and the
-	// signal's range delta, expressed in metres.
-	RangeMetres float64
-
-	// PhaseRangeCycles is derived from the satellites range values and the
-	// signal's delta value, expressed in cycles.
+	// PhaseRangeCycles.  Derived by merging the PhaseRangeDelta with the satellite
+	// range values and converting to cycles per second.
 	PhaseRangeCycles float64
 
-	// PhaseRangeRateMS is derived from the satellite's phase range rate and the
-	// signal's delta value and expressed as metres per second.  (This is the
-	// speed at which the satellite is approaching the base station, or if
-	// negative, the speed that it's moving away from it.)
+	// PhaseRangeRateMS.  Derived by merging the PhaseRangeRate values and converting
+	// to meters per second.  (According to Geoffrey Blewitt's paper, this is the
+	// velocity at which the satellite is approaching the base station, or if negative,
+	// the velocity at which it's moving away from it.)
 	PhaseRangeRateMS float64
+}
+
+// RangeInMetres combines the range values from an MSM satellite and
+// signal cell and produces a range in metres.
+func (sigCell *MSMSignalCell) RangeInMetres() (float64, error) {
+
+	scaledRange := sigCell.GetAggregateRange()
+
+	// scaleFactor is two to the power of 29:
+	// 10 0000 0000 0000 0000 0000 0000 0000
+	const scaleFactor = 0x20000000
+	// Restore the scale to give the range in milliseconds.
+	rangeInMillis := float64(scaledRange) / float64(scaleFactor)
+
+	// Use the speed of light to convert that to the distance from the
+	// satellite to the receiver.
+	rangeInMetres := rangeInMillis * oneLightMillisecond
+
+	return rangeInMetres, nil
+}
+
+// GetAggregateRange takes a header, satellite cell and signal cell, extracts the
+// range values and returns the range as a 37-bit scaled unsigned integer, 8 bits
+// whole part and 29 bits fractional part.  This is the transit time of the signal
+// in milliseconds.  Use getRangeInMetres to convert it.  The values in the satellite
+// and the signal cell can indicate that the measurement failed and the result is
+// invalid.  If the approximate range values in the satellite cell are invalid, the
+// result is 0.  If the delta in the signal cell is invalid, the result is the
+// approximate range.
+func (sigCell *MSMSignalCell) GetAggregateRange() uint64 {
+
+	// The range delta invalid indicator depends on the MSM type.
+	invalidRangeDelta := invalidRangeDeltaMSM7
+	if sigCell.msm4() {
+		invalidRangeDelta = invalidRangeDeltaMSM4
+	}
+
+	if sigCell.Satellite.RangeWholeMillis == invalidRange {
+		return 0
+	}
+
+	if sigCell.RangeDelta == invalidRangeDelta {
+		// The range is valid but the delta is not.
+		return GetScaledRange(sigCell.Satellite.RangeWholeMillis,
+			sigCell.Satellite.RangeFractionalMillis, 0)
+	}
+
+	// The delta value is valid.
+	delta := sigCell.RangeDelta
+	if sigCell.msm4() {
+		// The range delta value in an MSM4 signal is 15 bits signed.  In an MSM7 signal
+		// it's 20 bits signed, the bottom 5 bits being extra precision.  The calculation
+		// assumes the MSM7 form, so for an MSM4, normalise the value to 20 bits before
+		// using it.  The value may be negative, so multiply rather than shifting bits.
+		delta = delta * 16
+	}
+
+	return GetScaledRange(sigCell.Satellite.RangeWholeMillis,
+		sigCell.Satellite.RangeFractionalMillis, delta)
+}
+
+// getMSMPhaseRange combines the range and the phase range from an MSM4 or MSM7
+// message and returns the result in cycles. It returns zero if the input
+// measurements are invalid and an error if the signal is not in use.
+//
+func (sigCell *MSMSignalCell) PhaseRange() (float64, error) {
+
+	header := sigCell.Header
+
+	// In the RTKLIB, the decode_msm7 function uses the range from the
+	// satellite and the phase range from the signal cell to derive the
+	// carrier phase:
+	//
+	// /* carrier-phase (cycle) */
+	// if (r[i]!=0.0&&cp[j]>-1E12&&wl>0.0) {
+	//    rtcm->obs.data[index].L[ind[k]]=(r[i]+cp[j])/wl;
+	// }
+
+	if !sigCell.msm4() && !sigCell.msm7() {
+		em := fmt.Sprintf("message type %d is not a MSM and does not have a phase range value",
+			header.MessageType)
+		return 0.0, errors.New(em)
+	}
+
+	// This is similar to getMSMRange.  The phase range is in cycles
+	// and derived from the range values from the satellite cell shifted up
+	// 31 bits,  plus the signed phase range delta.  In an MSM4 and MSM5 message
+	// the delta in the signal cell is 22 bits and in an MSM6 and MSM7 it's 24
+	// bits.  The 24 bit value gives extra resolution, so we convert a 22 bit
+	// value to a 24 bit value with two trailing zeroes.
+	//
+	//     ------ Range -------
+	//     whole     fractional
+	//     www wwww wfff ffff fff0 0000 0000 0000 0000 0000
+	//     + or -             dddd dddd dddd dddd dddd dddd
+
+	wavelength, err := sigCell.GetWavelength()
+	if err != nil {
+		return 0.0, err
+	}
+
+	aggregatePhaseRange := sigCell.GetAggregatePhaseRange()
+
+	// Restore the scale of the aggregate value.
+	phaseRangeMilliSeconds := getPhaseRangeMilliseconds(aggregatePhaseRange)
+
+	// Convert to light milliseconds
+	phaseRangeLMS := sigCell.GetPhaseRangeLightMilliseconds(phaseRangeMilliSeconds)
+
+	// and divide by the wavelength to get cycles.
+	phaseRangeCycles := phaseRangeLMS / wavelength
+
+	return phaseRangeCycles, nil
+}
+
+// MSM7PhaseRangeRate combines the components of the phase range rate
+// in an MSM7 message and returns the result in milliseconds.  If the rate
+// value in the satellite cell is invalid, the result is zero.  If the delta
+// in the signal cell is invalid, the result is based on the rate value in the
+// satellite.
+//
+func (sigCell *MSMSignalCell) MSM7PhaseRangeRate() (float64, error) {
+	header := sigCell.Header
+
+	if !sigCell.msm7() {
+		em := fmt.Sprintf("message type %d is not an MSM7", header.MessageType)
+		return 0.0, errors.New(em)
+	}
+
+	aggregatePhaseRangeRate := sigCell.GetAggregatePhaseRangeRate()
+
+	// The aggregate is milliseconds scaled up by 10,000.
+	phaseRangeRateMillis := float64(aggregatePhaseRangeRate) / 10000
+
+	// Blewitt's paper says that the phase range rate is the rate at which the
+	// which the satellite is approaching or (if negative) receding from
+	// the GPS device.
+
+	return phaseRangeRateMillis, nil
+}
+
+// GetMSM7Doppler gets the doppler value in Hz from the phase
+// range rate fields of a satellite and signal cell from an MSM7.
+func (sigCell *MSMSignalCell) GetMSM7Doppler() (float64, error) {
+	// RTKLIB save_msm_obs calculates the phase range, multiplies it by
+	// the wavelength of the signal, reverses the sign of the result and
+	// calls it the Doppler:
+	//
+	// /* doppler (hz) */
+	// if (rr&&rrf&&rrf[j]>-1E12&&wl>0.0) {
+	//     rtcm->obs.data[index].D[ind[k]]=(float)(-(rr[i]+rrf[j])/wl);
+	// }
+	//
+	// When an MSM7 is converted to RINEX format, this value appears in one of
+	// the fields, so we can test the handling using data collected from a real
+	// device.
+
+	phaseRangeRateMillis, err := sigCell.MSM7PhaseRangeRate()
+
+	if err != nil {
+		return 0.0, err
+	}
+
+	wavelength, err := sigCell.GetWavelength()
+	if err != nil {
+		return 0.0, err
+	}
+
+	return (phaseRangeRateMillis / wavelength) * -1, nil
+}
+
+// GetPhaseRangeLightMilliseconds gets the phase range of the signal in light milliseconds.
+func (sigCell *MSMSignalCell) GetPhaseRangeLightMilliseconds(rangeMetres float64) float64 {
+	return rangeMetres * oneLightMillisecond
+}
+
+// GetAggregatePhaseRange takes a header, satellite cell and signal cell, extracts
+// the phase range values, aggregates them and returns them as a 41-bit scaled unsigned
+// unsigned integer, 8 bits whole part and 33 bits fractional part.  Use
+// getPhaseRangeCycles to convert this to the phase range in cycles.
+func (sigCell *MSMSignalCell) GetAggregatePhaseRange() uint64 {
+
+	// This is similar to getAggregateRange  but for the phase range.  The phase
+	// range value in the signal cell is merged with the range values in the
+	// satellite cell.
+
+	satCell := sigCell.Satellite
+
+	if satCell.RangeWholeMillis == invalidRange {
+		return 0
+	}
+
+	var delta int
+
+	if sigCell.msm4() {
+		// The message is an MSM4.
+		if sigCell.PhaseRangeDelta != invalidPhaseRangeDeltaMSM4 {
+			// The phase range delta value is valid.
+			// The value in an MSM4 signal cell is 22 bits signed.
+			// In an MSM7 signal cell it's 24 bits signed, the bottom 2 bits being
+			// extra precision.  The calculation assumes the MSM7 form, so for an MSM4,
+			// normalise the value to 24 bits before using it.  The value may be
+			// negative, so multiply it rather than shifting bits.
+			delta = sigCell.PhaseRangeDelta * 4
+		}
+	} else {
+		// The message is an MSM7.
+		if sigCell.PhaseRangeDelta != invalidPhaseRangeDeltaMSM7 {
+			delta = sigCell.PhaseRangeDelta
+		}
+
+	}
+
+	scaledPhaseRange :=
+		GetScaledPhaseRange(satCell.RangeWholeMillis, satCell.RangeFractionalMillis, delta)
+
+	return scaledPhaseRange
+}
+
+// GetAggregatePhaseRangeRate returns the phase range rate as an int, scaled up
+// by 10,000
+func (sigCell *MSMSignalCell) GetAggregatePhaseRangeRate() int64 {
+
+	// This is similar to getAggregateRange  but for the phase range rate.
+
+	satCell := sigCell.Satellite
+
+	if satCell.PhaseRangeRate == invalidPhaseRangeRate {
+		return 0
+	}
+
+	var delta int
+
+	if sigCell.PhaseRangeDelta != invalidPhaseRangeRateDelta {
+		delta = sigCell.PhaseRangeRateDelta
+	}
+
+	return GetScaledPhaseRangeRate(satCell.PhaseRangeRate, delta)
+}
+
+// getWavelength returns the carrier wavelength for a signal ID.
+// The result depends upon the constellation, each of which has its
+// own list of signals and equivalent wavelengths.  Some of the possible
+// signal IDs are not used and so have no associated wavelength, so the
+// result may be an error.
+//
+func (sigCell *MSMSignalCell) GetWavelength() (float64, error) {
+
+	var wavelength float64
+	switch sigCell.Header.Constellation {
+	case "GPS":
+		var err error
+		wavelength, err = sigCell.GetSigWaveLenGPS()
+		if err != nil {
+			return 0.0, err
+		}
+	case "Galileo":
+		var err error
+		wavelength, err = sigCell.GetSigWaveLenGalileo()
+		if err != nil {
+			return 0.0, err
+		}
+	case "GLONASS":
+		var err error
+		wavelength, err = sigCell.GetSigWaveLenGlo()
+		if err != nil {
+			return 0.0, err
+		}
+	case "BeiDou":
+		var err error
+		wavelength, err = sigCell.GetSigWaveLenBD()
+		if err != nil {
+			return 0.0, err
+		}
+	default:
+		message := fmt.Sprintf("no such constellation as %s",
+			sigCell.Header.Constellation)
+		return 0.0, errors.New(message)
+	}
+
+	return wavelength, nil
+}
+
+// getSigWaveLenGPS returns the signal carrier wavelength for a GPS satellite
+// if it's defined.
+func (sigCell *MSMSignalCell) GetSigWaveLenGPS() (float64, error) {
+	// Only some signal IDs are in use.
+	var frequency float64
+	switch sigCell.SignalID {
+	case 2:
+		frequency = freq1
+	case 3:
+		frequency = freq1
+	case 4:
+		frequency = freq1
+	case 8:
+		frequency = freq2
+	case 9:
+		frequency = freq2
+	case 10:
+		frequency = freq2
+	case 15:
+		frequency = freq2
+	case 16:
+		frequency = freq2
+	case 17:
+		frequency = freq2
+	case 22:
+		frequency = freq5
+	case 23:
+		frequency = freq5
+	case 24:
+		frequency = freq5
+	case 30:
+		frequency = freq1
+	case 31:
+		frequency = freq1
+	case 32:
+		frequency = freq1
+	default:
+		message := fmt.Sprintf("GPS signal ID %d not in use", sigCell.SignalID)
+		return 0, errors.New(message)
+	}
+	return cLight / frequency, nil
+}
+
+// GetSigWaveLenGalileo returns the signal carrier wavelength for a Galileo satellite
+// if it's defined.
+func (sigCell *MSMSignalCell) GetSigWaveLenGalileo() (float64, error) {
+	// Only some signal IDs are in use.
+	var frequency float64
+	switch sigCell.SignalID {
+	case 2:
+		frequency = freq1
+	case 3:
+		frequency = freq1
+	case 4:
+		frequency = freq1
+	case 5:
+		frequency = freq1
+	case 6:
+		frequency = freq1
+	case 8:
+		frequency = freq6
+	case 9:
+		frequency = freq6
+	case 10:
+		frequency = freq6
+	case 11:
+		frequency = freq6
+	case 12:
+		frequency = freq6
+	case 14:
+		frequency = freq7
+	case 15:
+		frequency = freq7
+	case 16:
+		frequency = freq7
+	case 18:
+		frequency = freq8
+	case 19:
+		frequency = freq8
+	case 20:
+		frequency = freq8
+	case 22:
+		frequency = freq5
+	case 23:
+		frequency = freq5
+	case 24:
+		frequency = freq5
+	default:
+		message := fmt.Sprintf("GPS signal ID %d not in use", sigCell.SignalID)
+		return 0, errors.New(message)
+	}
+	return cLight / frequency, nil
+}
+
+// GetSigWaveLenGlo gets the signal carrier wavelength for a GLONASS satellite
+// if it's defined.
+//
+func (sigCell *MSMSignalCell) GetSigWaveLenGlo() (float64, error) {
+	// Only some signal IDs are in use.
+	var frequency float64
+	switch sigCell.SignalID {
+	case 2:
+		frequency = freq1Glo
+	case 3:
+		frequency = freq1Glo
+	case 8:
+		frequency = freq2Glo
+	case 9:
+		frequency = freq2Glo
+	default:
+		message := fmt.Sprintf("GLONASS signal ID %d not in use", sigCell.SignalID)
+		return 0, errors.New(message)
+	}
+	return cLight / frequency, nil
+}
+
+// GetSigWaveLenBD returns the signal carrier wavelength for a Beidou satellite
+// if it's defined.
+//
+func (sigCell *MSMSignalCell) GetSigWaveLenBD() (float64, error) {
+	// Only some signal IDs are in use.
+	var frequency float64
+	switch sigCell.SignalID {
+	case 2:
+		frequency = freq1BD
+	case 3:
+		frequency = freq1BD
+	case 4:
+		frequency = freq1BD
+	case 8:
+		frequency = freq3BD
+	case 9:
+		frequency = freq3BD
+	case 10:
+		frequency = freq3BD
+	case 14:
+		frequency = freq2BD
+	case 15:
+		frequency = freq2BD
+	case 16:
+		frequency = freq2BD
+	default:
+		message := fmt.Sprintf("GPS signal ID %d not in use", sigCell.SignalID)
+		return 0, errors.New(message)
+	}
+	return cLight / frequency, nil
+}
+
+// MSM1 returns true if the message is an MSM type 1.
+func (sigCell *MSMSignalCell) msm1() bool {
+	switch sigCell.Header.MessageType {
+	// GPS
+	case 1071: // GPS
+		return true
+	case 1081: // Glonass
+		return true
+	case 1091: // Galileo
+		return true
+	case 1101: // SBAS
+		return true
+	case 1111: // QZSS
+		return true
+	case 1121: // Beidou
+		return true
+	case 1131: // NavIC/IRNSS
+		return true
+	default:
+		return false
+	}
+}
+
+// MSM2 returns true if the message is an MSM type 2.
+func (sigCell *MSMSignalCell) msm2() bool {
+	switch sigCell.Header.MessageType {
+	// GPS
+	case 1072: // GPS
+		return true
+	case 1082: // Glonass
+		return true
+	case 1092: // Galileo
+		return true
+	case 1102: // SBAS
+		return true
+	case 1112: // QZSS
+		return true
+	case 1122: // Beidou
+		return true
+	case 1132: // NavIC/IRNSS
+		return true
+	default:
+		return false
+	}
+}
+
+// MSM3 returns true if the message is an MSM type 3.
+func (sigCell *MSMSignalCell) msm3() bool {
+	switch sigCell.Header.MessageType {
+	// GPS
+	case 1073: // GPS
+		return true
+	case 1083: // Glonass
+		return true
+	case 1093: // Galileo
+		return true
+	case 1103: // SBAS
+		return true
+	case 1113: // QZSS
+		return true
+	case 1123: // Beidou
+		return true
+	case 1133: // NavIC/IRNSS
+		return true
+	default:
+		return false
+	}
+}
+
+// MSM4 returns true if the message is an MSM type 4.
+func (sigCell *MSMSignalCell) msm4() bool {
+	switch sigCell.Header.MessageType {
+	// GPS
+	case 1074: // GPS
+		return true
+	case 1084: // Glonass
+		return true
+	case 1094: // Galileo
+		return true
+	case 1104: // SBAS
+		return true
+	case 1114: // QZSS
+		return true
+	case 1124: // Beidou
+		return true
+	case 1134: // NavIC/IRNSS
+		return true
+	default:
+		return false
+	}
+}
+
+// MSM5 returns true if the message is an MSM type 5.
+func (sigCell *MSMSignalCell) msm5() bool {
+	switch sigCell.Header.MessageType {
+	case 1075:
+		return true
+	case 1085:
+		return true
+	case 1095:
+		return true
+	case 1105:
+		return true
+	case 1115:
+		return true
+	case 1125:
+		return true
+	case 1135:
+		return true
+	default:
+		return false
+	}
+}
+
+// MSM6 returns true if the message is an MSM type 6.
+func (sigCell *MSMSignalCell) msm6() bool {
+	switch sigCell.Header.MessageType {
+	case 1076:
+		return true
+	case 1086:
+		return true
+	case 1096:
+		return true
+	case 1106:
+		return true
+	case 1116:
+		return true
+	case 1126:
+		return true
+	case 1136:
+		return true
+	default:
+		return false
+	}
+}
+
+// MSM7 returns true if the message is an MSM type 7.
+func (sigCell *MSMSignalCell) msm7() bool {
+	switch sigCell.Header.MessageType {
+	case 1077:
+		return true
+	case 1087:
+		return true
+	case 1097:
+		return true
+	case 1107:
+		return true
+	case 1117:
+		return true
+	case 1127:
+		return true
+	case 1137:
+		return true
+	default:
+		return false
+	}
+}
+
+// Display returns a readable version of a signal cell.
+func (sigCell *MSMSignalCell) Display() string {
+	var rangeM string
+	r, rangeError := sigCell.RangeInMetres()
+	if rangeError == nil {
+		rangeM = fmt.Sprintf("%f", r)
+	} else {
+		rangeM = rangeError.Error()
+	}
+
+	var phaseRange string
+	pr, prError := sigCell.PhaseRange()
+	if prError == nil {
+		phaseRange = fmt.Sprintf("%f", pr)
+	} else {
+		phaseRange = prError.Error()
+	}
+
+	var phaseRangeRate string
+	if sigCell.msm7() {
+		prr, prrError :=
+			sigCell.MSM7PhaseRangeRate()
+		if prrError == nil {
+			phaseRangeRate = fmt.Sprintf("%f", prr)
+		} else {
+			phaseRangeRate = prrError.Error()
+		}
+	}
+
+	satelliteID := sigCell.Satellite.SatelliteID
+
+	if sigCell.msm7() {
+		return fmt.Sprintf("%2d %2d {%s %s %d, %v, %d, %s}",
+			satelliteID, sigCell.SignalID, rangeM, phaseRange,
+			sigCell.LockTimeIndicator, sigCell.HalfCycleAmbiguity,
+			sigCell.CNR, phaseRangeRate)
+	} else {
+		// An MSM4 does not have phase range rate fields
+		return fmt.Sprintf("%2d %2d {%s %s %d, %v, %d}",
+			satelliteID, sigCell.SignalID, rangeM, phaseRange,
+			sigCell.LockTimeIndicator, sigCell.HalfCycleAmbiguity,
+			sigCell.CNR)
+	}
 }
 
 // MSMMessage is a broken-out version of an MSM4 or MSM7 message.
@@ -616,18 +1303,81 @@ type MSMMessage struct {
 	Header *MSMHeader
 
 	// Satellites is a list of the satellites for which signals
-	// were observed.
+	// were observed in an MSM7 message.
 	Satellites []MSMSatelliteCell
 
 	// Signals is a list of sublists, one sublist per satellite,
 	// of signals at different frequencies observed by the base
-	// station from the satellites in the Satellite list. If
-	// there are, say, eight items in the Satellites list, there
-	// will be eight sublists here.  RTCM3 allows for up to 32
-	// signals but currently (2021) each satellite only uses two
-	// signal channels, so there should be either one or two
-	// signals in each sublist.
+	// station from the satellites in the Satellite list.
 	Signals [][]MSMSignalCell
+}
+
+// Display return a text version of the MSMMessage.
+func (message *MSMMessage) Display(rtcm *RTCM) string {
+	result :=
+		message.Header.Display(rtcm) +
+			message.DisplaySatelliteCells() +
+			message.DisplaySignalCells()
+
+	return result
+}
+
+// DisplaySignalCells returns a text version of the signal data from an MSMMessage.
+func (message *MSMMessage) DisplaySignalCells() string {
+
+	if len(message.Signals) < 1 {
+		return "No signals|n"
+	}
+
+	var heading string
+
+	if MSM4(int(message.Header.MessageType)) {
+		// the messages is an MSM4 and so doesn't have the phase range rate value.
+		heading = fmt.Sprintf("%d Signals\nsat ID sig ID {range (delta), lock time ind, half cycle ambiguity,\n",
+			len(message.Signals))
+		heading += "        Carrier Noise Ratio}\n"
+	} else {
+		// the messages is an MSM7 and has the phase range rate value.
+		heading = fmt.Sprintf("%d Signals\nsat ID sig ID {range (delta), phase range (delta), lock time ind, half cycle ambiguity,\n",
+			len(message.Signals))
+		heading += "        Carrier Noise Ratio,  phase range rate (delta)}\n"
+	}
+
+	body := ""
+
+	for i := range message.Signals {
+		for j := range message.Signals[i] {
+			body += fmt.Sprintf("%s\n", message.Signals[i][j].Display())
+		}
+	}
+
+	return heading + body
+}
+
+// DisplaySatelliteCells returns a text version of the satellite cells in the
+// Multiple Signal Message (MSM).
+func (message *MSMMessage) DisplaySatelliteCells() string {
+
+	if len(message.Satellites) < 1 {
+		return "No satellites\n"
+	}
+
+	heading := ""
+
+	if MSM4(message.Header.MessageType) {
+		heading = fmt.Sprintf("%d Satellites\nsatellite ID {range ms}\n",
+			len(message.Satellites))
+	} else {
+		heading = fmt.Sprintf("%d Satellites\nsatellite ID {range ms, extended info, phase range rate m/s}\n",
+			len(message.Satellites))
+	}
+
+	body := ""
+	for i := range message.Satellites {
+		body += message.Satellites[i].Display()
+	}
+
+	return heading + body
 }
 
 // Message contains an RTCM3 message, possibly broken out into readable form,
@@ -635,8 +1385,9 @@ type MSMMessage struct {
 // second case.
 type Message struct {
 	// MessageType is the type of the RTCM message (the message number).
-	// Type NonRTCMMessage contains a stream of bytes that doesn't contain an
-	// RTCM message.
+	// RTCM messages all have a positive message number.  Type NonRTCMMessage
+	// is negative and indicates a stream of bytes that doesn't contain a
+	// valid RTCM message, for example an NMEA message or a corrupt RTCM.
 	MessageType int
 
 	// Valid is true if the message is valid - complete and the CRC checks.
@@ -681,12 +1432,18 @@ func (message *Message) Copy() Message {
 	return newMessage
 }
 
-// Readable returns a broken out version of the message - if the
-// message type is 1005, it's a Message1005, if it's an MSM7 message,
-// it's an MSM7Message.
-func (m *Message) Readable(r *RTCM) interface{} {
+// PrepareForDisplay returns a broken out version of the message - for example,
+// if the message type is 1005, it's a Message1005.
+func (m *Message) PrepareForDisplay(r *RTCM) interface{} {
+	var err error
 	if m.readable == nil {
-		r.Analyse(m)
+		err = r.Analyse(m)
+		if err != nil {
+			// Message can't be analysed.  Log an error and mark the message
+			// as not valid.
+			log.Println(err.Error())
+			m.Valid = false
+		}
 	}
 
 	return m.readable
@@ -831,7 +1588,7 @@ func (r *RTCM) GetMessage(data []byte) (*Message, error) {
 	// whole thing.
 
 	frameLength := uint(len(data))
-	expectedFrameLength := messageLength + headerLengthBytes + crcLengthBytes
+	expectedFrameLength := messageLength + leaderLengthBytes + crcLengthBytes
 	// The message is analysed only when necessary (lazy evaluation).  For
 	// now, just copy the byte stream into the Message.
 	if expectedFrameLength > frameLength {
@@ -870,56 +1627,56 @@ func (r *RTCM) GetMessage(data []byte) (*Message, error) {
 }
 
 // Analyse decodes the raw byte stream and fills in the broken out message.
-func (r *RTCM) Analyse(message *Message) {
+func (r *RTCM) Analyse(message *Message) error {
 	var readable interface{}
-
-	if MSM(message.MessageType) {
-		readable = r.GetMSMMessage(message)
-	} else {
-		switch message.MessageType {
-		case 1005:
-			readable, _ = r.GetMessage1005(message.RawData)
-		case 1230:
-			readable, _ = r.GetMessage1230(message.RawData)
-		case 4072:
-			readable = "(Message type 4072 is in an unpublished format defined by U-Blox.)"
-		default:
-			readable = fmt.Sprintf("message type %d currently cannot be displayed",
-				message.MessageType)
-		}
+	var err error = nil
+	switch {
+	case MSM(message.MessageType):
+		readable, err = r.GetMSMMessage(message)
+	case message.MessageType == 1005:
+		readable, err = r.GetMessage1005(message.RawData)
+	case message.MessageType == 1230:
+		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this.)"
+	case message.MessageType == 4072:
+		readable = "(Message type 4072 is in an unpublished format defined by U-Blox.)"
+	default:
+		readable = fmt.Sprintf("message type %d currently cannot be displayed",
+			message.MessageType)
 	}
 
 	message.SetReadable(readable)
+
+	return err
 }
 
 // GetMessageLengthAndType extracts the message length and the message type from an
 // RTCMs message frame or returns an error, implying that this is not the start of a
-// valid message.  The data must be at least 5 bytes long.
-func (rtcm *RTCM) GetMessageLengthAndType(data []byte) (uint, int, error) {
+// valid message.  The bit stream must be at least 5 bytes long.
+func (rtcm *RTCM) GetMessageLengthAndType(bitStream []byte) (uint, int, error) {
 
-	if len(data) < headerLengthBytes+2 {
+	if len(bitStream) < leaderLengthBytes+2 {
 		return 0, NonRTCMMessage, errors.New("the message is too short to get the header and the length")
 	}
 
 	// The message header is 24 bits.  The top byte is startOfMessage.
-	if data[0] != StartOfMessageFrame {
-		message := fmt.Sprintf("message starts with 0x%0x not 0xd3", data[0])
+	if bitStream[0] != StartOfMessageFrame {
+		message := fmt.Sprintf("message starts with 0x%0x not 0xd3", bitStream[0])
 		return 0, NonRTCMMessage, errors.New(message)
 	}
 
 	// The next six bits must be zero.  If not, we've just come across
 	// a 0xd3 byte in a stream of binary data.
-	sanityCheck := Getbitu(data, 8, 6)
+	sanityCheck := GetBitsAsUint64(bitStream, 8, 6)
 	if sanityCheck != 0 {
 		errorMessage := fmt.Sprintf("bits 8 -13 of header are %d, must be 0", sanityCheck)
 		return 0, NonRTCMMessage, errors.New(errorMessage)
 	}
 
 	// The bottom ten bits of the header is the message length.
-	length := uint(Getbitu(data, 14, 10))
+	length := uint(GetBitsAsUint64(bitStream, 14, 10))
 
 	// The 12-bit message type follows the header.
-	messageType := int(Getbitu(data, 24, 12))
+	messageType := int(GetBitsAsUint64(bitStream, 24, 12))
 
 	// length must be > 0. (Defer this check until now, when we have the message type.)
 	if length == 0 {
@@ -1083,10 +1840,10 @@ func (rtcm *RTCM) ReadNextFrame(reader *bufio.Reader) ([]byte, error) {
 		// out the total length of the frame (which is l+6) and we can then
 		// read the remaining bytes of the frame.
 		switch {
-		case n < headerLengthBytes+2:
+		case n < leaderLengthBytes+2:
 			continue
 
-		case n == headerLengthBytes+2:
+		case n == leaderLengthBytes+2:
 			// We have the first three bytes of the frame so we have enough data to find
 			// the length and the type of the message (which we will need in a later trip
 			// around this loop).
@@ -1106,7 +1863,7 @@ func (rtcm *RTCM) ReadNextFrame(reader *bufio.Reader) ([]byte, error) {
 			// The frame contains a 3-byte header, a variable-length message (for which
 			// we now know the length) and a 3-byte CRC.  Now we just need to continue to
 			// read bytes until we have the whole message.
-			expectedFrameLength = messageLength + headerLengthBytes + crcLengthBytes
+			expectedFrameLength = messageLength + leaderLengthBytes + crcLengthBytes
 			logEntry2 := fmt.Sprintf("ReadNextFrame: expecting a %d frame", expectedFrameLength)
 			rtcm.makeLogEntry(logEntry2)
 
@@ -1161,697 +1918,675 @@ func (rtcm *RTCM) ReadNextMessage(reader *bufio.Reader) (*Message, error) {
 }
 
 // GetMessage1005 returns a text version of a message type 1005
-func (rtcm *RTCM) GetMessage1005(m []byte) (*Message1005, uint) {
+func (rtcm *RTCM) GetMessage1005(m []byte) (*Message1005, error) {
 	var result Message1005
 	// Pos is the position within the bitstream.
 	var pos uint = HeaderLengthBits
 
-	result.MessageType = uint(Getbitu(m, pos, 12))
+	result.MessageType = uint(GetBitsAsUint64(m, pos, 12))
 	pos += 12
-	result.StationID = uint(Getbitu(m, pos, 12))
+	result.StationID = uint(GetBitsAsUint64(m, pos, 12))
 	pos += 12
-	result.ITRFRealisationYear = uint(Getbitu(m, pos, 6))
+	result.ITRFRealisationYear = uint(GetBitsAsUint64(m, pos, 6))
 	pos += 6
-	result.GPS = (Getbitu(m, pos, 1) == 1)
-	pos++
-	result.Glonass = (Getbitu(m, pos, 1) == 1)
-	pos++
-	result.Galileo = (Getbitu(m, pos, 1) == 1)
-	pos++
-	result.ReferenceStation = (Getbitu(m, pos, 1) == 1)
-	pos++
-	result.AntennaRefX = Getbits(m, pos, 38)
+	result.Ignored1 = uint(GetBitsAsUint64(m, pos, 4))
+	pos += 4
+	result.AntennaRefX = GetbitsAsInt64(m, pos, 38)
 	pos += 38
-	result.Oscilator = (Getbitu(m, pos, 1) == 1)
-	pos++
-	result.ReservedBit = (Getbitu(m, pos, 1) == 1)
-	pos++
-	result.AntennaRefY = Getbits(m, pos, 38)
-	pos += 38
-	result.QuarterCycle = uint(Getbitu(m, pos, 2))
+	result.Ignored2 = uint(GetBitsAsUint64(m, pos, 2))
 	pos += 2
-	result.AntennaRefZ = Getbits(m, pos, 38)
+	result.AntennaRefY = GetbitsAsInt64(m, pos, 38)
+	pos += 38
+	result.Ignored3 = uint(GetBitsAsUint64(m, pos, 2))
+	pos += 2
+	result.AntennaRefZ = GetbitsAsInt64(m, pos, 38)
 	pos += 38
 
-	return &result, pos
+	return &result, nil
 }
 
-// GetMessage1230 returns a text version of a message type 1230
-// GLONASS code-phase biases
-func (rtcm *RTCM) GetMessage1230(m []byte) (*Message1230, uint) {
-	const codeBiasValueLength = 16
-	var result Message1230
-	// Pos is the position within the bitstream.  It starts just beyond
-	// the 24-bit frame header.
-	var pos uint = HeaderLengthBits
-
-	// Pos should never get beyond the end of the message within the frame.
-	messageEnd := uint((len(m) * 8) - CRCLengthBits)
-
-	result.MessageType = uint(Getbitu(m, pos, 12))
-	pos += 12
-	result.StationID = uint(Getbitu(m, pos, 12))
-	pos += 12
-	result.Aligned = (Getbitu(m, pos, 1) == 1)
-	pos++
-
-	pos += 3 // 3 bits reserved
-
-	// The signal mask is 4 bits.  The bits are:
-	// MSB 0 the L1 C/A code-phase bias is supplied
-	//     1 the L1 P code-phase bias is supplied
-	//     2 the L2 C/W code-phase bias is supplied
-	// LSB 3 the L2 P code-phase bias is supplied
-
-	// Get the whole mask.  Don't advance the position.
-	result.Signalmask = uint(Getbitu(m, pos, 4))
-
-	// Get the bits from the mask, advancing the position
-	// and counting the number of set bits.
-	var bitsSetInMask uint64 = 0
-	var maskBit [4]uint64
-	for i, _ := range maskBit {
-		maskBit[i] = Getbitu(m, pos, 1)
-		pos++
-		bitsSetInMask += maskBit[i]
-	}
-
-	result.L1_C_A_Bias_supplied = (maskBit[0] == 1)
-	result.L1_P_Bias_supplied = (maskBit[1] == 1)
-	result.L2_C_A_Bias_supplied = (maskBit[2] == 1)
-	result.L2_P_Bias_supplied = (maskBit[3] == 1)
-
-	// If there are any bias values they come next, one 16-bit number
-	// for each bit set in the mask.  The number may be the special
-	// invalid value.  If a bias value is not given it's assumed to be
-	// valid and zero.
-
-	var biasValue [4]int
-	var biasValueValid [4]bool
-
-	// The default setting for the valid field is true.
-	for i, _ := range biasValueValid {
-		biasValueValid[i] = true
-	}
-
-	if bitsSetInMask > 0 {
-
-		// There are some bias values.
-
-		// sanity check
-		if pos+codeBiasValueLength >= messageEnd {
-			logEntry := fmt.Sprintf("GetMessage1230: warning - overrun - pos %d messageEnd %d", pos, messageEnd)
-			rtcm.makeLogEntry(logEntry)
-		}
-
-		// Get the bias values, but avoid overrunning the message.
-		for i := range biasValue {
-			if maskBit[i] == 1 &&
-				(pos+codeBiasValueLength) <= messageEnd {
-
-				bits := Getbitu(m, pos, 16)
-				if bits == glonassCodeBiasInvalidValue {
-					biasValueValid[i] = false
-					biasValue[i] = 0
-				} else {
-					biasValueValid[i] = true
-					biasValue[i] = int(Getbits(m, pos, 16))
-				}
-				pos += codeBiasValueLength
-			}
-		}
-	}
-
-	result.L1_C_A_Bias_valid = biasValueValid[0]
-	result.L1_C_A_Bias = biasValue[0]
-
-	result.L1_P_Bias_valid = biasValueValid[1]
-	result.L1_P_Bias = biasValue[1]
-
-	result.L2_C_A_Bias_valid = biasValueValid[2]
-	result.L2_C_A_Bias = biasValue[2]
-
-	result.L2_P_Bias_valid = biasValueValid[3]
-	result.L2_P_Bias = biasValue[3]
-
-	return &result, pos
-}
-
-// GetMSMHeader extracts the header from an MSM message.  It returns
-// the MSMHeader and the bit position of the start of the satellite
-// data (which comes next in the bit stream).
+// GetMSMHeader extracts the header from an MSM message (MSM4 or MSM7).
+// It returns the header data and the bit position of the start of the
+// satellite data (which comes next in the bit stream).  If the bit stream
+// is not long enough, an error is returned.
 //
-func (rtcm *RTCM) GetMSMHeader(m []byte) (header *MSMHeader, startOfSatelliteData uint) {
-	var h MSMHeader
-	// Pos is the position within the bitstream.
-	// Skip over the header.
-	var pos uint = HeaderLengthBits
-	h.MessageType = uint(Getbitu(m, pos, 12))
-	pos += 12
-	switch h.MessageType {
-	case 1077:
-		h.Constellation = "GPS"
-	case 1087:
-		h.Constellation = "GLONASS"
-	case 1097:
-		h.Constellation = "Galileo"
-	case 1127:
-		h.Constellation = "BeiDou"
+func (rtcm *RTCM) GetMSMHeader(bitStream []byte) (*MSMHeader, uint, error) {
+
+	// The MSMHeader contains:
+	//    a 12-bit unsigned message type (1074, 1084 ... MSM4. 1077 ... MSM7.)
+	//    a 12-bit unsigned station ID
+	//    a 30-bit unsigned timestamp
+	//    a boolean multiple message flag
+	//    a 3-bit unsigned sequence number
+	//    a 7-bit unsigned session transmission time value
+	//    a 2-bit unsigned clock steering indicator
+	//    a 2-bit unsigned external clock indicator
+	//    a boolean GNSS Divergence Free Smoothing Indicator
+	//    a 3-bit GNSS Smoothing Interval
+	//    a 64-bit satellite mask (one bit sit per satellite observed)
+	//    a 32-bit signal mask (one bit set per signal type observed)
+	//    a cell mask (nSatellites X nSignals) bits long
+	//
+	// The function returns the broken out header and the bit position
+	// of the start of the next part of the message, which follows
+	// immediately after the cell mask.
+	const lenMessageType = 12
+	const lenStationID = 12
+	const lenEpochTime = 30
+	const lenMultipleMessageFlag = 1
+	const lenSequenceNumber = 3
+	const lenSessionTransmissionTime = 7
+	const lenClockSteeringIndicator = 2
+	const lenExternalClockSteeringIndicator = 2
+	const lenSmoothingIndicator = 1
+	const lenSmoothingInterval = 3
+
+	// The minimum length of an MSM header
+	const minLengthMSMHeader = lenMessageType + lenStationID + lenEpochTime + lenMultipleMessageFlag +
+		lenSequenceNumber + lenSessionTransmissionTime + lenClockSteeringIndicator +
+		lenExternalClockSteeringIndicator + lenSmoothingIndicator + lenSmoothingInterval +
+		lenSatelliteMask + lenSignalMask
+
+	const maxLengthOfCellMask = 64
+
+	// lenBitStreamInBits is the length of the bitstream in bits, including
+	// the 3-byte message leader.
+	lenBitStreamInBits := len(bitStream) * 8
+
+	// We don't know the length of the header yet, but we have a minimum.
+	// Check that, ignoring the 3-byte message leader.
+	if (lenBitStreamInBits - leaderLengthInBits) < minLengthMSMHeader {
+		// Error - not enough data.
+		em := fmt.Sprintf("bitstream is too short for an MSM header - got %d bits, expected at least %d",
+			lenBitStreamInBits, minLengthMSMHeader)
+		return nil, 0, errors.New(em)
 	}
-	h.StationID = uint(Getbitu(m, pos, 12))
-	pos += 12
-	h.EpochTime = uint(Getbitu(m, pos, 30))
-	pos += 30
-	// The epoch time in the message is milliseconds since the start of the
-	// constellation's epoch.  UTCTime is the same time in UTC.
-	switch h.MessageType {
-	case 1077:
-		//GPS.
-		h.UTCTime = rtcm.GetUTCFromGPSTime(h.EpochTime)
-		h.Constellation = "GPS"
 
-	case 1087:
-		// Glonass.
-		h.UTCTime = rtcm.GetUTCFromGlonassTime(h.EpochTime)
-		h.Constellation = "GLONASS"
+	// Get a header object with the type values filled in.  (Delegating
+	// this to a subsidiary function simplifies the testing.)
+	msmHeader, pos, headerError := getMSMType(bitStream, 0)
 
-	case 1097:
-		// Galileo (which actually uses GPS time).
-		h.UTCTime = rtcm.GetUTCFromGalileoTime(h.EpochTime)
-		h.Constellation = "Galileo"
-
-	case 1127:
-		// Beidou.
-		h.UTCTime = rtcm.GetUTCFromBeidouTime(h.EpochTime)
-		h.Constellation = "BeiDou"
-	default:
-		h.Constellation = "Unknown"
+	if headerError != nil {
+		return nil, 0, headerError
 	}
 
-	h.MultipleMessage = (Getbitu(m, pos, 1) == 1)
-	pos++
-	h.SequenceNumber = uint(Getbitu(m, pos, 3))
-	pos += 3
-	h.SessionTransmissionTime = uint(Getbitu(m, pos, 7))
-	pos += 7
-	h.ClockSteeringIndicator = uint(Getbitu(m, pos, 2))
-	pos += 2
-	h.ExternalClockIndicator = uint(Getbitu(m, pos, 2))
-	pos += 2
-	h.GNSSDivergenceFreeSmoothingIndicator =
-		(Getbitu(m, pos, 1) == 1)
-	pos++
-	h.GNSSSmoothingInterval = uint(Getbitu(m, pos, 3))
-	pos += 3
+	// Get the rest of the fixed-length values.
+	msmHeader.StationID = uint(GetBitsAsUint64(bitStream, pos, lenStationID))
+	pos += lenStationID
+	msmHeader.EpochTime = uint(GetBitsAsUint64(bitStream, pos, lenEpochTime))
+	pos += lenEpochTime
+	msmHeader.MultipleMessage = (GetBitsAsUint64(bitStream, pos,
+		lenMultipleMessageFlag) == 1)
+	pos += lenMultipleMessageFlag
+	msmHeader.SequenceNumber = uint(GetBitsAsUint64(bitStream, pos,
+		lenSequenceNumber))
+	pos += lenSequenceNumber
+	msmHeader.SessionTransmissionTime = uint(GetBitsAsUint64(bitStream, pos,
+		lenSessionTransmissionTime))
+	pos += lenSessionTransmissionTime
+	msmHeader.ClockSteeringIndicator = uint(GetBitsAsUint64(bitStream, pos,
+		lenClockSteeringIndicator))
+	pos += lenClockSteeringIndicator
+	msmHeader.ExternalClockIndicator = uint(GetBitsAsUint64(bitStream, pos,
+		lenExternalClockSteeringIndicator))
+	pos += lenExternalClockSteeringIndicator
+	msmHeader.GNSSDivergenceFreeSmoothingIndicator =
+		(GetBitsAsUint64(bitStream, pos, lenSmoothingIndicator) == 1)
+	pos += lenSmoothingIndicator
+	msmHeader.GNSSSmoothingInterval = uint(GetBitsAsUint64(bitStream, pos,
+		lenSmoothingInterval))
+	pos += lenSmoothingInterval
 
-	h.SatelliteMaskBits = uint64(Getbitu(m, pos, satelliteMaskLength))
-	// Bit 63 of the mask is satellite number 1, bit 62 is 2,
-	// bit 0 is 64.
-	h.Satellites = make([]uint, 0)
-	for satNum := 1; satNum <= satelliteMaskLength; satNum++ {
-		if Getbitu(m, pos, 1) == 1 {
-			h.Satellites = append(h.Satellites, uint(satNum))
+	// Get the satellite mask, but don't advance the bit position.  That's
+	// done next.
+	msmHeader.SatelliteMaskBits = uint64(GetBitsAsUint64(bitStream, pos,
+		lenSatelliteMask))
+
+	// Create a slice of satellite IDs, advancing the bit position as we go.
+	// Bit 63 of the mask is satellite number 1, bit 62 is 2, bit 0 is 64.
+	// If signals were observed from satellites 3, 7 and 9, the slice will
+	// contain {3, 7, 9}.  (Note, we then expect to see 3 signal cells later
+	// in the message.)
+	msmHeader.Satellites = make([]uint, 0)
+	for satNum := 1; satNum <= lenSatelliteMask; satNum++ {
+		if GetBitsAsUint64(bitStream, pos, 1) == 1 {
+			msmHeader.Satellites = append(msmHeader.Satellites, uint(satNum))
 		}
 		pos++
 	}
 
-	h.SignalMaskBits = uint32(Getbitu(m, pos, signalMaskLength))
+	// Get the signal mask, but don't advance the bit position.  That's
+	// done next.
+	msmHeader.SignalMaskBits = uint32(GetBitsAsUint64(bitStream, pos,
+		lenSignalMask))
 
-	// Bit 31 of the mask is signal number 1, bit 30 is 2,
-	// bit 0 is 32.
-	h.Signals = make([]uint, 0)
-	for sigNum := 1; sigNum <= signalMaskLength; sigNum++ {
-		if Getbitu(m, pos, 1) == 1 {
-			h.Signals = append(h.Signals, uint(sigNum))
+	// Create a slice of signal IDs, advancing the bit position as we go.
+	// Bit 31 of the mask is signal number 1, bit 30 is 2, bit 0 is 32.
+	// If we observed signals 62 and 64, the mask bits will be 0x0005
+	// and the slice will contain {62, 64}.
+	msmHeader.Signals = make([]uint, 0)
+	for sigNum := 1; sigNum <= lenSignalMask; sigNum++ {
+		if GetBitsAsUint64(bitStream, pos, 1) == 1 {
+			msmHeader.Signals = append(msmHeader.Signals, uint(sigNum))
 		}
 		pos++
 	}
 
-	// The cell mask is variable length but <= 64.
-	cellMaskLength := uint(len(h.Satellites) * len(h.Signals))
-	if cellMaskLength > 64 {
-		logEntry := fmt.Sprintf("GetMSMHeader: cellMask is %d bits - expected <= 64",
-			cellMaskLength)
-		rtcm.makeLogEntry(logEntry)
-		return nil, 0
-	}
-	h.CellMaskBits = uint64(Getbitu(m, pos, cellMaskLength))
+	// The last component of the header is the cell mask.  This is variable
+	// length - (number of signals) X (number of satellites) bits, no more
+	// than maxLengthOfCellMask bits long.  Now that we know those values, we
+	// can calculate the length and do some final sanity checks.
+	//
+	cellMaskLength := uint(len(msmHeader.Satellites) * len(msmHeader.Signals))
 
-	h.CellMask = make([][]bool, len(h.Satellites), len(h.Satellites))
-	for i := 0; i < len(h.Satellites); i++ {
-		h.CellMask[i] = make([]bool, len(h.Signals), len(h.Signals))
-		for j := 0; j < len(h.Signals); j++ {
-			h.CellMask[i][j] = (uint32(Getbitu(m, pos, 1)) == 1)
+	if cellMaskLength > maxLengthOfCellMask {
+		em := fmt.Sprintf("GetMSMHeader: cellMask is %d bits - expected <= %d",
+			cellMaskLength, maxLengthOfCellMask)
+		return nil, 0, errors.New(em)
+	}
+
+	// headerBits is the number of bits in the bitstream including the 24-bit
+	// message leader.
+	headerBits := uint(lenBitStreamInBits)
+
+	// expectedHeaderLength is the length of the header including the cell mask
+	// and the 24-bit message leader.
+	expectedHeaderLength := minLengthMSMHeader + cellMaskLength + leaderLengthInBits
+
+	// Check that the bitstream is long enough.
+	if headerBits < expectedHeaderLength {
+		// Error - not enough data.
+		em := fmt.Sprintf("bitstream is too short for an MSM header with %d cell mask bits - got %d bits, expected at least %d",
+			cellMaskLength, lenBitStreamInBits, expectedHeaderLength)
+		return nil, 0, errors.New(em)
+
+	}
+
+	// Get the cell mask as a string of bits.  The bits form a two-dimensional
+	// array of (number of signals) X (number of satellites) bits.  The length
+	// is always <= 64.  If the receiver observed two signals types and it
+	// observed both types from one satellite, just the first type from another
+	// and just the second type from a third satellite, the mask will be 11 10 01.
+	// Don't advance the bit position - that's done next.
+	msmHeader.CellMaskBits = uint64(GetBitsAsUint64(bitStream, pos, cellMaskLength))
+
+	// Create a slice of slices of bools, each bool representing a bit in the
+	// cell mask.  If the receiver observed two signals types and it observed
+	// them from 3 satellites, the cell mask might be:  {{t,t, f}, {t,f, t}}
+	// meaning that the device received both types from the first satellite,
+	// just the first signal type from the second satellite and just the
+	// second type from the third satellite.  (Note: given that in that example
+	// four items are set true, we also expect to see four signal cells later
+	// in the message.
+	//
+	msmHeader.CellMask = make([][]bool, 0)
+	for i := 0; i < len(msmHeader.Satellites); i++ {
+		row := make([]bool, 0)
+		for j := 0; j < len(msmHeader.Signals); j++ {
+			value := (uint32(GetBitsAsUint64(bitStream, pos, 1)) == 1)
 			pos++
-			if h.CellMask[i][j] {
-				h.NumSignalCells++
+			row = append(row, value)
+			if value {
+				msmHeader.NumSignalCells++
 			}
 		}
+		msmHeader.CellMask = append(msmHeader.CellMask, row)
 	}
 
-	return &h, pos
+	return msmHeader, pos, nil
 }
 
-// GetMSM4SatelliteCells extracts the satellite cell data from an MSM4 message.
+// getMSMwithType extracts the message type from the bitstream, starting at
+// the startBit position, and returns an MSMHeader object with the type
+// fields filled in, the number of bits from the bitstream consumed and any
+// error message.  The bitstream is presumed to contain an MSM4 or an MSM7
+// Message and the MSM4 field in the header indicates which of those it is.
+// An error is returned if the bitstream is too short or if the message
+// is not an MSM4 or an MSM7.
+//
+func getMSMType(bitStream []byte, startBit uint) (*MSMHeader, uint, error) {
+
+	// Number of bits in the message type value.
+	const bitsInMessageType = 12
+	// Number of bits in the 3-byte message leader.
+	const bitsInMessageLeader = leaderLengthBytes * 8
+	// For the bitstream to contain a message type, it must be at least this long.
+	const minMessageLength = bitsInMessageLeader + bitsInMessageType
+
+	// Check that the bitstream is long enough.
+	messageBits := len(bitStream) * 8
+	if messageBits < minMessageLength {
+		// Error - not enough data.
+		em := fmt.Sprintf("cannot extract the header from a bitstream %d bits long, expected at least %d bits",
+			messageBits, minMessageLength)
+		return nil, 0, errors.New(em)
+	}
+
+	// Get the message type.
+	pos := startBit + leaderLengthInBits
+	messageType := int(GetBitsAsUint64(bitStream, pos, 12))
+	pos += 12
+	constellation := ""
+
+	// Figure out whether it's an MSM4, and MSM7 or some unexpected type.
+	switch messageType {
+	case 1074:
+		constellation = "GPS"
+	case 1084:
+		constellation = "GLONASS"
+	case 1094:
+		constellation = "Galileo"
+	case 1104:
+		constellation = "SBAS"
+	case 1114:
+		constellation = "QZSS"
+	case 1124:
+		constellation = "BeiDou"
+	case 1134:
+		constellation = "NavIC/IRNSS"
+	case 1077:
+		constellation = "GPS"
+	case 1087:
+		constellation = "GLONASS"
+	case 1097:
+		constellation = "Galileo"
+	case 1107:
+		constellation = "SBAS"
+	case 1117:
+		constellation = "QZSS"
+	case 1127:
+		constellation = "BeiDou"
+	case 1137:
+		constellation = "NavIC/IRNSS"
+
+	default:
+		// Error - the message must be MSM4 or MSM7.
+		em := fmt.Sprintf("message type %d is not an MSM4 or an MSM7", messageType)
+		return nil, 0, errors.New(em)
+	}
+
+	// Create and return the header.
+	msmHeader := MSMHeader{MessageType: messageType, Constellation: constellation}
+
+	return &msmHeader, pos, nil
+}
+
+// getSatelliteCells extracts the satellite cell data from an MSM4 message.
 // It returns a slice of cell data and the number of bits of the message
 // bitstream consumed so far (which is the index of the start of the signal
-// cells).
+// cells).  If the bitstream is not long enough to contain the message,
+// an error is returned.
 //
-func (rtcm *RTCM) GetMSM4SatelliteCells(m []byte, h *MSMHeader, startOfSatelliteData uint) ([]MSMSatelliteCell, uint) {
+func (rtcm *RTCM) getSatelliteCells(bitStream []byte, header *MSMHeader, startOfSatelliteData uint) ([]MSMSatelliteCell, uint, error) {
 	// The second part of the MSM message is the satellite data.  If signals were
 	// observed from satellites 2, 3 and 15, there will be three sets of data fields.
 	// The bit stream contains all of the rough range values, followed by the range
 	// delta values.  The rough values and delta values are merged together later.
-	// It's more convenient to present these as an array of fields, one for each
-	// satellite from which signals were observed.
-	satData := make([]MSMSatelliteCell, len(h.Satellites))
 
-	// Define the lengths of each field.
-	const lenRangeMillisWhole = 8
-	const lenRangeMillisFractional = 10
+	// Define the lengths of each field and the invalid value if any.
+	const lenWholeMillis = 8
+	const lenExtendedInfo = 4 // MSM7 only.
+	const lenFractionalMillis = 10
+	const lenPhaseRangeRate = 14 // MSM7 only.
 
-	// Set the satellite ids.  If the satellite list in the header (h.Satellites)
+	bitsLeft := len(bitStream)*8 - int(startOfSatelliteData)
+	minBitsPerMSM4 := len(header.Satellites) * (lenWholeMillis + lenFractionalMillis)
+	minBitsPerMSM7 := minBitsPerMSM4 +
+		(len(header.Satellites) * (lenPhaseRangeRate + lenExtendedInfo))
+
+	if MSM4(header.MessageType) {
+		if (len(bitStream) * 8) <= minBitsPerMSM4 {
+			message := fmt.Sprintf("overrun - not enough data for %d MSM4 satellite cells - %d %d",
+				header.Satellites, minBitsPerMSM4, bitsLeft)
+			return nil, 0, errors.New(message)
+		}
+
+	} else {
+
+		if (len(bitStream) * 8) < minBitsPerMSM7 {
+			message := fmt.Sprintf("overrun - not enough data for %d MSM7 satellite cells - %d %d",
+				len(header.Satellites), minBitsPerMSM7, bitsLeft)
+			return nil, 0, errors.New(message)
+		}
+	}
+
+	// Get the satellite ids.  If the satellite list in the header (h.Satellites)
 	// contains {2, 3, 15} then we have observed satellites with IDs 2, 3 and 15.
 	//
-	for i := range satData {
-		satData[i].SatelliteID = h.Satellites[i]
+	id := make([]uint, 0)
+	for i := range header.Satellites {
+		id = append(id, uint(header.Satellites[i]))
 	}
 
-	// Set all of the valid values - they may be unset later.
-	for i := range satData {
-		satData[i].RangeValid = true
-		satData[i].PhaseRangeRateValid = true
-	}
-
-	// Get the rough range values (whole milliseconds).  Watch out for the invalid value.
+	// Set the bit position to the start of the satellite data in the message.
 	pos := startOfSatelliteData
-	for i := 0; i < int(len(h.Satellites)); i++ {
-		v := uint(Getbitu(m, pos, lenRangeMillisWhole))
-		if v == rangeMillisWholeInvalidValue {
-			satData[i].RangeValid = false
+
+	// Get the rough range values (whole milliseconds).
+	wholeMillis := make([]uint, 0)
+	for range header.Satellites {
+		millis := uint(GetBitsAsUint64(bitStream, pos, lenWholeMillis))
+		pos += lenWholeMillis
+		wholeMillis = append(wholeMillis, millis)
+	}
+
+	// An MSM7 has a phase range rate field, an MSM4 does not.
+	extendedInfo := make([]uint, 0)
+	if MSM7(header.MessageType) {
+		for range header.Satellites {
+			info := GetBitsAsUint64(bitStream, pos, lenExtendedInfo)
+			pos += lenExtendedInfo
+			extendedInfo = append(extendedInfo, uint(info))
+		}
+	}
+
+	// Get the fractional millis values (fractions of a millisecond).
+	fractionalMillis := make([]uint, 0)
+	for range header.Satellites {
+		fraction := GetBitsAsUint64(bitStream, pos, lenFractionalMillis)
+		pos += lenFractionalMillis
+		fractionalMillis = append(fractionalMillis, uint(fraction))
+	}
+
+	// An MSM7 has a phase range rate field, an MSM4 does not.
+	phaseRangeRate := make([]int, 0)
+	if MSM7(header.MessageType) {
+		for range header.Satellites {
+			rate := GetbitsAsInt64(bitStream, pos, lenPhaseRangeRate)
+			pos += lenPhaseRangeRate
+			phaseRangeRate = append(phaseRangeRate, int(rate))
+		}
+	}
+
+	// Create a slice of satellite cells initialised from those data.
+	satData := make([]MSMSatelliteCell, 0)
+	for i := range header.Satellites {
+		if MSM4(header.MessageType) {
+			satCell := createSatelliteCell(header.MessageType, id[i], wholeMillis[i], fractionalMillis[i], 0, 0)
+			satData = append(satData, satCell)
 		} else {
-			satData[i].RangeWholeMillis = v
+			satCell := createSatelliteCell(header.MessageType, id[i], wholeMillis[i],
+				fractionalMillis[i], extendedInfo[i], phaseRangeRate[i])
+			satData = append(satData, satCell)
 		}
-
-		pos += lenRangeMillisWhole
 	}
 
-	// Get the range delta values (fractions of a millisecond).
-	for i := 0; i < int(len(h.Satellites)); i++ {
-		if satData[i].RangeValid {
-			satData[i].RangeFractionalMillis =
-				uint(Getbitu(m, pos, lenRangeMillisFractional))
-		}
-		pos += lenRangeMillisFractional
-	}
-
+	// The bit position is now at the start of the signal data.
 	startOfSignalData := pos
 
-	return satData, startOfSignalData
+	return satData, startOfSignalData, nil
 }
 
-// GetMSM7SatelliteCells extracts the satellite cell data from an MSM4 message.
-// It returns a slice of cell data and the number of bits of the message
-// bitstream consumed so far (which is the index of the start of the signal
-// cells).
-//
-func (rtcm *RTCM) GetMSM7SatelliteCells(m []byte, h *MSMHeader, startOfSatelliteData uint) ([]MSMSatelliteCell, uint) {
-	// The second part of the MSM message is the satellite data.  If signals were
-	// observed from satellites 2, 3 and 15, there will be three sets of data fields.
-	// Compared with the satellite data in an MSM4 message, there are some extra fields.
-	// The bit stream contains:  all of the rough range values, followed by the extended
-	// satellite data values, the range delta values, then the rough phase range rate
-	// values (the deltas for which are in the signal data).  The rough values and the
-	// delta values are merged together later.
-	//
-	// It's more convenient to present the result as a slice of MSMSatelliteCell objects,
-	// one for each observed satellite.
-	//
-	satData := make([]MSMSatelliteCell, len(h.Satellites))
+// createSatelliteCell creates a satellite cell from the given values.  If msm4 is
+// true, it's an MSM4 cell, otherwise it's an MSM7 cell.
+func createSatelliteCell(messageType int, id, wholeMillis, fractionalMillis, extendedInfo uint, phaseRangeRate int) MSMSatelliteCell {
+	// Invalid values for various fields.  These are n-bit values with the top
+	// bit set to 1 and the rest all zero.  For a two-s complement signed quantity,
+	// the result will be a negative number.
 
-	// Define the lengths of each field.
-	const lenRangeMillisWhole = 8
-	const lenExtendedInfo = 4
-	const lenRangeMillisFractional = 10
-	const lenPhaseRangeRate = 14
-
-	// Set the satellite ids.  If the satellite list in the header (h.Satellites)
-	// contains {2, 3, 15} then we have observed satellites with IDs 2, 3 and 15.
-	//
-	for i := range satData {
-		satData[i].SatelliteID = h.Satellites[i]
+	cell := MSMSatelliteCell{
+		MessageType:           messageType,
+		SatelliteID:           id,
+		RangeWholeMillis:      wholeMillis,
+		RangeFractionalMillis: fractionalMillis,
 	}
 
-	// Set all of the valid values - they may be unset later.
-	for i := range satData {
-		satData[i].RangeValid = true
-		satData[i].PhaseRangeRateValid = true
+	if MSM7(messageType) {
+		// An MSM7 message has an extended info and a phase
+		// range rate field.
+		cell.ExtendedInfo = extendedInfo
+		cell.PhaseRangeRate = phaseRangeRate
 	}
-
-	// Get the rough range values (whole milliseconds).  Watch out for the invalid value.
-	pos := startOfSatelliteData
-	for i := 0; i < int(len(h.Satellites)); i++ {
-		v := uint(Getbitu(m, pos, lenRangeMillisWhole))
-		if v == rangeMillisWholeInvalidValue {
-			satData[i].RangeValid = false
-		} else {
-			satData[i].RangeWholeMillis = v
-		}
-
-		pos += lenRangeMillisWhole
-	}
-
-	// Get the extended satellite information.
-	for i := 0; i < int(len(h.Satellites)); i++ {
-		satData[i].ExtendedInfo = uint(Getbitu(m, pos, lenExtendedInfo))
-		pos += lenExtendedInfo
-	}
-
-	// Get the range delta values (fractions of a millisecond)
-	for i := 0; i < int(len(h.Satellites)); i++ {
-		satData[i].RangeFractionalMillis = uint(Getbitu(m, pos, lenRangeMillisFractional))
-		pos += lenRangeMillisFractional
-	}
-
-	// Get the rough phase range rate values.  Watch out for the invalid value.
-	for i := 0; i < int(len(h.Satellites)); i++ {
-		if uint(Getbits(m, pos, lenPhaseRangeRate)) == phaseRangeRateInvalidValue {
-			satData[i].PhaseRangeRateValid = false
-		} else {
-			satData[i].PhaseRangeRate =
-				int(Getbits(m, pos, lenPhaseRangeRate))
-		}
-		pos += lenPhaseRangeRate
-	}
-
-	startOfSignalData := pos
-
-	return satData, startOfSignalData
+	return cell
 }
 
-// GetMSM4SignalCells gets the raw signal data.  The returned object contains the raw data
+// getSignalCells gets the raw signal data.  The returned object contains the raw data
 // for each signal collected together.
-func (rtcm *RTCM) GetMSM4SignalCells(m []byte, h *MSMHeader, satData []MSMSatelliteCell, startOfSignaldata uint) [][]MSMSignalCell {
+func (rtcm *RTCM) getSignalCells(bitStream []byte, header *MSMHeader, satData []MSMSatelliteCell, startOfSignaldata uint) ([][]MSMSignalCell, error) {
 	// The third part of the message bit stream is the signal data.  Each satellite can
 	// send many signals, each on a different frequency.  For example, if we observe one
 	// signal from satellite 2, two from satellite 3 and 2 from satellite 15, there will
-	// be five sets of signal data.  It's composed of the pseudo range delta values for
-	// all five signals, followed by all of the phase range delta values, the phase range
-	// lock time indicator values, the half-cycle ambiguity indicator values, then
-	// the GNSS signal CNR values.  It's more convenient to present these as a slice
-	// of slices of fields, one outer slice for each satellite and one inner slice for
-	// each observed signal.  The raw data in the fields are merged together later.
-
-	var signalCell [][]MSMSignalCell
-	sigData := make([]MSMSignalCell, h.NumSignalCells)
-	lengthInBits := len(m) * 8
+	// be five sets of signal data.  Irritatingly they are not laid out in a convenient
+	// way.  First, we get the pseudo range delta values for each of the five signals,
+	// followed by all of the phase range delta values, and so on.  Some of the fields
+	// are different length depending on the message type, MSM4 or MSM7.
+	//
+	// It's more convenient to present these as a slice of slices of fields, one outer
+	// slice for each satellite and one inner slice for each observed signal.
+	//
+	// Some of the values in the MSMSignalCell objects are derived from the data in the
+	// message.  For example, the range in metres is derived by aggregating the approximate
+	// value from the MSMSatelliteCell and the delta in the MSMS, which produces a
+	// transit time, and then applying a conversion.
 
 	// Define the lengths of the fields
-	const lenRangeDelta = 15
-	const lenPhaseRangeDelta = 22
-	const lenLockTimeIndicator = 4
-	const lenHalfCycleAmbiguity = 1
-	const lenCNR = 6
-	const lenPhaseRangeRateDelta = 15
+	const lenRangeDeltaMSM4 uint = 15
+	const lenRangeDeltaMSM7 uint = 20
+	const lenPhaseRangeDeltaMSM4 uint = 22
+	const lenPhaseRangeDeltaMSM7 uint = 24
+	const lenLockTimeIndicatorMSM4 uint = 4
+	const lenLockTimeIndicatorMSM7 uint = 10
+	const lenHalfCycleAmbiguity uint = 1
+	const lenCNRMSM4 uint = 6
+	const lenCNRMSM7 uint = 10
+	const lenPhaseRangeRateDelta uint = 15
+
+	const bitsPerMSM4 = lenRangeDeltaMSM4 + lenPhaseRangeDeltaMSM4 +
+		lenLockTimeIndicatorMSM4 + lenHalfCycleAmbiguity + lenCNRMSM4
+
+	const bitsPerMSM7 = lenRangeDeltaMSM7 + lenPhaseRangeDeltaMSM7 +
+		lenLockTimeIndicatorMSM7 + lenHalfCycleAmbiguity + lenCNRMSM7 +
+		lenPhaseRangeRateDelta
 
 	// Pos is the position within the bitstream.
 	pos := startOfSignaldata
 
-	// Check for overrun.
-	lastPosition := int(pos) + h.NumSignalCells*
-		int(lenRangeDelta+lenPhaseRangeDelta+lenLockTimeIndicator+lenHalfCycleAmbiguity+lenCNR)
+	// If type4 is true, the message is an MSM4, otherwise it's an MSM7
+	type4 := MSM4(int(header.MessageType))
 
-	if lastPosition >= lengthInBits {
-		logEntry := fmt.Sprintf("GetMSM4SignalCells: overrun %d %d", lastPosition, lengthInBits)
-		rtcm.makeLogEntry(logEntry)
-		return signalCell
-	}
-
-	// Set all of the valid values - they may be unset later.
-	for i := range sigData {
-		sigData[i].CNRValid = true
-		sigData[i].PhaseRangeDeltaValid = true
-		sigData[i].PhaseRangeRateDeltaValid = true
-		sigData[i].RangeDeltaValid = true
-	}
-
-	// Get the pseudorange delta values.  Watch out for the invalid value.
-	for i := 0; i < h.NumSignalCells; i++ {
-		if uint(Getbits(m, pos, lenRangeDelta)) == msm4SignalRangeDeltaInvalidValue {
-			sigData[i].RangeDeltaValid = false
-		} else {
-			sigData[i].RangeDelta = int(Getbits(m, pos, lenRangeDelta))
+	// Check that there are enough bits in the message for the expected
+	// number of signals.
+	bitsLeft := uint(len(bitStream)*8) - pos
+	if type4 {
+		bitsExpected := uint(header.NumSignalCells) * bitsPerMSM4
+		if bitsLeft < bitsExpected {
+			message := fmt.Sprintf("overrun - not enough data for %d MSM4 signals - %d %d",
+				header.NumSignalCells, bitsExpected, bitsLeft)
+			return nil, errors.New(message)
 		}
-		pos += lenRangeDelta
-	}
-
-	// Get the phase range delta values.  Watch out for the invalid value.
-	for i := 0; i < h.NumSignalCells; i++ {
-		if uint(Getbits(m, pos, lenPhaseRangeDelta)) == msm4SignalPhaseRangeDeltaInvalidValue {
-			sigData[i].PhaseRangeDeltaValid = false
-		} else {
-			sigData[i].PhaseRangeDelta = int(Getbits(m, pos, lenPhaseRangeDelta))
+	} else {
+		bitsExpected := uint(header.NumSignalCells) * bitsPerMSM7
+		if bitsLeft < bitsExpected {
+			message := fmt.Sprintf("overrun - not enough data for %d MSM7 signals - %d %d",
+				header.NumSignalCells, bitsExpected, bitsLeft)
+			return nil, errors.New(message)
 		}
-		pos += lenPhaseRangeDelta
 	}
 
-	// Get the phase range lock time indicator.
-	for i := 0; i < h.NumSignalCells; i++ {
-		sigData[i].LockTimeIndicator = uint(Getbitu(m, pos, lenLockTimeIndicator))
-		pos += lenLockTimeIndicator
+	// Get the range deltas.
+	rangeDelta := make([]int, 0)
+	{
+		// The length of this field in an MSM4 is different from the length in an MSM7.
+		length := lenRangeDeltaMSM7
+		if type4 {
+			length = lenRangeDeltaMSM4
+		}
+		for i := 0; i < header.NumSignalCells; i++ {
+			rd := int(GetbitsAsInt64(bitStream, pos, length))
+			pos += length
+			rangeDelta = append(rangeDelta, rd)
+		}
+	}
+
+	// Get the phase range deltas.
+	phaseRangeDelta := make([]int, 0)
+	{
+		// The length of this field in an MSM4 is different from the length in an MSM7.
+		length := lenPhaseRangeDeltaMSM7
+		if type4 {
+			length = lenPhaseRangeDeltaMSM4
+		}
+		for i := 0; i < header.NumSignalCells; i++ {
+			prd := int(GetbitsAsInt64(bitStream, pos, length))
+			pos += length
+			phaseRangeDelta = append(phaseRangeDelta, prd)
+		}
+	}
+
+	// Get the lock time indicators.
+	lockTimeIndicator := make([]uint, 0)
+	{
+		// The length of this field in an MSM4 is different from the length in an MSM7.
+		length := lenLockTimeIndicatorMSM7
+		if type4 {
+			length = lenLockTimeIndicatorMSM4
+		}
+		for i := 0; i < header.NumSignalCells; i++ {
+			lti := uint(GetBitsAsUint64(bitStream, pos, length))
+			pos += length
+			lockTimeIndicator = append(lockTimeIndicator, lti)
+		}
 	}
 
 	// Get the half-cycle ambiguity indicator bits.
-	for i := 0; i < h.NumSignalCells; i++ {
-		sigData[i].HalfCycleAmbiguity = (Getbitu(m, pos, lenHalfCycleAmbiguity) == 1)
+	halfCycleAmbiguity := make([]bool, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		hca := (GetBitsAsUint64(bitStream, pos, lenHalfCycleAmbiguity) == 1)
 		pos += lenHalfCycleAmbiguity
+		halfCycleAmbiguity = append(halfCycleAmbiguity, hca)
 	}
 
-	// Get the CNR values.  Watch out for the invalid value.
-	for i := 0; i < h.NumSignalCells; i++ {
-		v := uint(Getbitu(m, pos, lenCNR))
-		if v == msmSignalCMRInvalidValue {
-			sigData[i].CNR = v
+	// Get the CNRs.
+	cnr := make([]uint, 0)
+	{
+		// The length of this field in an MSM4 is different from the length in an MSM7.
+		length := lenCNRMSM7
+		if type4 {
+			length = lenCNRMSM4
+		}
+		for i := 0; i < header.NumSignalCells; i++ {
+			c := uint(GetBitsAsUint64(bitStream, pos, length))
+			pos += length
+			cnr = append(cnr, c)
+		}
+	}
+
+	// Get the phase range rate deltas (MSM7 only)
+	phaseRangeRateDelta := make([]int, 0)
+	if !type4 {
+		length := lenPhaseRangeRateDelta
+		for i := 0; i < header.NumSignalCells; i++ {
+			delta := int(GetbitsAsInt64(bitStream, pos, length))
+			pos += length
+			phaseRangeRateDelta = append(phaseRangeRateDelta, delta)
+		}
+	}
+
+	// Create the signal cells in a slice.
+	cellSlice := make([]MSMSignalCell, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		if type4 {
+			// Create an MSM4 cell.
+			cell := createSignalCell(true, 0, rangeDelta[i], phaseRangeDelta[i],
+				lockTimeIndicator[i], halfCycleAmbiguity[i], cnr[i], 0)
+			cellSlice = append(cellSlice, cell)
 		} else {
-			sigData[i].CNRValid = false
-		}
-		pos += lenCNR
-	}
-
-	// Get the phase range rate delta values.  Watch out for the invalid value.
-	for i := 0; i < h.NumSignalCells; i++ {
-		v := uint(Getbits(m, pos, lenPhaseRangeRateDelta))
-		if v == msm7PhaseRangeRateDeltaInvalidValue {
-			sigData[i].PhaseRangeRateDeltaValid = false
-		} else {
-			sigData[i].PhaseRangeRateDelta = int(Getbits(m, pos, lenPhaseRangeRateDelta))
-		}
-		pos += lenPhaseRangeRateDelta
-	}
-
-	// Set the satellite and signal numbers by cranking through the cell mask.
-
-	cell := 0
-	for i := range h.CellMask {
-		var cellSlice []MSMSignalCell
-		for j := range h.CellMask[i] {
-			if h.CellMask[i][j] {
-				sigData[cell].Satellite = i
-				sigData[cell].SignalID = h.Signals[j]
-				cellSlice = append(cellSlice, sigData[cell])
-				cell++
-			}
-		}
-		signalCell = append(signalCell, cellSlice)
-	}
-	// Set the combined values.  For example the range in metres is derived from
-	// the range values in the satellite cell and the range delta value in the
-	// signal cell.
-	for i := range signalCell {
-		for j := range signalCell[i] {
-			satelliteID := signalCell[i][j].Satellite
-			satellite := &satData[satelliteID]
-			signal := &signalCell[i][j]
-			signal.RangeMetres = getMSMRangeInMetres(h, satellite, signal)
-			var err error
-			signal.PhaseRangeCycles, err = getMSMPhaseRange(h, satellite, signal)
-			if err != nil {
-				logEntry := fmt.Sprintf("error getting phase range - %s\n", err.Error())
-				rtcm.makeLogEntry(logEntry)
-			}
+			// Create an MSM7 cell.
+			cell := createSignalCell(false, 0, rangeDelta[i], phaseRangeDelta[i],
+				lockTimeIndicator[i], halfCycleAmbiguity[i], cnr[i], phaseRangeRateDelta[i])
+			cellSlice = append(cellSlice, cell)
 		}
 	}
 
-	return signalCell
+	// Arrange the cells into a slice of slices, and return.
+	sigData := arrangeSignalCells(header, satData, cellSlice)
+
+	return sigData, nil
 }
 
-// GetMSM7SignalCells extracts the signal cells from an MSM message
-// starting at bit (startOfSignaldata).  It returns the signal cells
-// as a slice of slices of MSM7SignalCell objects, one outer slice
-// element for each satellite and one inner slice element for each
-// signal from that satellite.
-//
-// For example, If signal 5 from satellite 1 was observed and signals
-// 5 and 13 from satellite 6 were observed, element 0 of the outer
-// slice will contain a slice with one element (for satellite 1,
-// signal 5) and element 1 will contain a slice with two elements,
-// representing the signals from satellite 6.  To make this setup
-// easier to use, each MSM7SignalCell contains a satellite ID and a
-// signal ID along with the data from the cell.
-//
-func (rtcm *RTCM) GetMSM7SignalCells(m []byte, h *MSMHeader, satData []MSMSatelliteCell, startOfSignaldata uint) [][]MSMSignalCell {
-	// The number of cells is variable, NumSignalCells in the
-	// header.  As explained in GetMSM7SatelliteCell, the bit
-	// stream is laid out with all pseudo range values followed
-	// by all phase range values, and so on.
+// createSignalCell creates an MSM Signal Cell.
+func createSignalCell(type4 bool, signalID uint, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, phaseRangeRateDelta int) MSMSignalCell {
 
-	var signalCell [][]MSMSignalCell
+	// Create a cell with the values that are always valid.
+	cell := MSMSignalCell{SignalID: signalID,
+		RangeDelta: rangeDelta, PhaseRangeDelta: phaseRangeDelta,
+		LockTimeIndicator: lockTimeIndicator, HalfCycleAmbiguity: halfCycleAmbiguity,
+		CNR: cnr}
 
-	// Get the cell data into a more manageable form - a slice of
-	// MSM7SignalCell objects, one for each expected signal cell.
-	sigData := make([]MSMSignalCell, h.NumSignalCells)
-	lengthInBits := len(m) * 8
-
-	// Define the lengths of the fields
-	const lenRangeDelta = 15
-	const lenPhaseRangeDelta = 22
-	const lenLockTimeIndicator = 4
-	const lenHalfCycleAmbiguity = 1
-	const lenCNR = 6
-
-	// Pos is the position within the bitstream.
-	pos := startOfSignaldata
-
-	// Check for overrun.
-	lastPosition := int(pos) + h.NumSignalCells*
-		int(lenRangeDelta+lenPhaseRangeDelta+lenLockTimeIndicator+lenHalfCycleAmbiguity+lenCNR)
-
-	if lastPosition >= lengthInBits {
-		logEntry := fmt.Sprintf("GetMSM4SignalCells: overrun %d %d", lastPosition, lengthInBits)
-		rtcm.makeLogEntry(logEntry)
-		return signalCell
+	if !type4 {
+		// An MSM4 message doesn't have the phase range rate field.
+		cell.PhaseRangeRateDelta = phaseRangeRateDelta
 	}
 
-	// Set all of the valid values - they may be unset later.
-	for i := range sigData {
-		sigData[i].CNRValid = true
-		sigData[i].PhaseRangeDeltaValid = true
-		sigData[i].PhaseRangeRateDeltaValid = true
-		sigData[i].RangeDeltaValid = true
-	}
-
-	for i := 0; i < h.NumSignalCells; i++ {
-		if pos+20 < uint(lengthInBits) {
-			rangeDelta := int(Getbits(m, pos, 20))
-			pos += 20
-			sigData[i].RangeDelta = rangeDelta
-		} else {
-			logEntry := fmt.Sprintf("GetMSM7SignalCells: overrun %d %d", pos, lengthInBits)
-			rtcm.makeLogEntry(logEntry)
-			return signalCell
-		}
-	}
-	for i := 0; i < h.NumSignalCells; i++ {
-		if pos+24 < uint(lengthInBits) {
-			sigData[i].PhaseRangeDelta = int(Getbits(m, pos, 24))
-			pos += 24
-		} else {
-			logEntry := fmt.Sprintf("GetMSM7SignalCells: overrun %d %d", pos, lengthInBits)
-			rtcm.makeLogEntry(logEntry)
-			return signalCell
-		}
-	}
-	for i := 0; i < h.NumSignalCells; i++ {
-		if pos+10 < uint(lengthInBits) {
-			sigData[i].LockTimeIndicator = uint(Getbitu(m, pos, 10))
-			pos += 10
-		} else {
-			logEntry := fmt.Sprintf("GetMSM7SignalCells: overrun %d %d", pos, lengthInBits)
-			rtcm.makeLogEntry(logEntry)
-			return signalCell
-		}
-	}
-	for i := 0; i < h.NumSignalCells; i++ {
-		if pos < uint(lengthInBits) {
-			sigData[i].HalfCycleAmbiguity = (Getbitu(m, pos, 1) == 1)
-			pos++
-		} else {
-			logEntry := fmt.Sprintf("GetMSM7SignalCells: overrun %d %d", pos, lengthInBits)
-			rtcm.makeLogEntry(logEntry)
-			return signalCell
-		}
-	}
-	for i := 0; i < h.NumSignalCells; i++ {
-		if pos+10 < uint(lengthInBits) {
-			sigData[i].CNR = uint(Getbitu(m, pos, 10))
-			pos += 10
-		} else {
-			logEntry := fmt.Sprintf("GetMSM7SignalCells: overrun %d %d", pos, lengthInBits)
-			rtcm.makeLogEntry(logEntry)
-			return signalCell
-		}
-	}
-	for i := 0; i < h.NumSignalCells; i++ {
-		if pos+15 < uint(lengthInBits) {
-			sigData[i].PhaseRangeRateDelta = int(Getbits(m, pos, 15))
-			pos += 15
-		} else {
-			logEntry := fmt.Sprintf("GetMSM7SignalCells: overrun %d %d", pos, lengthInBits)
-			rtcm.makeLogEntry(logEntry)
-			return signalCell
-		}
-	}
-
-	// Set the satellite and signal numbers by cranking through the cell mask.
-
-	cell := 0
-	for i := range h.CellMask {
-		var cellSlice []MSMSignalCell
-		for j := range h.CellMask[i] {
-			if h.CellMask[i][j] {
-				sigData[cell].Satellite = i
-				sigData[cell].SignalID = h.Signals[j]
-				cellSlice = append(cellSlice, sigData[cell])
-				cell++
-			}
-		}
-		signalCell = append(signalCell, cellSlice)
-	}
-	// Set the combined values.  For example the range in metres is derived from
-	// the range values in the satellite cell and the range delta value in the
-	// signal cell.
-	for i := range signalCell {
-		for j := range signalCell[i] {
-			satelliteID := signalCell[i][j].Satellite
-			satellite := &satData[satelliteID]
-			signal := &signalCell[i][j]
-			signal.RangeMetres = getMSMRangeInMetres(h, satellite, signal)
-			var err error
-			signal.PhaseRangeCycles, err = getMSMPhaseRange(h, satellite, signal)
-			if err != nil {
-				logEntry := fmt.Sprintf("error getting phase range - %s\n", err.Error())
-				rtcm.makeLogEntry(logEntry)
-			}
-			signal.PhaseRangeRateMS, err = getMSMPhaseRangeRate(h, satellite, signal)
-			if err != nil {
-				logEntry := fmt.Sprintf("error getting phase range rate - %s\n", err.Error())
-				rtcm.makeLogEntry(logEntry)
-			}
-		}
-	}
-
-	return signalCell
+	return cell
 }
 
-// GetSatellites gets the list of satellites from the 64-bit
+// arrangeSignalCells arranges the signal cells into a slice of slices, one outer
+// slice per satellite containing a slice of signals for that satellite.  It also
+// adds pointers to the satellite cell for the satellite that received the signal
+// and the header of the message.
+func arrangeSignalCells(header *MSMHeader, satCell []MSMSatelliteCell, signalCell []MSMSignalCell) [][]MSMSignalCell {
+	// For example if the satellite mask in the header contains {3, 5, 8} and
+	// cell mask contains {{1,5},{1},{5}} then we received signals 1 and 5 from
+	// satellite 3, signal 1 from satellite 5 and signal 5 from satellite 8.
+	// We would return this slice of slices:
+	//     0: a slice of two signal cells with satellite ID 3, signal IDs 1 and 5
+	//     1: a slice of one signal cell with satellite ID 5, signal ID 1
+	//     2: a slice of one signal cell with satellite ID 8, signal ID 5
+	// and so on ...
+	//
+	// Figuring this out is a bit messy, because the necessary information
+	// is distributed over the satellite, signal and cell masks in a form
+	// that's compact but difficult to unpick.
+	//
+	signalCells := make([][]MSMSignalCell, len(header.Satellites))
+	for i := range signalCells {
+		signalCells[i] = make([]MSMSignalCell, 0)
+	}
+
+	// signalCellSlice is a slice of cells, c is the index of the next entry.
+	c := 0
+
+	// We want a slice of slices of signal cells, one outer slice per satellite,
+	// one inner slice for the signals that the satellite received.  The logic is
+	// tricky.  If signals 1 and 3 were observed, the signal mask will contain
+	// {1,3}.  If satellite 4 received signals 1 and 3 and satellite 6 received
+	// signal 1, h.Satellites will contain {4, 6} and h.CellMask will contain
+	// {{t,t},{t,f}} - three true values, implying three signal cells in total.
+	// The result is a slice of two slices, the first for satellite 4 and
+	// containing two signal cells and the second for satellite 6 containing
+	// just one signal cell.
+	//
+	// We need the same logic to figure out which satellite received each
+	// signal, so we do that here too.
+	//
+	for i := range header.CellMask {
+		for j := range header.CellMask[i] {
+			if header.CellMask[i][j] {
+				signalCell[c].Header = header
+				// Set the reference to the satellite that received this signal.
+				signalCell[c].Satellite = &(satCell[i])
+				// Get the signal Id from the signal mask.
+				signalCell[c].SignalID = header.Signals[j]
+				// Put the signal cell into the correct slice.
+				signalCells[i] = append(signalCells[i], signalCell[c])
+				// Prepare to process the next signal cell.
+				c++
+			}
+		}
+	}
+
+	return signalCells
+}
+
+// getSatellites gets the list of satellites from the 64-bit
 // satellite mask as a slice of satellite numbers each >= 1,
 // <= 64.  The mask starts at bit pos in the message.
-func GetSatellites(message []byte, pos uint) []uint {
+func getSatellites(message []byte, pos uint) []uint {
 	// Bit 63 of the mask is satellite number 1, bit 62 is 2,
 	// bit 0 is 64.
 	satellites := make([]uint, 0)
-	for satNum := 1; satNum <= satelliteMaskLength; satNum++ {
-		if Getbitu(message, pos, 1) == 1 {
+	for satNum := 1; satNum <= lenSatelliteMask; satNum++ {
+		if GetBitsAsUint64(message, pos, 1) == 1 {
 			satellites = append(satellites, uint(satNum))
 		}
 		pos++
@@ -1859,16 +2594,16 @@ func GetSatellites(message []byte, pos uint) []uint {
 	return satellites
 }
 
-// GetSignals gets the list of signals from the 32-bit signal
+// getSignals gets the list of signals from the 32-bit signal
 // mask as a slice of signal numbers each >= 1, <= 32.  The
 // mask starts at bit pos in the message.
-func GetSignals(message []byte, pos uint) []uint {
+func getSignals(message []byte, pos uint) []uint {
 
 	// Bit 31 of the mask is signal number 1, bit 30 is 2,
 	// bit 0 is 32.
 	signals := make([]uint, 0)
-	for sigNum := 1; sigNum <= signalMaskLength; sigNum++ {
-		if Getbitu(message, pos, 1) == 1 {
+	for sigNum := 1; sigNum <= lenSignalMask; sigNum++ {
+		if GetBitsAsUint64(message, pos, 1) == 1 {
 			signals = append(signals, uint(sigNum))
 		}
 		pos++
@@ -1876,38 +2611,37 @@ func GetSignals(message []byte, pos uint) []uint {
 	return signals
 }
 
-// GetMSMMessage presents an Multiple Signal Message as broken out fields.
-// If it's type 4 or 7, it produces readable versions of the data.
-//
-func (rtcm *RTCM) GetMSMMessage(message *Message) *MSMMessage {
+// GetMSMMessage presents an MSM (type 1074, 1084 etc) or an MSM7 Message
+// (type 1077, 1087 etc) as plain text showing the broken out fields.
+func (rtcm *RTCM) GetMSMMessage(message *Message) (*MSMMessage, error) {
 
 	if !MSM(message.MessageType) {
-		return nil
+		message := fmt.Sprintf("message type %d is not an MSM", message.MessageType)
+		return nil, errors.New(message)
 	}
 
-	header, startOfSatelliteData := rtcm.GetMSMHeader(message.RawData)
+	header, startOfSatelliteData, headerError :=
+		rtcm.GetMSMHeader(message.RawData)
 
-	var satellites []MSMSatelliteCell
-	var signals [][]MSMSignalCell
-	var startOfSignals uint
+	if headerError != nil {
+		return nil, headerError
+	}
 
-	switch {
-	case MSM4(message.MessageType):
-		satellites, startOfSignals =
-			rtcm.GetMSM4SatelliteCells(message.RawData, header, startOfSatelliteData)
+	satellites, startOfSignals, fetchSatellitesError :=
+		rtcm.getSatelliteCells(message.RawData, header, startOfSatelliteData)
+	if fetchSatellitesError != nil {
+		return nil, fetchSatellitesError
+	}
 
-		signals = rtcm.GetMSM4SignalCells(message.RawData, header, satellites, startOfSignals)
-
-	case MSM7(message.MessageType):
-		satellites, startOfSignals =
-			rtcm.GetMSM7SatelliteCells(message.RawData, header, startOfSatelliteData)
-
-		signals = rtcm.GetMSM7SignalCells(message.RawData, header, satellites, startOfSignals)
+	signals, fetchSignalsError :=
+		rtcm.getSignalCells(message.RawData, header, satellites, startOfSignals)
+	if fetchSignalsError != nil {
+		return nil, fetchSignalsError
 	}
 
 	var msmMessage = MSMMessage{Header: header, Satellites: satellites, Signals: signals}
 
-	return &msmMessage
+	return &msmMessage, nil
 }
 
 // GetUTCFromGPSTime converts a GPS time to UTC, using the start time
@@ -2019,7 +2753,13 @@ func GetStartOfLastSundayUTC(now time.Time) time.Time {
 // DisplayMessage takes the given Message object and returns it
 // as a readable string.
 //
-func (r *RTCM) DisplayMessage(message *Message) string {
+func (handler *RTCM) DisplayMessage(message *Message) string {
+
+	if message.MessageType == NonRTCMMessage {
+		return fmt.Sprintf("not RTCM, %d bytes, %s\n%s\n",
+			len(message.RawData), message.Warning, hex.Dump(message.RawData))
+	}
+
 	status := ""
 	if message.Valid {
 		status = "valid"
@@ -2040,50 +2780,78 @@ func (r *RTCM) DisplayMessage(message *Message) string {
 		message.MessageType, len(message.RawData), status, message.Warning)
 	leader += fmt.Sprintf("%s\n", hex.Dump(message.RawData))
 
-	if message.Valid {
-
-		if MSM(message.MessageType) {
-		} else {
-			m, ok := message.Readable(r).(*MSMMessage)
-			if !ok {
-				return ("expected the readable message to be *MSM7Message\n")
-			}
-			return leader + r.displayMSM(m)
-		}
-
-		switch message.MessageType {
-		case NonRTCMMessage:
-			display := fmt.Sprintf("not RTCM, %d bytes, %s\n%s\n",
-				len(message.RawData), message.Warning, hex.Dump(message.RawData))
-			return display
-
-		case 1005:
-			m, ok := message.Readable(r).(*Message1005)
-			if !ok {
-				return ("expected the readable message to be *Message1005\n")
-			}
-			return leader + r.display1005(m)
-
-		case 1230:
-			m, ok := message.Readable(r).(*Message1230)
-			if !ok {
-				return ("expected the readable message to be *Message1230\n")
-			}
-			return leader + r.display1230(m)
-
-		case 4072:
-			m, ok := message.Readable(r).(string)
-			if !ok {
-				return ("expected the readable message to be a string\n")
-			}
-			return leader + m
-
-		default:
-			return leader + "\n"
-		}
-	} else {
+	if !message.Valid {
 		return leader
 	}
+
+	if !displayable(message.MessageType) {
+		return leader
+	}
+
+	// The message is displayable.  Prepare it for display.
+	_, ok := message.PrepareForDisplay(handler).(*MSMMessage)
+	if !ok {
+		return ("expected the readable message to be *MSMMessage\n")
+	}
+
+	switch {
+
+	case message.MessageType == 1005:
+		m, ok := message.PrepareForDisplay(handler).(*Message1005)
+		if !ok {
+			return ("expected the readable message to be *Message1005\n")
+		}
+		return leader + handler.display1005(m)
+
+	case MSM4(message.MessageType):
+		m, ok := message.PrepareForDisplay(handler).(*MSMMessage)
+		if !ok {
+			return ("expected the readable message to be an MSM4\n")
+		}
+		return leader + m.Display(handler)
+
+	case MSM7(message.MessageType):
+		m, ok := message.PrepareForDisplay(handler).(*MSMMessage)
+		if !ok {
+			return ("expected the readable message to be an MSM7\n")
+		}
+		return leader + m.Display(handler)
+
+	default:
+		return leader + "\n"
+	}
+}
+
+// Displayable is true if the message type is one that we know how
+// to display in a readable form.
+func displayable(messageType int) bool {
+	// we currently can display messages of type 1005, MSM4 and MSM7.
+	// A non-RTCM message has type -1, so messageType must be an int.
+
+	if messageType == NonRTCMMessage {
+		return false
+	}
+
+	if MSM4(messageType) || MSM7(messageType) || messageType == 1005 {
+		return true
+	}
+
+	return false
+}
+
+// displayableMSM is true if the message is MSM and we know how to
+// display it.
+func displayableMSM(messageType int) bool {
+
+	if MSM4(messageType) {
+		return true
+	}
+
+	if MSM7(messageType) {
+		return true
+	}
+
+	return false
 }
 
 // display1005 returns a text version of a message type 1005
@@ -2091,193 +2859,23 @@ func (rtcm *RTCM) display1005(message *Message1005) string {
 
 	l1 := fmt.Sprintln("message type 1005 - Base Station Information")
 
-	l2 := fmt.Sprintf("stationID %d, ITRF realisation year %d, GPS %v, GLONASS %v Galileo %v,\n",
-		message.StationID, message.ITRFRealisationYear,
-		message.GPS, message.Glonass, message.Galileo)
-	l2 += fmt.Sprintf("reference station %v, oscilator %v, quarter cycle %d,\n",
-		message.ReferenceStation, message.Oscilator, message.QuarterCycle)
+	l2 := fmt.Sprintf("stationID %d, ITRF realisation year %d, ignored 0x%4x,\n",
+		message.StationID, message.ITRFRealisationYear, message.Ignored1)
+	l2 += fmt.Sprintf("x %d ignored 0x%2x, y %d, ignored 0x%2x z %d,\n",
+		message.AntennaRefX, message.Ignored2, message.AntennaRefY,
+		message.Ignored3, message.AntennaRefZ)
 
-	x := Scaled5ToFloat(message.AntennaRefX)
-	y := Scaled5ToFloat(message.AntennaRefY)
-	z := Scaled5ToFloat(message.AntennaRefZ)
+	x := scaled5ToFloat(message.AntennaRefX)
+	y := scaled5ToFloat(message.AntennaRefY)
+	z := scaled5ToFloat(message.AntennaRefZ)
 	l2 += fmt.Sprintf("ECEF coords in metres (%8.4f,%8.4f,%8.4f)\n",
 		x, y, z)
 	return l1 + l2
 }
 
-// display1230 returns a text version of a message type 1230
-func (rtcm *RTCM) display1230(message *Message1230) string {
-
-	l1 := fmt.Sprintln("message type 1230 - GLONASS code-phase biases")
-
-	var l2, l3, alignment string
-	if message.Aligned {
-		alignment = "aligned"
-	} else {
-		alignment = "not aligned"
-	}
-
-	l2 = fmt.Sprintf("stationID %d, %s, mask %4b\n",
-		message.StationID, alignment, message.Signalmask)
-
-	if message.L1_C_A_Bias_supplied {
-		if message.L1_C_A_Bias_valid {
-			l3 = fmt.Sprintf("L1 C/A bias %d, ", message.L1_C_A_Bias)
-		}
-	}
-
-	if message.L1_P_Bias_supplied {
-		if message.L1_P_Bias_valid {
-			l3 += fmt.Sprintf("L1 P bias %d, ", message.L1_P_Bias)
-		}
-	}
-
-	if message.L2_C_A_Bias_supplied {
-		if message.L1_C_A_Bias_valid {
-			l3 += fmt.Sprintf("L2 C/A bias %d, ", message.L2_C_A_Bias)
-		}
-	}
-
-	if message.L2_P_Bias_supplied {
-		if message.L2_P_Bias_valid {
-			l3 += fmt.Sprintf("L1 P bias %d", message.L2_P_Bias)
-		}
-	}
-	l3 += fmt.Sprint("\n")
-
-	return l1 + l2 + l3
-}
-
-// displayMSM returns a text version of an MSM7 message.
-func (rtcm *RTCM) displayMSM(message *MSMMessage) string {
-	messageType := int(message.Header.MessageType)
-	if !MSM(messageType) {
-		return fmt.Sprintf("type %d is not MSM", message.Header.MessageType)
-	}
-	headerStr := rtcm.displayMSMHeader(message.Header)
-	headerStr += "\n"
-
-	satelliteDisplay := ""
-	signalDisplay := ""
-
-	if MSM4(messageType) || MSM7(messageType) {
-		satelliteDisplay = displayMSMSatelliteCells(message.Satellites)
-		signalDisplay = displayMSM7SignalCells(message)
-	}
-
-	return headerStr + satelliteDisplay + "\n" + signalDisplay + "\n"
-}
-
-// displayMSMHeader return a text version of an MSMHeader.
-func (rtcm *RTCM) displayMSMHeader(h *MSMHeader) string {
-	var timeUTC time.Time
-	line := fmt.Sprintf("type %d %s Full Pseudoranges and PhaseRanges plus CNR (high resolution)\n",
-		h.MessageType, h.Constellation)
-	switch h.Constellation {
-	case "GPS":
-		timeUTC = rtcm.GetUTCFromGPSTime(h.EpochTime)
-	case "GLONASS":
-		timeUTC = rtcm.GetUTCFromGlonassTime(h.EpochTime)
-	case "BeiDou":
-		timeUTC = rtcm.GetUTCFromBeidouTime(h.EpochTime)
-	default:
-		timeUTC = rtcm.GetUTCFromGalileoTime(h.EpochTime)
-	}
-	timeStr := timeUTC.Format(dateLayout)
-	line += fmt.Sprintf("time %s (%d millisecs from epoch)\n", timeStr, h.EpochTime)
-	mode := "single"
-	if h.MultipleMessage {
-		mode = "multiple"
-	}
-	line += fmt.Sprintf("stationID %d, %s message, sequence number %d, session transmit time %d\n",
-		h.StationID, mode, h.SequenceNumber, h.SessionTransmissionTime)
-	line += fmt.Sprintf("clock steering %d, external clock %d ",
-		h.ClockSteeringIndicator, h.ExternalClockIndicator)
-	line += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
-		h.GNSSDivergenceFreeSmoothingIndicator, h.GNSSSmoothingInterval)
-	line += fmt.Sprintf("%d satellites, %d signals, %d signal cells\n",
-		len(h.Satellites), len(h.Signals), h.NumSignalCells)
-
-	return line
-}
-
-// displayMSMSatelliteCells returns a text version of a slice of MSM7 satellite data
-func displayMSMSatelliteCells(satellites []MSMSatelliteCell) string {
-
-	l1 := fmt.Sprintf("%d Satellites\nsatellite ID {range ms, extended info, phase range rate m/s}\n",
-		len(satellites))
-	l2 := ""
-	for i := range satellites {
-		// Mark the range and phase values as valid or invalid.
-		rangeMillis := "invalid"
-		if satellites[i].RangeValid {
-			rangeMillis = fmt.Sprintf("%d.%d", satellites[i].RangeWholeMillis,
-				satellites[i].RangeFractionalMillis)
-		}
-
-		phaseRangeRate := "invalid"
-		if satellites[i].PhaseRangeRateValid {
-			phaseRangeRate = fmt.Sprintf("%d", satellites[i].PhaseRangeRate)
-		}
-		l2 += fmt.Sprintf("%2d {%s %d %s}\n", satellites[i].SatelliteID,
-			rangeMillis, satellites[i].ExtendedInfo, phaseRangeRate)
-	}
-
-	return l1 + l2
-}
-
-// displayMSM7SignalCells returns a text version of the MSM7 signal data from an MSM7Message.
-func displayMSM7SignalCells(message *MSMMessage) string {
-
-	if !MSM(int(message.Header.MessageType)) {
-		return fmt.Sprintf("message type %d does not contain signal cells",
-			message.Header.MessageType)
-	}
-
-	l1 := fmt.Sprintf("%d Signals\nsat ID sig ID {range m (delta) phase range cycles (delta), lock time ind, half cycle ambiguity,\n",
-		len(message.Signals))
-	l1 += "        Carrier Noise Ratio,  phase range rate (delta)}\n"
-	l2 := ""
-
-	for _, list := range message.Signals {
-		for _, signal := range list {
-			// Mark the range and phase values as valid or invalid.
-			r := "invalid"
-			if signal.RangeDeltaValid {
-				r = fmt.Sprintf("%f (%d)", signal.RangeMetres, signal.RangeDelta)
-			}
-			phaseRange := "invalid"
-			if signal.PhaseRangeDeltaValid {
-				phaseRange = fmt.Sprintf("%f (%d)", signal.PhaseRangeCycles, signal.PhaseRangeRateDelta)
-			}
-			phaseRangeRate := "invalid"
-			if signal.PhaseRangeRateDeltaValid {
-				phaseRangeRate = fmt.Sprintf("%f (%d)", signal.PhaseRangeRateMS, signal.PhaseRangeRateDelta)
-			}
-
-			cnr := "invalid"
-			if signal.CNRValid {
-				cnr = fmt.Sprintf("%d", signal.CNR)
-			}
-			satelliteID := message.Header.Satellites[signal.Satellite]
-			l2 += fmt.Sprintf("%2d %2d {%s %s %d, %v, %s, %s}\n",
-				satelliteID, signal.SignalID, r, phaseRange, signal.LockTimeIndicator,
-				signal.HalfCycleAmbiguity, cnr, phaseRangeRate)
-		}
-	}
-	return l1 + l2
-}
-
-// getScaled5 takes a scaled integer a.b where b has 5 decimal places and
-// returns the float value.
-//
-func Scaled5ToFloat(scaled5 int64) float64 {
-	return float64(scaled5) * 0.0001
-}
-
 // CheckCRC checks the CRC of a message frame.
 func CheckCRC(frame []byte) bool {
-	if len(frame) < headerLengthBytes+crcLengthBytes {
+	if len(frame) < leaderLengthBytes+crcLengthBytes {
 		return false
 	}
 	// The CRC is the last three bytes of the message frame.
@@ -2302,53 +2900,59 @@ func CheckCRC(frame []byte) bool {
 	return true
 }
 
-// Getbitu extracts len bits from a slice of  bytes,
-// starting at bit position pos and returns them as a uint.
-//
-// This is RTKLIB's getbitu, translated from C to Go.
-//
-// extern unsigned int getbitu(const unsigned char *buff, int pos, int len)
-// {
-//     unsigned int bits=0;
-//     int i;
-//     for (i=pos;i<pos+len;i++) bits=(bits<<1)+((buff[i/8]>>(7-i%8))&1u);
-//     return bits;
-// }
-//
-func Getbitu(buff []byte, pos uint, len uint) uint64 {
-	var u1 uint64 = 1
-	var bits uint64 = 0
+// GetBitsAsUint64 extracts len bits from a slice of  bytes, starting
+// at bit position pos and returns them as a uint.  See RTKLIB's getbitu.
+func GetBitsAsUint64(buff []byte, pos uint, len uint) uint64 {
+	// The C version in RTKLIB is:
+	//
+	// extern unsigned int getbitu(const unsigned char *buff, int pos, int len)
+	// {
+	//     unsigned int bits=0;
+	//     int i;
+	//     for (i=pos;i<pos+len;i++) bits=(bits<<1)+((buff[i/8]>>(7-i%8))&1u);
+	//     return bits;
+	// }
+	//
+	const u64One uint64 = 1
+	var result uint64 = 0
 	for i := pos; i < pos+len; i++ {
-		bits = (bits << 1) + (uint64((buff[i/8])>>(7-i%8)) & u1)
+		byteNumber := i / 8
+		// Work on a 64-bit copy of the byte contents.
+		var byteContents uint64 = uint64(buff[byteNumber])
+		var shiftBy uint = 7 - i%8
+		// Shift the contents down to put the desired bit at the bottom.
+		b := byteContents >> shiftBy
+		// Extract the bottom bit.
+		bit := b & u64One
+		// Shift the result up one bit and glue in the extracted bit.
+		result = (result << 1) | uint64(bit)
 	}
-	return bits
+	return result
 }
 
-// Getbits extracts len bits from a slice of bytes, starting at bit
-// position pos, interprets the bits as a twos-complement inte and
-// returns the resulting as a signed int.
-//
-// This does the same as RTKLIB's getbits() function, but the
-// algorithm is from https://en.wikipedia.org/wiki/Two%27s_complement,
-// which includes this Python code:
-//
-// def twos_complement(input_value: int, num_bits: int) -> int:
-//     """Calculates a two's complement integer from the given input value's bits."""
-//     mask = 2 ** (num_bits - 1)
-//     return -(input_value & mask) + (input_value & ~mask)
-//
-// The two's complement version of a positive number is, of course,
-// the number.  So if the sign bit is not set, we just return that,
-// otherwise we do the same calculation as the Python code.
-//
-func Getbits(buff []byte, pos uint, len uint) int64 {
-	negative := Getbitu(buff, pos, 1) == 1
-	uval := Getbitu(buff, pos, len)
+// GetbitsAsInt64 extracts len bits from a slice of bytes, starting at bit
+// position pos, interprets the bits as a twos-complement integer and returns
+// the resulting as a 64-bit signed int.  Se RTKLIB's getbits() function.
+func GetbitsAsInt64(buff []byte, pos uint, len uint) int64 {
+	// This algorithm is a version of the Python code in
+	//  https://en.wikipedia.org/wiki/Two%27s_complement,
+	//
+	// def twos_complement(input_value: int, num_bits: int) -> int:
+	//     """Calculates a two's complement integer from the given input value's bits."""
+	//     mask = 2 ** (num_bits - 1)
+	//     return -(input_value & mask) + (input_value & ~mask)
+
+	// If the first bit is a 1, the result is negative.
+	negative := GetBitsAsUint64(buff, pos, 1) == 1
+	// Get the whole bit string
+	uval := GetBitsAsUint64(buff, pos, len)
+	// If it's not negative, we're done.
 	if negative {
-		var mask uint64 = uint64(2) << (len - 2)
-		weightOfTopBit := int(uval & mask)
-		weightOfLowerBits := int(uval & ^mask)
-		return int64((-1 * weightOfTopBit) + weightOfLowerBits)
+		// It's negative.  Use the algorithm from the Wiki page.
+		var mask uint64 = 2 << (len - 2)
+		weightOfTopBit := int64(uval & mask)
+		weightOfLowerBits := int64(uval & ^mask)
+		return (-1 * weightOfTopBit) + weightOfLowerBits
 	}
 
 	return int64(uval)
@@ -2411,7 +3015,7 @@ func (rtcm *RTCM) HandleMessages(reader io.Reader, channels []chan Message) {
 		}
 
 		// Send a copy of the message to each of the non-nil channels.
-		for i, _ := range channels {
+		for i := range channels {
 			if channels[i] != nil {
 				messageCopy := message.Copy()
 				channels[i] <- messageCopy
@@ -2494,31 +3098,34 @@ func (rtcm *RTCM) getChar(reader bufio.Reader) (byte, error) {
 	return buffer[0], nil
 }
 
-// getMSMRangeInMetres combines the components of the range from an MSM
-// message and returns the result in metres.  It returns zero if the range
-// in the satellite cell is invalid.
-func getMSMRangeInMetres(header *MSMHeader, satellite *MSMSatelliteCell, signal *MSMSignalCell) float64 {
+// getScaledValue is a helper for functions such as getMSMScaledRange.
+func getScaledValue(v1, shift1, v2, shift2 uint, delta int) uint64 {
+	return uint64(int64((uint64(v1)<<shift1)|(uint64(v2)<<shift2)) + int64(delta))
+}
 
-	if !satellite.RangeValid {
-		// There is no valid range reading.
-		return 0.0
-	}
+// getPhaseRangeMilliseconds gets the phase range of the signal in metres
+func getPhaseRangeMilliseconds(scaledRange uint64) float64 {
 
-	// This only works for MSM4, MSM5, MSM6 and MSM7 messages.
-	// Return 0.0 for any other message type.
-	switch {
-	case MSM4(int(header.MessageType)):
-		break
-	case MSM5(int(header.MessageType)):
-		break
-	case MSM6(int(header.MessageType)):
-		break
-	case MSM7(int(header.MessageType)):
-		break
-	default:
-		return 0.0
-	}
+	// The scaled range is made up from the range values in the satellite
+	// cell and the phase range delta value in the signal cell.
 
+	// The scaled range has 31 bits fractional part.
+	// scaleFactor is two to the power of 31:
+	// 1000 0000 0000 0000 0000 0000 0000 0000
+	const scaleFactor = 0x80000000
+
+	// Restore the scale of the aggregate value.
+	return float64(scaledRange) / scaleFactor
+}
+
+// getPhaseRangeLightMilliseconds gets the phase range of the signal in light milliseconds.
+func getPhaseRangeLightMilliseconds(rangeMetres float64) float64 {
+	return rangeMetres * oneLightMillisecond
+}
+
+// GetScaledRange combines the components of the range from an MSM message and
+// returns the result as a 37-bit scaled integer, 8 bits whole, 29 bits fractional.
+func GetScaledRange(wholeMillis, fractionalMillis uint, delta int) uint64 {
 	// The raw range values are in milliseconds giving the transit time of each
 	// signal from the satellite to the GPS receiver.  This can be converted to
 	// the distance between the two using the speed of light.
@@ -2526,364 +3133,77 @@ func getMSMRangeInMetres(header *MSMHeader, satellite *MSMSatelliteCell, signal 
 	// Since the signals were sent from the same satellite at the same time, the
 	// transit times should always be the same.  In fact they can be different
 	// because of factors such as interference by the ionosphere having a different
-	// effect on signals of a different frequency.  The resulting differences in
-	// the values provide useful information about the interference.
+	// effect on signals of a different frequency.
 	//
-	// The transit time is provided in three parts, the satellite cell contains
-	// an approximate range for all the signals, which is always positive.  The
-	// unsigned 8-bit RangeWhole is whole milliseconds and the unsigned 10-bit
-	// RangeFractional is the fractional part.  The range value can be marked as
-	// invalid, in which case there is no sensible range value and we return
-	// zero.  (That was done earlier.)
+	// The transit time is provided in three parts: the unsigned  approximate range,
+	// the unsigned 10-bit fractional range (in units of 1024 ms) and the 20-bit
+	// signed delta. These are scaled up and the (positive or negative) delta is
+	// added to give the resulting scaled integer, 18 bits whole and 19 bits
+	// fractional:
 	//
-	// Each signal cell contains a signed delta.  In an MSM4 and an MSM5 message
-	// it's 15 bits long.  In an MSM6 and an MSM7, it's 20 bits long, giving an
-	// extra 5 bits of resolution.  The positive or negative delta is added to
-	// the satellite range to correct it.  The delta is very small, so the result
-	// is always still positive.
+	//       8 bits  |     29 bits fractional
+	//        whole
 	//
-	// The delta also has an invalid value.  If the satellite range is valid but
-	// the delta is invalid, then we return the uncorrected approximate range
-	// from the values in the satellite cell.
-	//
-	// To preserve accuracy during the calculation, the values are kept as scaled
-	// integers and converted to a float at the end.
-	//
-	//     ------ Range -------
-	//     whole     fractional
+	//     |--- approx Range ----|
+	//     |whole    |fractional |
+	//                           |------- delta --------|
 	//     w wwww wwwf ffff ffff f000 0000 0000 0000 0000
-	//     + or - range delta    dddd dddd dddd dddd dddd <- 20-bit delta
+	//     + pos or neg delta    dddd dddd dddd dddd dddd <- 20-bit signed delta
+	//
+	// The two parts of the approximate value are uint and much bigger than the
+	// delta when scaled, so the result is always positive - the transit time. The
+	// calculation is done on scaled integers rather tham floating point values to
+	// preserve accuracy for as long as possible.
+	//
+	// Hiving off this part of the calculation into a separate function eases unit
+	// testing.
 
-	//     ------ Range -------
-	//     whole     fractional
-	//     w wwww wwwf ffff ffff f000 0000 0000 0000 0000
-	//     + or - range delta    dddd dddd dddd ddd0 0000 <- 15-bit delta
-
-	// Merge the satellite values to give the approximate range shifted up 29 bits.
-	aggregateRange := int64(satellite.RangeWholeMillis<<29 |
-		satellite.RangeFractionalMillis<<19)
-
-	// If the range delta is valid, add it to the aggregate.
-	if signal.RangeDeltaValid {
-
-		// If the message is MSM4 or MSM5, convert the 15-bit delta to a 20-bit
-		// delta with trailing zeroes.
-		delta := int64(signal.RangeDelta)
-		if MSM4(int(header.MessageType)) || MSM5(int(header.MessageType)) {
-			delta = delta << 5
-		}
-
-		aggregateRange += delta
-	}
-
-	// Restore the scale to give the range in milliseconds.
-	rangeInMillis := float64(aggregateRange) * P2_29
-
-	// Use the speed of light to convert that to the distance from the
-	// satellite to the receiver.
-	rangeInMetres := rangeInMillis * oneLightMillisecond
-
-	return rangeInMetres
+	return getScaledValue(wholeMillis, 29, fractionalMillis, 19, delta)
 }
 
-// getMSMPhaseRange combines the range and the phase range from an MSM4, MSM5,
-// MSM6 or MSM7 message and returns the result in cycles. It returns zero if
-// the input measurements are invalid and an error if the signal is not in use.
-//
-func getMSMPhaseRange(header *MSMHeader, satellite *MSMSatelliteCell, signal *MSMSignalCell) (float64, error) {
-
-	if !satellite.RangeValid {
-		return 0.0, nil
-	}
-
-	if !signal.PhaseRangeDeltaValid {
-		return 0.0, nil
-	}
-
-	// This only works for MSM4, MSM5, MSM6 and MSM7 messages.
-	// Return 0.0 for any other message type.
-	switch {
-	case MSM4(int(header.MessageType)):
-		break
-	case MSM5(int(header.MessageType)):
-		break
-	case MSM6(int(header.MessageType)):
-		break
-	case MSM7(int(header.MessageType)):
-		break
-	default:
-		return 0.0, nil
-	}
-
-	// This is similar to getMSMRangeInMetres.  The phase range is in cycles
-	// and derived from the range values from the satellite cell shifted up
-	// 31 bits plus the signed phase range delta.  In an MSM4 and MSM5 message
-	// the delta in the signal cell is 22 bits and in an MSM6 and MSM7 it's 24
-	// bits.  The 24 bit value gives extra resolution, so we convert a 22 bit
-	// value to a 24 bit value with two trailing spaces.
-	//
-	// The values are kept as integers during the calculation to preserve
-	// accuracy.
+// GetScaledPhaseRange combines the components of the phase range from an MSM message
+// and returns the result as a 41-bit scaled integer, 8 bits whole, 33 bits
+// fractional.
+func GetScaledPhaseRange(wholeMillis, fractionalMillis uint, delta int) uint64 {
+	// This is similar to getAggregateRange, but the amounts shifted are different.
+	// The incoming delta value is 24 bits signed and the delta and the fractional
+	// part share 3 bits, producing a 39-bit result.
 	//
 	//     ------ Range -------
 	//     whole     fractional
+	//     876 5432 1098 7654 3210 9876 5432 1098 7654 3210
 	//     www wwww wfff ffff fff0 0000 0000 0000 0000 0000
-	//     + or -             dddd dddd dddd dddd dddd dddd
+	//     + or -             dddd dddd dddd dddd dddd dddd <- phase range rate delta.
 
-	wavelength, err := getWavelength(header.Constellation, signal.SignalID)
-	if err != nil {
-		return 0.0, err
-	}
-
-	var aggregatePhaseRange int64 = 0
-	millis := int64(satellite.RangeWholeMillis<<31 |
-		satellite.RangeFractionalMillis<<21)
-
-	// If the message is MSM4 or MSM5, convert the 22-bit delta to 24 bits
-	// with trailing zeroes.  Since it's signed, do that by multiplying it
-	// by 4.
-	delta := int64(signal.PhaseRangeDelta)
-	if MSM4(int(header.MessageType)) || MSM5(int(header.MessageType)) {
-		delta = delta * 4
-	}
-
-	aggregatePhaseRange = millis + delta
-
-	// Restore the scale of the aggregate value - it's shifted up 31 bits.
-	phaseRangeMilliSeconds := float64(aggregatePhaseRange) * P2_31
-
-	// Convert to light milliseconds
-	phaseRangeLMS := phaseRangeMilliSeconds * oneLightMillisecond
-
-	// and divide by the wavelength to get cycles.
-	phaseRangeCycles := phaseRangeLMS / wavelength
-
-	return phaseRangeCycles, nil
+	return getScaledValue(wholeMillis, 31, fractionalMillis, 21, delta)
 }
 
-// getMSMPhaseRangeRate combines the components of the phase range rate
-// in an MSM5 or MSM7 message and returns the result in milliseconds.  If
-// either the component values are invalid, it returns float zero.
-//
-func getMSMPhaseRangeRate(header *MSMHeader, satellite *MSMSatelliteCell, signal *MSMSignalCell) (float64, error) {
+func GetScaledPhaseRangeRate(wholeMillis, fractionalMillis int) int64 {
 
-	if !satellite.PhaseRangeRateValid {
-		return 0.0, nil
-	}
+	// This is similar to getAggregateRange, but for the two-part phase
+	// range rate.  The 14-bit signed phase range rate value in the
+	// satellite cell is in milliseconds and the 15-bit signed delta in
+	// the signal cell is in ten thousandths of a millisecond.  The result
+	// is the rate in milliseconds scaled up by 10,000.
+	aggregatePhaseRangeRate := int64(wholeMillis) * 10000
+	aggregatePhaseRangeRate += int64(fractionalMillis)
 
-	if !signal.PhaseRangeRateDeltaValid {
-		return 0.0, nil
-	}
-
-	// This only works for MSM5 and MSM7 messages.
-	// Return 0.0 for any other message type.
-	switch {
-	case MSM5(int(header.MessageType)):
-		break
-	case MSM7(int(header.MessageType)):
-		break
-	default:
-		return 0.0, nil
-	}
-
-	// The 14-bit signed phase range rate is in milliseconds and the
-	// 15-bit signed delta is in ten thousandths of a millisecond.
-	aggregatePhaseRangeRate := int64(satellite.PhaseRangeRate) * 10000
-	aggregatePhaseRangeRate += int64(signal.PhaseRangeRateDelta)
-	wavelength, err := getWavelength(header.Constellation, signal.SignalID)
-	if err != nil {
-		return 0.0, err
-	}
-	return (1.0 - float64(aggregatePhaseRangeRate)/10000.0/wavelength), nil
+	return aggregatePhaseRangeRate
 }
 
-// getWavelength returns the carrier wavelength for a signal ID.
-// The result depends upon the constellation, each of which has its
-// own list of signals and equivalent wavelengths.  Some of the possible
-// signal IDs are not used and so have no associated wavelength, so the
-// result may be an error.
-//
-func getWavelength(constellation string, signalID uint) (float64, error) {
-	var wavelength float64
-	switch constellation {
-	case "GPS":
-		var err error
-		wavelength, err = getSigWaveLenGPS(signalID)
-		if err != nil {
-			return 0.0, err
-		}
-	case "Galileo":
-		var err error
-		wavelength, err = getSigWaveLenGalileo(signalID)
-		if err != nil {
-			return 0.0, err
-		}
-	case "GLONASS":
-		var err error
-		wavelength, err = getSigWaveLenGlo(signalID)
-		if err != nil {
-			return 0.0, err
-		}
-	case "BeiDou":
-		var err error
-		wavelength, err = getSigWaveLenBD(signalID)
-		if err != nil {
-			return 0.0, err
-		}
-	default:
-		message := fmt.Sprintf("no such constellation as %s", constellation)
-		return 0.0, errors.New(message)
-	}
+// GetPhaseRangeMilliseconds gets the phase range of the signal in milliseconds.
+func GetPhaseRangeMilliseconds(scaledRange uint64) float64 {
 
-	return wavelength, nil
-}
+	// The scaled range is made up from the range values in the satellite
+	// cell and the phase range delta value in the signal cell.
 
-// getSigWaveLenGPS returns the signal carrier wavelength for a GPS satellite
-// if it's defined.
-func getSigWaveLenGPS(signalID uint) (float64, error) {
-	// Only some signal IDs are in use.
-	var frequency float64
-	switch signalID {
-	case 2:
-		frequency = freq1
-	case 3:
-		frequency = freq1
-	case 4:
-		frequency = freq1
-	case 8:
-		frequency = freq2
-	case 9:
-		frequency = freq2
-	case 10:
-		frequency = freq2
-	case 15:
-		frequency = freq2
-	case 16:
-		frequency = freq2
-	case 17:
-		frequency = freq2
-	case 22:
-		frequency = freq5
-	case 23:
-		frequency = freq5
-	case 24:
-		frequency = freq5
-	case 30:
-		frequency = freq1
-	case 31:
-		frequency = freq1
-	case 32:
-		frequency = freq1
-	default:
-		message := fmt.Sprintf("GPS signal ID %d not in use", signalID)
-		return 0, errors.New(message)
-	}
-	return CLight / frequency, nil
-}
+	// The scaled range has 31 bits fractional part.
+	// scaleFactor is two to the power of 31:
+	// 1000 0000 0000 0000 0000 0000 0000 0000
+	const scaleFactor = 0x80000000
 
-// getSigWaveLenGalileo returns the signal carrier wavelength for a Galileo satellite
-// if it's defined.
-func getSigWaveLenGalileo(signalID uint) (float64, error) {
-	// Only some signal IDs are in use.
-	var frequency float64
-	switch signalID {
-	case 2:
-		frequency = freq1
-	case 3:
-		frequency = freq1
-	case 4:
-		frequency = freq1
-	case 5:
-		frequency = freq1
-	case 6:
-		frequency = freq1
-	case 8:
-		frequency = freq6
-	case 9:
-		frequency = freq6
-	case 10:
-		frequency = freq6
-	case 11:
-		frequency = freq6
-	case 12:
-		frequency = freq6
-	case 14:
-		frequency = freq7
-	case 15:
-		frequency = freq7
-	case 16:
-		frequency = freq7
-	case 18:
-		frequency = freq8
-	case 19:
-		frequency = freq8
-	case 20:
-		frequency = freq8
-	case 22:
-		frequency = freq5
-	case 23:
-		frequency = freq5
-	case 24:
-		frequency = freq5
-	default:
-		message := fmt.Sprintf("GPS signal ID %d not in use", signalID)
-		return 0, errors.New(message)
-	}
-	return CLight / frequency, nil
-}
-
-// getSigWaveLenGlo gets the signal carrier wavelength for a GLONASS satellite
-// if it's defined.
-//
-func getSigWaveLenGlo(signalID uint) (float64, error) {
-	// Only some signal IDs are in use.
-	var frequency float64
-	switch signalID {
-	case 2:
-		frequency = freq1Glo
-	case 3:
-		frequency = freq1Glo
-	case 8:
-		frequency = freq2Glo
-	case 9:
-		frequency = freq2Glo
-	default:
-		message := fmt.Sprintf("GLONASS signal ID %d not in use", signalID)
-		return 0, errors.New(message)
-	}
-	return CLight / frequency, nil
-}
-
-// getSigWaveLenBD returns the signal carrier wavelength for a Beidou satellite
-// if it's defined.
-//
-func getSigWaveLenBD(signalID uint) (float64, error) {
-	// Only some signal IDs are in use.
-	var frequency float64
-	switch signalID {
-	case 2:
-		frequency = freq1BD
-	case 3:
-		frequency = freq1BD
-	case 4:
-		frequency = freq1BD
-	case 8:
-		frequency = freq3BD
-	case 9:
-		frequency = freq3BD
-	case 10:
-		frequency = freq3BD
-	case 14:
-		frequency = freq2BD
-	case 15:
-		frequency = freq2BD
-	case 16:
-		frequency = freq2BD
-	default:
-		message := fmt.Sprintf("GPS signal ID %d not in use", signalID)
-		return 0, errors.New(message)
-	}
-	return CLight / frequency, nil
+	// Restore the scale of the aggregate value.
+	return float64(scaledRange) / scaleFactor
 }
 
 // pause sleeps for the time defined in the RTCM.
@@ -3072,6 +3392,17 @@ func MSM7(messageType int) bool {
 // MSM returns true if the message type in the header is an Multiple Signal
 // Message of any type.
 func MSM(messageType int) bool {
+	if messageType == NonRTCMMessage {
+		return false
+	}
+
 	return MSM1(messageType) || MSM2(messageType) || MSM3(messageType) ||
 		MSM4(messageType) || MSM5(messageType) || MSM6(messageType) || MSM7(messageType)
+}
+
+// getScaled5 takes a scaled integer a.b where b has 5 decimal places and
+// returns the float value.
+//
+func scaled5ToFloat(scaled5 int64) float64 {
+	return float64(scaled5) * 0.0001
 }

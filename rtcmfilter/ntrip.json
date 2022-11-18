@@ -1,0 +1,18 @@
+{
+    "input": [
+        "/dev/ttyACM0",
+        "/dev/ttyACM1",
+        "/dev/ttyACM2",
+        "/dev/ttyACM3"
+    ],
+    "stop_on_eof": false,
+    "display_messages": true,
+    "record_messages": true,
+    "message_log_directory": "logs",
+    "casterhostname": "caster.example.com",
+    "casterport": 2101,
+    "casterUserName": "user",
+    "casterPassword": "password",
+    "timeout": 1,
+    "sleeptime": 2
+}
