@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"io"
 	"log"
-	"math"
-	"os"
 	"testing"
 	"time"
+
+	msm4message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
+	msm7message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 
 	"github.com/goblimey/go-tools/switchwriter"
 )
@@ -16,6 +18,10 @@ import (
 // maxEpochTime is the value of a GPS and Beidou epoch time
 // just before it rolls over.
 const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
+
+// dateLayout defines the layout of dates when they are displayed.  It
+// produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone".
+const dateLayout = "2006-01-02 15:04:05.000 -0700 MST"
 
 var london *time.Location
 var paris *time.Location
@@ -55,50 +61,7 @@ func TestReadValidMessage(t *testing.T) {
 	handler := New(now, logger)
 	handler.StopOnEOF = true
 
-	frame1, readError1 := handler.ReadNextFrame(reader)
-	if readError1 != nil {
-		t.Fatal(readError1)
-	}
-
-	message, messageFetchError := handler.GetMessage(frame1)
-	if messageFetchError != nil {
-		t.Error(messageFetchError)
-	}
-
-	if !message.Complete {
-		t.Error("not complete")
-	}
-
-	if !message.CRCValid {
-		t.Error("CRC check fails")
-	}
-
-	if !message.Valid {
-		t.Error("invalid")
-	}
-
-	gotType := message.MessageType
-	if wantType != gotType {
-		t.Errorf("expected type %d got %d", wantType, gotType)
-	}
-}
-
-func Test(t *testing.T) {
-
-	const wantType = 1077
-
-	f, openError := os.Open("/home/simon/goprojects/go-ntrip/rtcmfilter/data.2022-03-17.rtcm3")
-	if openError != nil {
-		t.Error(openError)
-	}
-
-	reader := bufio.NewReader(f)
-
-	now := time.Now()
-	handler := New(now, logger)
-	handler.StopOnEOF = true
-
-	frame1, readError1 := handler.ReadNextFrame(reader)
+	frame1, readError1 := handler.ReadNextRTCM3MessageFrame(reader)
 	if readError1 != nil {
 		t.Fatal(readError1)
 	}
@@ -171,8 +134,8 @@ func TestHandleMessages(t *testing.T) {
 
 	reader := bytes.NewReader(messageData)
 
-	channels := make([]chan Message, 0)
-	ch := make(chan Message, 10)
+	channels := make([]chan RTCM3Message, 0)
+	ch := make(chan RTCM3Message, 10)
 	channels = append(channels, ch)
 	rtcmHandler := New(time.Now(), nil)
 	rtcmHandler.StopOnEOF = true
@@ -184,7 +147,7 @@ func TestHandleMessages(t *testing.T) {
 
 	// Check.  Read the data back from the channel and check the message type
 	// and validity flags.
-	messages := make([]Message, 0)
+	messages := make([]RTCM3Message, 0)
 	for {
 		message, ok := <-ch
 		if !ok {
@@ -224,7 +187,7 @@ func TestHandleMessages(t *testing.T) {
 
 	r0 := bytes.NewReader(messages[0].RawData)
 	resultReader0 := bufio.NewReader(r0)
-	message0, err0 := rtcmHandler.ReadNextMessage(resultReader0)
+	message0, err0 := rtcmHandler.ReadNextRTCM3Message(resultReader0)
 	if err0 != nil {
 		t.Fatal(err0)
 	}
@@ -270,7 +233,7 @@ func TestHandleMessages(t *testing.T) {
 
 	r1 := bytes.NewReader(messages[1].RawData)
 	resultReader1 := bufio.NewReader(r1)
-	message1, err1 := rtcmHandler.ReadNextMessage(resultReader1)
+	message1, err1 := rtcmHandler.ReadNextRTCM3Message(resultReader1)
 	if err1 != nil {
 		t.Fatal(err1)
 	}
@@ -331,7 +294,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 
 	// The first call should read the incomplete message, hit
 	// EOF and ignore it.
-	frame1, readError1 := rtcm.ReadNextFrame(imReader)
+	frame1, readError1 := rtcm.ReadNextRTCM3MessageFrame(imReader)
 	if readError1 != nil {
 		t.Fatal(readError1)
 	}
@@ -366,7 +329,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 	}
 
 	// The second call should return nil and the EOF.
-	frame2, readError2 := rtcm.ReadNextFrame(imReader)
+	frame2, readError2 := rtcm.ReadNextRTCM3MessageFrame(imReader)
 	if readError2 == nil {
 		t.Errorf("expected an error")
 	}
@@ -408,7 +371,7 @@ func TestReadAlmostCompleteMessage(t *testing.T) {
 
 	// The first call should read the incomplete message, hit
 	// EOF and ignore it.
-	frame1, readError1 := rtcm.ReadNextFrame(imReader)
+	frame1, readError1 := rtcm.ReadNextRTCM3MessageFrame(imReader)
 	if readError1 != nil {
 		t.Fatal(readError1)
 	}
@@ -435,7 +398,7 @@ func TestReadJunk(t *testing.T) {
 	rtcm := New(startTime, logger)
 	rtcm.StopOnEOF = true
 
-	frame, err1 := rtcm.ReadNextFrame(junkAtStartReader)
+	frame, err1 := rtcm.ReadNextRTCM3MessageFrame(junkAtStartReader)
 	if err1 != nil {
 		t.Fatal(err1.Error())
 	}
@@ -464,7 +427,7 @@ func TestReadOnlyJunk(t *testing.T) {
 	rtcm := New(startTime, logger)
 	rtcm.StopOnEOF = true
 
-	frame, err1 := rtcm.ReadNextFrame(junkReader)
+	frame, err1 := rtcm.ReadNextRTCM3MessageFrame(junkReader)
 
 	if err1 != nil {
 		t.Fatal(err1.Error())
@@ -488,7 +451,7 @@ func TestReadOnlyJunk(t *testing.T) {
 
 	// Call again - expect EOF.
 
-	frame2, err2 := rtcm.ReadNextFrame(junkReader)
+	frame2, err2 := rtcm.ReadNextRTCM3MessageFrame(junkReader)
 
 	if err2 == nil {
 		t.Fatal("expected EOF error")
@@ -502,16 +465,63 @@ func TestReadOnlyJunk(t *testing.T) {
 	}
 }
 
-//TestDisplayMSM4 checks that MSM type 4 messages are handled correctly.
-func TestReadMSM4(t *testing.T) {
-	r := bytes.NewReader(msm4Data)
-	msm4Reader := bufio.NewReader(r)
-	// This test uses real data collected on the 17th June 2022.
+//TestGetMessageWithRealData checks that GetMessage correctly handles an MSM4 message extracted from
+// real data.
+func TestGetMessageWithRealData(t *testing.T) {
+
+	// These data were collected on the 17th June 2022.
 	startTime := time.Date(2022, time.June, 17, 0, 0, 0, 0, locationUTC)
+	var msm4 = []byte{
+		0xd3, 0x00, 0x7b, 0x46, 0x40, 0x00, 0x78, 0x4e, 0x56, 0xfe, 0x00, 0x00, 0x00, 0x58, 0x16, 0x00,
+		0x20, 0x00, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00, 0x7f, 0x55, 0x0e, 0xa2, 0xa2, 0xa4, 0x9a, 0x92,
+		0xa3, 0x10, 0xe2, 0x4a, 0xd0, 0xa9, 0xba, 0x91, 0x8f, 0xc0, 0x62, 0x40, 0x8d, 0xa6, 0xa4, 0x4c,
+		0x4d, 0x9f, 0xdb, 0x3c, 0x65, 0x87, 0x9f, 0x4f, 0x16, 0x3b, 0xf2, 0x55, 0x40, 0x72, 0xe7, 0x01,
+		0x4d, 0x8c, 0x1a, 0x85, 0x40, 0x63, 0x1d, 0x42, 0x07, 0x3e, 0x07, 0xf3, 0x15, 0xe3, 0x36, 0x77,
+		0xb0, 0x29, 0xde, 0x66, 0x68, 0x84, 0x9b, 0xf7, 0xff, 0xff, 0xff, 0xff, 0xfe, 0x00, 0x3d, 0x15,
+		0x15, 0x4f, 0x6d, 0x78, 0x63, 0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5b, 0xa7,
+		0x0c,
+		0xd3, 0x00, 0x7b, 0x44, 0x60, 0x00, 0x78, 0x4f, 0x31, 0xbe, 0x00, 0x00, 0x21, 0x84, 0x00,
+		0x60, 0x40, 0x00, 0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x7f, 0xbe, 0xb2, 0x9e, 0xa2, 0xae, 0xb8,
+		0xa4, 0xad, 0x04, 0x04, 0x5a, 0x33, 0xa2, 0x16, 0x93, 0x1e, 0x6f, 0xd8, 0x9f, 0xbb, 0xdd, 0x3d,
+		0x3a, 0x7e, 0xee, 0x9a, 0xdc, 0x4c, 0x3e, 0xc8, 0x80, 0x97, 0x06, 0x83, 0x77, 0xc6, 0xcc, 0xc2,
+		0x6a, 0x04, 0xae, 0xff, 0x1b, 0x83, 0xfd, 0xcb, 0xbf, 0xc9, 0x2b, 0xff, 0x33, 0x78, 0xf9, 0x91,
+		0xe3, 0xeb, 0x7c, 0x50, 0x87, 0xae, 0x02, 0x2c, 0x1e, 0xf8, 0x15, 0x20, 0x3a, 0xb8, 0x50, 0xeb,
+		0xbb, 0xc0, 0xb4, 0xf5, 0x03, 0x15, 0x07, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc0, 0x01, 0x3d,
+		0x17, 0xdd, 0x7d, 0x54, 0x52, 0xf5, 0xf6, 0xd7, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x76,
+		0xfb, 0x6f,
+		0xd3, 0x00, 0x7b, 0x43, 0xc0, 0x00, 0xb3, 0xe2, 0x16, 0x7e, 0x00, 0x00, 0x0c, 0x07,
+		0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x80, 0x00, 0x00, 0x7f, 0xfe, 0x86, 0x82, 0x94, 0x8c,
+		0x9a, 0x88, 0x93, 0x2c, 0xd2, 0x39, 0x44, 0x70, 0xc6, 0xf5, 0x49, 0xb7, 0xf0, 0x6f, 0xc9, 0x86,
+		0x69, 0x8c, 0x8d, 0x00, 0x85, 0x01, 0x69, 0xe2, 0xdb, 0xc8, 0x31, 0x5e, 0x52, 0xab, 0xdb, 0x13,
+		0xf6, 0x19, 0x09, 0xe8, 0x12, 0xf3, 0xfe, 0x94, 0xc0, 0x0d, 0xa7, 0xe1, 0xc2, 0x56, 0x07, 0x9e,
+		0x68, 0x00, 0x0b, 0x90, 0x02, 0xb0, 0x7f, 0xb9, 0xe9, 0x7f, 0x01, 0x9a, 0x15, 0xc5, 0x08, 0x57,
+		0x78, 0xfe, 0xd7, 0x0e, 0x7b, 0x8c, 0x9a, 0x0a, 0x89, 0x78, 0x56, 0x8a, 0x1f, 0xff, 0xfd, 0xff,
+		0xf7, 0x5f, 0xff, 0xe0, 0x00, 0x65, 0x5e, 0x56, 0xc5, 0x0d, 0xf5, 0x44, 0xf5, 0x15, 0x5f, 0x38,
+		0x5d, 0xa9, 0x5d,
+		0xd3, 0x00, 0x98, 0x43, 0x20, 0x00, 0x78, 0x4f, 0x31, 0xbc, 0x00, 0x00, 0x2b,
+		0x50, 0x08, 0x06, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x80, 0x00, 0x5f, 0xfd, 0xe9, 0x49, 0xa8,
+		0xe9, 0x08, 0xa8, 0xc9, 0x2a, 0x69, 0xc3, 0x2b, 0x30, 0xfc, 0x5d, 0xba, 0x3d, 0x14, 0x76, 0x18,
+		0xf0, 0xc8, 0xe5, 0xdc, 0x8d, 0xf8, 0xfb, 0xbb, 0x8b, 0x76, 0xf4, 0x02, 0x5e, 0x01, 0x70, 0xa6,
+		0xf9, 0x4a, 0x41, 0x56, 0x02, 0x74, 0x48, 0x6f, 0xe0, 0x84, 0xc0, 0x1c, 0x3f, 0x44, 0x7c, 0xc0,
+		0x3f, 0x05, 0x1e, 0x5b, 0x97, 0xf9, 0xd9, 0x83, 0xf9, 0xcb, 0x07, 0xe4, 0x72, 0xe0, 0x38, 0xdf,
+		0x01, 0x09, 0x4e, 0x18, 0x42, 0xf8, 0x66, 0xdd, 0x20, 0xc1, 0x5a, 0x83, 0x25, 0xa2, 0x0f, 0x65,
+		0x17, 0x83, 0xe8, 0x3e, 0x04, 0x23, 0x84, 0x6b, 0x9e, 0x12, 0xf7, 0x67, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xf7, 0xf8, 0x00, 0x05, 0xf5, 0xcb, 0x6d, 0x57, 0x4f, 0x85, 0x97, 0x57, 0x6c, 0xcf,
+		0x53, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xce, 0xce,
+		0x4c,
+	}
+
+	const wantNumSatellites = 7
+	const wantMessageType = 1124
+
+	r := bytes.NewReader(msm4)
+	reader := bufio.NewReader(r)
+
 	rtcm := New(startTime, logger)
 	rtcm.StopOnEOF = true
 
-	frame, err1 := rtcm.ReadNextFrame(msm4Reader)
+	frame, err1 := rtcm.ReadNextRTCM3MessageFrame(reader)
 
 	if err1 != nil {
 		t.Error(err1.Error())
@@ -524,24 +534,27 @@ func TestReadMSM4(t *testing.T) {
 		return
 	}
 
-	if message.MessageType != 1124 {
+	if message.MessageType != wantMessageType {
 		t.Errorf("expected message type 1124 got %d", message.MessageType)
 		return
 	}
 
 	// Get the message in display form.
-	display, ok := message.PrepareForDisplay(rtcm).(*MSMMessage)
+	display, ok := message.PrepareForDisplay(rtcm).(*msm4message.Message)
 	if !ok {
 		t.Error("expected the readable message to be *MSMMessage\n")
 		return
 	}
 
-	if len(display.Satellites) != 7 {
-		t.Errorf("expected 7 satellites, got %d", len(display.Satellites))
+	if len(display.Satellites) != wantNumSatellites {
+		t.Errorf("expected %d satellites, got %d", wantNumSatellites, len(display.Satellites))
 	}
 
-	_ = display.Satellites[0].RangeWholeMillis
+	// The outer slice should be the same size as the satellite slice.
 
+	if len(display.Signals) != wantNumSatellites {
+		t.Errorf("expected %d sets of signals, got %d", wantNumSatellites, len(display.Satellites))
+	}
 }
 
 func TestReadNextMessageFrame(t *testing.T) {
@@ -551,7 +564,7 @@ func TestReadNextMessageFrame(t *testing.T) {
 	rtcmHandler := New(startTime, logger)
 	rtcmHandler.StopOnEOF = true
 
-	frame, err1 := rtcmHandler.ReadNextFrame(realDataReader)
+	frame, err1 := rtcmHandler.ReadNextRTCM3MessageFrame(realDataReader)
 	if err1 != nil {
 		t.Fatal(err1.Error())
 	}
@@ -576,7 +589,7 @@ func TestRealData(t *testing.T) {
 	rtcm := New(startTime, logger)
 	rtcm.StopOnEOF = true
 
-	m, readError := rtcm.ReadNextMessage(realDataReader)
+	m, readError := rtcm.ReadNextRTCM3Message(realDataReader)
 
 	if readError != nil {
 		t.Errorf("error reading data - %s", readError.Error())
@@ -588,7 +601,7 @@ func TestRealData(t *testing.T) {
 		return
 	}
 
-	message, ok := m.PrepareForDisplay(rtcm).(*MSMMessage)
+	message, ok := m.PrepareForDisplay(rtcm).(*msm7message.Message)
 
 	if !ok {
 		t.Errorf("expected message 0 to contain a type 1077 message but readable is nil")
@@ -635,9 +648,9 @@ func TestRealData(t *testing.T) {
 		return
 	}
 
-	if message.Signals[0][0].Satellite.SatelliteID != 4 {
+	if message.Signals[0][0].SatelliteID != 4 {
 		t.Errorf("expected satelliteID 4, got %d",
-			message.Signals[0][0].Satellite.SatelliteID)
+			message.Signals[0][0].SatelliteID)
 		return
 	}
 
@@ -656,82 +669,9 @@ func TestRealData(t *testing.T) {
 		t.Error(rangeError)
 	}
 
-	if !equalWithin(3, 24410527.355, rangeMetres) {
+	if !utils.EqualWithin(3, 24410527.355, rangeMetres) {
 		t.Errorf("expected range 24410527.355 metres, got %3.6f", rangeMetres)
 		return
-	}
-}
-
-func TestGetbitu(t *testing.T) {
-	i := GetBitsAsUint64(testData, 8, 0)
-	if i != 0 {
-		t.Errorf("expected 0, got 0x%x", i)
-	}
-
-	i = GetBitsAsUint64(testData, 16, 4)
-	if i != 8 {
-		t.Errorf("expected 8, got 0x%x", i)
-	}
-
-	i = GetBitsAsUint64(testData, 16, 8)
-	if i != 0x8a {
-		t.Errorf("expected 0x8a, got 0x%x", i)
-	}
-
-	i = GetBitsAsUint64(testData, 16, 16)
-	if i != 0x8a43 {
-		t.Errorf("expected 0x8a43, got 0x%x", i)
-	}
-
-	// try a full 64-byte number
-	i = GetBitsAsUint64(testData, 12, 64)
-	if i != 0x08a4320008a0e1a2 {
-		t.Errorf("expected 0x08a4320008a0e1a2, got 0x%x", i)
-	}
-}
-
-func TestGetbits(t *testing.T) {
-	var bitStream1 = []byte{
-		// 63 bits - 111 1111 0000 0000 1111 1111 0000 0000 1111 1111 0000 0000 1111 1111 0000 0000
-		0x7f, 0x00, 0xff, 0x00, 0xff, 0x00, 0xff, 0x00,
-	}
-
-	i := GetbitsAsInt64(bitStream1, 0, 64)
-	if i != 0x7f00ff00ff00ff00 {
-		t.Errorf("expected 0x7f00ff00ff00ff00, got 0x%x", i)
-	}
-
-	var bitStream2 = []byte{
-		0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-	}
-
-	i = GetbitsAsInt64(bitStream2, 0, 64)
-	if i != 0x7fffffffffffffff {
-		t.Errorf("expected 0x7fffffffffffffff, got 0x%x", i)
-	}
-
-	var bitStream3 = []byte{0xfb /* 1111 1011 */}
-
-	i = GetbitsAsInt64(bitStream3, 0, 8)
-	if i != -5 {
-		t.Errorf("expected -5, got %d, 0x%x", i, i)
-	}
-
-	var bitStream4 = []byte{0xff, 0xff}
-
-	i = GetbitsAsInt64(bitStream4, 0, 16)
-	if i != -1 {
-		t.Errorf("expected -1, got %d, 0x%x", i, i)
-	}
-
-	var bitStream5 = []byte{
-		// 64 bits containing -1
-		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-	}
-
-	i = GetbitsAsInt64(bitStream5, 0, 64)
-	if i != -1 {
-		t.Errorf("expected -1, got %d, 0x%x", i, i)
 	}
 }
 
@@ -751,36 +691,6 @@ func TestGetMessage(t *testing.T) {
 	if expectedLength != len(message.RawData) {
 		t.Errorf("expected message length %d, got %d",
 			expectedLength, len(message.RawData))
-		return
-	}
-}
-
-// TestGetSatellites tests GetSatellites.
-func TestGetSatellites(t *testing.T) {
-	// Set the bitstream to "junk" followed by a 64-bit
-	// mask with bit 63 (sat 1) 55 (sat 9) and 0 (sat 64)
-	var bitstream = []byte{'j', 'u', 'n', 'k', 0x80, 0x80, 0, 0, 0, 0, 0, 1}
-	var expectedSatellites = []uint{1, 9, 64}
-	satellites := getSatellites(bitstream, 32)
-
-	if !slicesEqual(expectedSatellites, satellites) {
-		t.Errorf("expected %v, got %v\n",
-			expectedSatellites, satellites)
-		return
-	}
-}
-
-// TestGetSignals tests GetSignals.
-func TestGetSignals(t *testing.T) {
-	// Set the bitstream to "junk" followed by a 32-bit
-	// mask with bit 31 (sat 1) 23 (sat 9) and 0 (sat 32).
-	var bitstream = []byte{'j', 'u', 'n', 'k', 0x80, 0x80, 0, 1}
-	var expectedSignals = []uint{1, 9, 32}
-	signals := getSignals(bitstream, 32)
-
-	if !slicesEqual(expectedSignals, signals) {
-		t.Errorf("expected %v, got %v\n",
-			expectedSignals, signals)
 		return
 	}
 }
@@ -1253,114 +1163,4 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	if expectedMillis5 != millis5 {
 		t.Errorf("expected millis %x result %x", expectedMillis5, millis5)
 	}
-}
-
-// TestGetRangeMSM7WitRealData checks that getMSMRangeInMetres works
-// for an MSM7 message using real data.
-// func TestGetRangeMSM7WitRealData(t *testing.T) {
-// 	// These data were taken from a UBlox base station.
-// 	// They were converted to RINEX format and the wanted value
-// 	// taken from that.
-
-// 	const want = 24410527.355
-
-// 	satellite := MSMSatelliteCell{
-// 		RangeWholeMillis:      81,
-// 		RangeFractionalMillis: 435}
-
-// 	signal := MSMSignalCell{
-// 		RangeDelta: -26835}
-
-// 	scaledRange := GetScaledRange(satellite.RangeWholeMillis, satellite.RangeFractionalMillis,
-// 		signal.RangeDelta)
-
-// 	got := getMSMRangeInMetres(scaledRange)
-
-// 	if !equalWithin(3, want, got) {
-// 		t.Errorf("expected %f got %f", want, got)
-// 		return
-// 	}
-// }
-
-
-
-// TestScaled5ToFloat tests scaled5ToFloat with positive and negative values.
-func TestScaled5ToFloat(t *testing.T) {
-	fZero := scaled5ToFloat(0)
-	const scaled5 = 9812345
-	fPos := scaled5ToFloat(scaled5)
-
-	if !equalWithin(5, 981.2345, fPos) {
-		t.Errorf("expected 981.2345, got %f\n", fPos)
-	}
-
-	if !equalWithin(5, 0.0, fZero) {
-		t.Errorf("expected 0.0, got %f\n", fZero)
-	}
-
-	fNeg := scaled5ToFloat(-7654321)
-	if !equalWithin(5, -765.4321, fNeg) {
-		t.Errorf("expected -765.4321, got %f\n", fNeg)
-	}
-}
-
-// TestEqualWithin checks the equalWithin test helper function.
-func TestEqualWithin(t *testing.T) {
-
-	var testData = []struct {
-		N    uint
-		F1   float64
-		F2   float64
-		Want bool
-	}{
-		{0, 100.1, 100.04, true},
-		{1, 0.01, 0.04, true},
-		{1, 0.01, 0.09, false}, // 0.09 will b rounded up to 0.1.
-		{1, 0.5, 0.6, false},
-		{1, 1, 2, false},
-		{2, 1.111, 1.113, true},
-		{2, 2.222, 2.232, false},
-		{3, 9.9991, 9.9992, true},
-	}
-
-	for _, td := range testData {
-		got := equalWithin(td.N, td.F1, td.F2)
-
-		if got != td.Want {
-			t.Errorf("%d %f %f: want %v, got %v",
-				td.N, td.F1, td.F2, td.Want, got)
-		}
-	}
-}
-
-// TestHandleMessages tests the verbatim logging of messages.
-
-// slicesEqual returns true if uint slices a and b contain the same
-// elements.  A nil argument is equivalent to an empty slice.
-// https://yourbasic.org/golang/compare-slices/
-func slicesEqual(a, b []uint) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// equalWithin return true if the given float64 values are equal
-// within (precision) decimal places after rounding.  (This can fail if
-// either of the numbers or the difference between them are too large.)
-func equalWithin(precision uint, f1, f2 float64) bool {
-
-	// see http://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html
-
-	var scaleFactor float64 = math.Pow(10, float64(precision))
-
-	f1 = math.Round(f1 * scaleFactor)
-	f2 = math.Round(f2 * scaleFactor)
-
-	return math.Abs(f1-f2) <= 0.1
 }

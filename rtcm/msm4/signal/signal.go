@@ -1,0 +1,385 @@
+// package signal contains code to handle the data from a signal cell from a
+// Multiple Signal Message type 4 (message type 1074, 1084 etc.).  Various
+// values are defined from values in the signal cell and its associated satellite
+// cell.  For convenience the ones from the satellite cell are copied here.
+package signal
+
+import (
+	"errors"
+	"fmt"
+
+	msmHeader "github.com/goblimey/go-ntrip/rtcm/header"
+	msm4satellite "github.com/goblimey/go-ntrip/rtcm/msm4/satellite"
+	"github.com/goblimey/go-ntrip/rtcm/utils"
+)
+
+// invalidRange is the invalid value for the whole millis range in an MSM
+// satellite cell.
+const invalidRange = 0xff
+
+// InvalidRangeDelta is the invalid value for the range delta in an MSM4
+// signal cell. 15 bit two's complement 100 0000 0000 0000
+const InvalidRangeDelta = -16384
+
+// InvalidPhaseRangeDelta is the invalid value for the phase range delta
+// in an MSM4 signal cell.  22 bit two's complement signed:
+// 10 0000 0000 0000 0000 0000
+const InvalidPhaseRangeDelta = -2097152
+
+// Cell holds the data from an MSM4 message for one signal
+// from one satellite, plus values copied from the satellite.
+type Cell struct {
+	// Field names, sizes, invalid values etc are derived from rtklib rtcm3.c
+	// (decode_msm4 function) plus other clues from the igs BNC application.
+
+	// SatelliteID is the ID of the satellite from which this signal was received: 1-64.
+	SatelliteID uint
+
+	// SignalID is the ID of the signal that was observed: 1-32.
+	SignalID uint
+
+	// Wavelength is the wavelength of the signal
+	Wavelength float64
+
+	// RangeWholeMillisFromSatelliteCell is the RangeWholeMillis from the satellite cell -
+	// Whole milliseconds of range 0-255. It's used to calculate the range and the phase
+	// range.  0xff indicates an invalid value, meaning that all range values should be
+	// ignored.
+	RangeWholeMillisFromSatelliteCell uint
+
+	// RangeFractionalMillisFromSatelliteCell is the RangeFractionalMillis value for the
+	// satellite cell.  The units are 1/1024 milliseconds.  The values is used to
+	// calculate the range and phase range.
+	RangeFractionalMillisFromSatelliteCell uint
+
+	// RangeDelta - int15.  A scaled value representing a small signed delta to be added to
+	// the range values from the satellite to get the range as the transit time of the signal.
+	// To get the range in metres, multiply the result by one light millisecond, the distance
+	// light travels in a millisecond.
+	RangeDelta int
+
+	// PhaseRangeDelta - int22.  Invalid if the top bit is set and the others are all zero
+	// (-2097152).  The true phase range for the signal is derived by scaling this and adding
+	// it to the approximate value in the satellite cell.  If this value is invalid, use just
+	// the approximate value.
+	PhaseRangeDelta int
+
+	// LockTimeIndicator - uint4.
+	LockTimeIndicator uint
+
+	// HalfCycleAmbiguity flag - 1 bit.
+	HalfCycleAmbiguity bool
+
+	// CarrierToNoiseRatio - uint6.
+	CarrierToNoiseRatio uint
+}
+
+// New creates an MSM Signal Cell.
+func New(signalID uint, satelliteCell *msm4satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, wavelength float64) *Cell {
+
+	var satelliteID uint
+	var rangeWhole uint
+	var rangeFractional uint
+
+	if satelliteCell != nil {
+		satelliteID = satelliteCell.SatelliteID
+		rangeWhole = satelliteCell.RangeWholeMillis
+		rangeFractional = satelliteCell.RangeFractionalMillis
+	}
+
+	cell := Cell{
+		SatelliteID:                            satelliteID,
+		SignalID:                               signalID,
+		Wavelength:                             wavelength,
+		RangeWholeMillisFromSatelliteCell:      rangeWhole,
+		RangeFractionalMillisFromSatelliteCell: rangeFractional,
+		RangeDelta:                             rangeDelta,
+		PhaseRangeDelta:                        phaseRangeDelta,
+		LockTimeIndicator:                      lockTimeIndicator,
+		HalfCycleAmbiguity:                     halfCycleAmbiguity,
+		CarrierToNoiseRatio:                    cnr}
+
+	return &cell
+}
+
+// String returns a readable version of a signal cell.
+func (cell *Cell) String() string {
+	var rangeM string
+	r, rangeError := cell.RangeInMetres()
+	if rangeError == nil {
+		rangeM = fmt.Sprintf("%.3f", r)
+	} else {
+		rangeM = rangeError.Error()
+	}
+
+	var phaseRange string
+	pr, prError := cell.PhaseRange()
+	if prError == nil {
+		phaseRange = fmt.Sprintf("%.3f", pr)
+	} else {
+		phaseRange = prError.Error()
+	}
+
+	return fmt.Sprintf("%2d, %2d {%s, %s, %d, %v, %d}",
+		cell.SatelliteID, cell.SignalID, rangeM, phaseRange,
+		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
+		cell.CarrierToNoiseRatio)
+}
+
+// GetSignalCells gets the data from the signal cells of an MSM4 message.
+func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader.Header, satCells []msm4satellite.Cell) ([][]Cell, error) {
+	// The third part of the message bit stream is the signal data.  Each satellite can
+	// send many signals, each on a different frequency.  For example, if we observe one
+	// signal from satellite 2, two from satellite 3 and 2 from satellite 15, there will
+	// be five sets of signal data.  Irritatingly they are not laid out in a convenient
+	// way.  First, we get the pseudo range delta values for each of the five signals,
+	// followed by all of the phase range delta values, and so on. The trailing bytes of
+	// the message may be all zeros.
+	//
+	// It's more convenient to present these as a slice of slices of fields, one outer
+	// slice for each satellite and one inner slice for each observed signal.
+	//
+	// If the multiple message flag is set in the header, the message is one of a set
+	// with the same epoch time and station ID.  Each message in the set contains some
+	// of the signals.  If the multiple message flag is not set then we expect the
+	// message to contain all the signals.
+
+	// Define the lengths of the fields
+	const lenRangeDelta uint = 15
+	const lenPhaseRangeDelta uint = 22
+	const lenLockTimeIndicator uint = 4
+	const lenHalfCycleAmbiguity uint = 1
+	const lenCNR uint = 6
+
+	const bitsPerCell = lenRangeDelta + lenPhaseRangeDelta +
+		lenLockTimeIndicator + lenHalfCycleAmbiguity + lenCNR
+
+	// Pos is the position within the message bitstream.
+	pos := startOfSignalCells
+
+	// Find the number of signal cells, ignoring any padding.
+
+	numSignalCells := utils.GetNumberOfSignalCells(bitStream, pos, bitsPerCell)
+
+	if !header.MultipleMessage {
+		// This message should contain all the signal cells.  Check that
+		// there are the expected number.
+		if numSignalCells < header.NumSignalCells {
+			message := fmt.Sprintf("overrun - want %d MSM4 signals, got %d",
+				header.NumSignalCells, numSignalCells)
+			return nil, errors.New(message)
+		}
+	}
+
+	// Capture the signal fields into a set of slices, one per field.
+
+	// Get the range deltas.
+	rangeDelta := make([]int, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		rd := int(utils.GetBitsAsInt64(bitStream, pos, lenRangeDelta))
+		pos += lenRangeDelta
+		rangeDelta = append(rangeDelta, rd)
+	}
+
+	// Get the phase range deltas.
+	phaseRangeDelta := make([]int, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		prd := int(utils.GetBitsAsInt64(bitStream, pos, lenPhaseRangeDelta))
+		pos += lenPhaseRangeDelta
+		phaseRangeDelta = append(phaseRangeDelta, prd)
+	}
+
+	// Get the lock time indicators.
+	lockTimeIndicator := make([]uint, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		lti := uint(utils.GetBitsAsUint64(bitStream, pos, lenLockTimeIndicator))
+		pos += lenLockTimeIndicator
+		lockTimeIndicator = append(lockTimeIndicator, lti)
+	}
+
+	// Get the half-cycle ambiguity indicator bits.
+	halfCycleAmbiguity := make([]bool, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		hca := (utils.GetBitsAsUint64(bitStream, pos, lenHalfCycleAmbiguity) == 1)
+		pos += lenHalfCycleAmbiguity
+		halfCycleAmbiguity = append(halfCycleAmbiguity, hca)
+	}
+
+	// Get the Carrier to Noise Ratio values.
+	cnr := make([]uint, 0)
+	for i := 0; i < header.NumSignalCells; i++ {
+		c := uint(utils.GetBitsAsUint64(bitStream, pos, lenCNR))
+		pos += lenCNR
+		cnr = append(cnr, c)
+	}
+
+	// Create and return a slice of slices of signal cells.
+	// For example if the satellite mask in the header contains {3, 5, 8} and the
+	// cell mask contains {{1,5},{1},{5}} then we received signals 1 and 5 from
+	// satellite 3, signal 1 from satellite 5 and signal 5 from satellite 8.
+	// We would return this slice of slices:
+	//     0: a slice of two signal cells with satellite ID 3, signal IDs 1 and 5
+	//     1: a slice of one signal cell with satellite ID 5, signal ID 1
+	//     2: a slice of one signal cell with satellite ID 8, signal ID 5
+	//
+	// Figuring this out is a bit messy, because the order information
+	// is distributed over the satellite, signal and cell masks.
+
+	signalCells := make([][]Cell, len(header.Satellites))
+
+	// c is the index into the slices of signal fields captured above.
+	c := 0
+
+	for i := range header.Cells {
+		signalCells[i] = make([]Cell, 0)
+		for j := range header.Cells[i] {
+			if header.Cells[i][j] {
+
+				signalID := header.Signals[j]
+
+				wavelength := utils.GetWavelength(header.Constellation, signalID)
+
+				cell := New(signalID, &satCells[i], rangeDelta[c], phaseRangeDelta[c],
+					lockTimeIndicator[c], halfCycleAmbiguity[c], cnr[c], wavelength)
+
+				signalCells[i] = append(signalCells[i], *cell)
+
+				// Prepare to process the next set of signal fields.
+				c++
+			}
+		}
+	}
+
+	return signalCells, nil
+}
+
+// GetAggregateRange takes the range values from an MSM4 signal cell (including some
+// copied from the MSM4satellite cell) and returns the range as a 37-bit scaled unsigned
+// integer with 8 bits whole part and 29 bits fractional part.  This is the transit time
+// of the signal in milliseconds.  Use getRangeInMetres to convert it to a distance in
+// metres.  The whole millis value and/or the delta value can indicate that the
+// measurement was invalid.  If the approximate range value in the satellite cell is
+// invalid, the result is 0.  If the delta in the signal cell is invalid, the result is
+// the approximate range.
+//
+// This is a helper function for RangeInMetres, exposed for unit testing.
+func (cell *Cell) GetAggregateRange() uint64 {
+
+	if cell.RangeWholeMillisFromSatelliteCell == invalidRange {
+		return 0
+	}
+
+	if cell.RangeDelta == InvalidRangeDelta {
+		// The range is valid but the delta is not.
+		return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
+			cell.RangeFractionalMillisFromSatelliteCell, 0)
+	}
+
+	// The delta value is valid.
+
+	// The range delta value in an MSM4 signal is 15 bits signed.  In an MSM7 signal
+	// it's 20 bits signed, the bottom 5 bits being extra precision.  The calculation
+	// assumes the MSM7 form, so for an MSM4, normalise the value to 20 bits before
+	// using it.  The value may be negative, so multiply rather than shifting bits.
+	delta := cell.RangeDelta * 32
+
+	return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
+		cell.RangeFractionalMillisFromSatelliteCell, delta)
+}
+
+// GetAggregatePhaseRange takes a header, satellite cell and signal cell, extracts
+// the phase range values, aggregates them and returns them as a 41-bit scaled unsigned
+// unsigned integer, 8 bits whole part and 33 bits fractional part.  Use
+// getPhaseRangeCycles to convert this to the phase range in cycles.
+func (cell *Cell) GetAggregatePhaseRange() uint64 {
+
+	// This is similar to getAggregateRange  but for the phase range.  The phase
+	// range value in the signal cell is merged with the range values from the
+	// satellite cell.
+
+	if cell.RangeWholeMillisFromSatelliteCell == invalidRange {
+		return 0
+	}
+
+	var delta int
+
+	if cell.PhaseRangeDelta == InvalidPhaseRangeDelta {
+		// The range is valid but the delta is not.  Use just the range.
+		delta = 0
+	} else {
+		// The range and the delta are valid.  Use both.
+		// The value is 22 bits signed.  In an MSM7 signal cell it's 24 bits signed,
+		// the lowest two bits being extra precision.  The calculation assumes the MSM7
+		// form, so normalise the MSM4 value to 24 bits before using it.  It may be
+		// negative, so multiply it rather than shifting bits.
+		//
+		delta = cell.PhaseRangeDelta * 4
+	}
+
+	scaledPhaseRange := utils.GetScaledPhaseRange(
+		cell.RangeWholeMillisFromSatelliteCell,
+		cell.RangeFractionalMillisFromSatelliteCell,
+		delta,
+	)
+
+	return scaledPhaseRange
+}
+
+// RangeInMetres gives the distance from the satellite to the GPS device derived from
+// the satellite and signal cell, in metres.
+func (cell *Cell) RangeInMetres() (float64, error) {
+
+	// Get the range as a 37-bit scaled integer, 8 bits whole, 29 bits fractional
+	// representing the transit time in milliseconds.
+	scaledRange := cell.GetAggregateRange()
+
+	// Convert to float and divide by two to the power 29 to restore the scale.
+	// scaleFactor is two to the power of 29:
+	// 10 0000 0000 0000 0000 0000 0000 0000
+	const scaleFactor = 0x20000000
+	// Restore the scale to give the range in milliseconds.
+	rangeInMillis := float64(scaledRange) / float64(scaleFactor)
+
+	// Use the speed of light to convert that to the distance from the
+	// satellite to the receiver.
+	rangeInMetres := rangeInMillis * utils.OneLightMillisecond
+
+	return rangeInMetres, nil
+}
+
+// GetPhaseRangeLightMilliseconds gets the phase range of the signal in light milliseconds.
+func (cell *Cell) GetPhaseRangeLightMilliseconds(rangeMetres float64) float64 {
+	return rangeMetres * utils.OneLightMillisecond
+}
+
+// PhaseRange combines the range and the phase range from an MSM4
+// message and returns the result in cycles. It returns zero if the input
+// measurements are invalid and an error if the signal is not in use.
+//
+func (cell *Cell) PhaseRange() (float64, error) {
+
+	// In the RTKLIB, the decode_msm4 function uses the range from the
+	// satellite and the phase range from the signal cell to derive the
+	// carrier phase:
+	//
+	// /* carrier-phase (cycle) */
+	// if (r[i]!=0.0&&cp[j]>-1E12&&wl>0.0) {
+	//    rtcm->obs.data[index].L[ind[k]]=(r[i]+cp[j])/wl;
+	// }
+
+	// This is similar to RangeInMetres.  The phase range delta is aggregated
+	// with the range values from the satellite cell and converted to cycles.
+
+	aggregatePhaseRange := cell.GetAggregatePhaseRange()
+
+	// Restore the scale of the aggregate value.
+	phaseRangeMilliSeconds := utils.GetPhaseRangeMilliseconds(aggregatePhaseRange)
+
+	// Convert to light milliseconds
+	phaseRangeLMS := utils.GetPhaseRangeLightMilliseconds(phaseRangeMilliSeconds)
+
+	// and divide by the wavelength to get cycles.
+	phaseRangeCycles := phaseRangeLMS / cell.Wavelength
+
+	return phaseRangeCycles, nil
+}
