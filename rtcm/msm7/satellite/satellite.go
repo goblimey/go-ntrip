@@ -128,8 +128,9 @@ func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites [
 	minBits := len(Satellites) * CellLengthInBits
 
 	if ((len(bitStream) * 8) - int(startOfSatelliteData)) < minBits {
-		message := fmt.Sprintf("overrun - not enough data for %d MSM7 satellite cells - %d %d",
-			len(Satellites), minBits, bitsLeft)
+		message :=
+			fmt.Sprintf("overrun - not enough data for %d MSM7 satellite cells - need %d bits, got %d",
+				len(Satellites), minBits, bitsLeft)
 		return nil, errors.New(message)
 	}
 

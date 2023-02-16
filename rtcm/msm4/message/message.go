@@ -30,8 +30,8 @@ func New(header *header.Header, satellites []satellite.Cell, signals [][]signal.
 	return &message
 }
 
-// Display return a text version of the MSM4Message.
-func (message *Message) Display() string {
+// String return a text version of the MSM4Message.
+func (message *Message) String() string {
 	result :=
 		message.Header.String() +
 			message.DisplaySatelliteCells() +

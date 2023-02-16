@@ -1,8 +1,6 @@
 package message
 
 import (
-	"fmt"
-
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/msm7/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/msm7/signal"
@@ -30,8 +28,8 @@ func New(header *header.Header, satellites []satellite.Cell, signals [][]signal.
 	return &message
 }
 
-// Display return a text version of the MSM7Message.
-func (message *Message) Display() string {
+// String return a text version of the MSM7Message.
+func (message *Message) String() string {
 	result :=
 		message.Header.String() +
 			message.DisplaySatelliteCells() +
@@ -50,12 +48,11 @@ func (message *Message) DisplaySatelliteCells() string {
 
 	heading := ""
 
-	heading = fmt.Sprintf("%d Satellites\nsatellite ID {range ms, extended info, phase range rate m/s}\n",
-		len(message.Satellites))
+	heading = "Satellite ID {range m, extended info, phase range rate}:\n"
 
 	body := ""
 	for i := range message.Satellites {
-		body += message.Satellites[i].String()
+		body += message.Satellites[i].String() + "\n"
 	}
 
 	return heading + body
@@ -66,20 +63,16 @@ func (message *Message) DisplaySatelliteCells() string {
 func (message *Message) DisplaySignalCells() string {
 
 	if len(message.Signals) < 1 {
-		return "No signals|n"
+		return "No signals\n"
 	}
 
-	var heading string
-
-	heading = fmt.Sprintf("%d Signals\nsat ID sig ID {range (delta), phase range (delta), lock time ind, half cycle ambiguity,\n",
-		len(message.Signals))
-	heading += "        Carrier Noise Ratio,  phase range rate (delta)}\n"
+	heading := "Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:\n"
 
 	body := ""
 
 	for i := range message.Signals {
 		for j := range message.Signals[i] {
-			body += fmt.Sprintf("%s\n", message.Signals[i][j].String())
+			body += message.Signals[i][j].String() + "\n"
 		}
 	}
 

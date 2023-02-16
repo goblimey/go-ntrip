@@ -16,7 +16,6 @@ func TestNew(t *testing.T) {
 	const rangeFractional uint = 2
 	const extendedInfo uint = 3
 	const phaseRangeRate = 4
-	const invalidRange = 0xff
 
 	invalidPhaseRangeRateBytes := []byte{0x80, 00} // 14 bits plus filler: 1000 0000 0000 00 filler 00
 	invalidPhaseRangeRate := int(utils.GetBitsAsInt64(invalidPhaseRangeRateBytes, 0, 14))
@@ -34,13 +33,13 @@ func TestNew(t *testing.T) {
 			Cell{SatelliteID: 3,
 				RangeWholeMillis: rangeWhole, RangeFractionalMillis: rangeFractional,
 				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate}},
-		{"MSM7 with invalid range", 4, invalidRange, rangeFractional, extendedInfo, phaseRangeRate,
+		{"MSM7 with invalid range", 4, utils.InvalidRange, rangeFractional, extendedInfo, phaseRangeRate,
 			Cell{SatelliteID: 4,
-				RangeWholeMillis: invalidRange, RangeFractionalMillis: rangeFractional,
+				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional,
 				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate}},
-		{"MSM7 with invalid range and phase range rate", 5, invalidRange, rangeFractional, extendedInfo, invalidPhaseRangeRate,
+		{"MSM7 with invalid range and phase range rate", 5, utils.InvalidRange, rangeFractional, extendedInfo, invalidPhaseRangeRate,
 			Cell{SatelliteID: 5,
-				RangeWholeMillis: invalidRange, RangeFractionalMillis: rangeFractional,
+				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional,
 				ExtendedInfo: extendedInfo, PhaseRangeRate: invalidPhaseRangeRate}},
 	}
 	for _, td := range testData {
@@ -104,7 +103,7 @@ func TestGetSatelliteCells(t *testing.T) {
 func TestGetSatelliteCellsShortMessage(t *testing.T) {
 	const satelliteID1 = 42
 	const satelliteID2 = 43
-	const wantError = "overrun - not enough data for 2 MSM7 satellite cells - 72 64"
+	const wantError = "overrun - not enough data for 2 MSM7 satellite cells - need 72 bits, got 64"
 
 	satellites := []uint{satelliteID1, satelliteID2}
 
@@ -134,6 +133,7 @@ func TestGetSatelliteCellsShortMessage(t *testing.T) {
 
 // TestString checks the string method.
 func TestString(t *testing.T) {
+	const wholeMillis = 2
 	// The fractional millis value is ten bits (1/1024).
 	// This value (10 0000 0110) represents 0.5.
 	const fracMillis = 0x200
@@ -142,7 +142,7 @@ func TestString(t *testing.T) {
 
 	const wantDisplay = " 1 {2.500, 3, 4}"
 
-	satellite := New(1, 2, fracMillis, extendedInfo, phaseRangeRate)
+	satellite := New(1, wholeMillis, fracMillis, extendedInfo, phaseRangeRate)
 
 	display := satellite.String()
 
@@ -194,10 +194,11 @@ func TestStringWithInvalidRange(t *testing.T) {
 
 }
 
-// TestStringWithInvalidRange checks the string method.
+// TestStringWithInvalidPhaseRangeRate checks that the string method displays
+// the phase range rate correctly.
 func TestStringWithInvalidPhaseRangeRate(t *testing.T) {
 	// When the whole millis value is marked as invalid,
-	// both range values are ignored
+	// both range values are ignored.
 	const rangeWhole = 2
 	const rangeFrac = 0x206 // 10 0000 0110
 	const extendedInfo = 3

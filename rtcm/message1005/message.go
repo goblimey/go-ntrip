@@ -7,6 +7,16 @@ import (
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
+const lenMessageType = 12
+const lenStationID = 12
+const lenITRFRealisationYear = 6
+const lenIgnoredBits1 = 4
+const lenAntennaRefX = 38
+const lenIgnoredBits2 = 2
+const lenAntennaRefY = 38
+const lenIgnoredBits3 = 2
+const lenAntennaRefZ = 38
+
 // Message contains a message of type 1005 - antenna position.
 type Message struct {
 	// Some bits in the message are ignored by the RTKLIB decoder so
@@ -41,14 +51,32 @@ type Message struct {
 	AntennaRefZ int64 `json:"antenna_ref_z,omitempty"`
 }
 
-// display1005 returns a text version of a message type 1005
-func (message *Message) Display() string {
+func New(messageType, stationID, itrfRealisationYear, ignored1 uint,
+	antennaRefX int64, ignored2 uint, antennaRefY int64, ignored3 uint, antennaRefZ int64) *Message {
+
+	message := Message{
+		MessageType:         messageType,
+		StationID:           stationID,
+		ITRFRealisationYear: itrfRealisationYear,
+		Ignored1:            ignored1,
+		AntennaRefX:         antennaRefX,
+		Ignored2:            ignored2,
+		AntennaRefY:         antennaRefY,
+		Ignored3:            ignored3,
+		AntennaRefZ:         antennaRefZ,
+	}
+
+	return &message
+}
+
+// String returns a text version of a message type 1005
+func (message *Message) String() string {
 
 	l1 := fmt.Sprintln("message type 1005 - Base Station Information")
 
-	l2 := fmt.Sprintf("stationID %d, ITRF realisation year %d, ignored 0x%4x,\n",
+	l2 := fmt.Sprintf("stationID %d, ITRF realisation year %d, ignored 0x%x,\n",
 		message.StationID, message.ITRFRealisationYear, message.Ignored1)
-	l2 += fmt.Sprintf("x %d ignored 0x%2x, y %d, ignored 0x%2x z %d,\n",
+	l2 += fmt.Sprintf("x %d, ignored 0x%x, y %d, ignored 0x%x, z %d,\n",
 		message.AntennaRefX, message.Ignored2, message.AntennaRefY,
 		message.Ignored3, message.AntennaRefZ)
 
@@ -64,16 +92,6 @@ func (message *Message) Display() string {
 
 // GetMessage1005 returns a text version of a message type 1005
 func GetMessage(bitStream []byte) (*Message, error) {
-
-	const lenMessageType = 12
-	const lenStationID = 12
-	const lenITRFRealisationYear = 6
-	const lenIgnoredBits1 = 4
-	const lenAntennaRefX = 38
-	const lenIgnoredBits2 = 2
-	const lenAntennaRefY = 38
-	const lenIgnoredBits3 = 2
-	const lenAntennaRefZ = 38
 
 	const bitsExpected = lenMessageType + lenStationID + lenITRFRealisationYear +
 		lenIgnoredBits1 + lenAntennaRefX + lenIgnoredBits2 + lenAntennaRefY +
@@ -91,26 +109,26 @@ func GetMessage(bitStream []byte) (*Message, error) {
 	// Pos is the position within the bitstream.
 	var pos uint = 0
 
-	var result Message
-
-	result.MessageType = uint(utils.GetBitsAsUint64(bitStream, pos, lenMessageType))
+	messageType := uint(utils.GetBitsAsUint64(bitStream, pos, lenMessageType))
 	pos += lenMessageType
-	result.StationID = uint(utils.GetBitsAsUint64(bitStream, pos, lenStationID))
+	stationID := uint(utils.GetBitsAsUint64(bitStream, pos, lenStationID))
 	pos += lenStationID
-	result.ITRFRealisationYear = uint(utils.GetBitsAsUint64(bitStream, pos, lenITRFRealisationYear))
+	itrfRealisationYear := uint(utils.GetBitsAsUint64(bitStream, pos, lenITRFRealisationYear))
 	pos += lenITRFRealisationYear
-	result.Ignored1 = uint(utils.GetBitsAsUint64(bitStream, pos, lenIgnoredBits1))
+	ignored1 := uint(utils.GetBitsAsUint64(bitStream, pos, lenIgnoredBits1))
 	pos += lenIgnoredBits1
-	result.AntennaRefX = utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefX)
+	antennaRefX := utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefX)
 	pos += lenAntennaRefX
-	result.Ignored2 = uint(utils.GetBitsAsUint64(bitStream, pos, lenIgnoredBits2))
+	ignored2 := uint(utils.GetBitsAsUint64(bitStream, pos, lenIgnoredBits2))
 	pos += lenIgnoredBits2
-	result.AntennaRefY = utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefY)
+	antennaRefY := utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefY)
 	pos += lenAntennaRefY
-	result.Ignored3 = uint(utils.GetBitsAsUint64(bitStream, pos, lenIgnoredBits3))
+	ignored3 := uint(utils.GetBitsAsUint64(bitStream, pos, lenIgnoredBits3))
 	pos += lenIgnoredBits3
-	result.AntennaRefZ = utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefZ)
+	antennaRefZ := utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefZ)
 	pos += lenAntennaRefZ
 
-	return &result, nil
+	message := New(messageType, stationID, itrfRealisationYear, ignored1,
+		antennaRefX, ignored2, antennaRefY, ignored3, antennaRefZ)
+	return message, nil
 }

@@ -5,6 +5,10 @@ import (
 	"math"
 )
 
+// invalidRange is the invalid value for the whole millis range in an MSM4
+// or MSM7 satellite cell.
+const InvalidRange = 0xff
+
 // SpeedOfLightMS is the speed of light in metres per second.
 const SpeedOfLightMS = 299792458.0
 
@@ -42,14 +46,14 @@ const Freq7 float64 = 1.20714e9
 // Freq8 is the E5a+b  frequency (Hz).
 const Freq8 float64 = 1.191795e9
 
-// Freq1Glo is the GLONASS G1 base frequency (Hz).
-const Freq1Glo float64 = 1.60200e9
+// FreqL1Glonass is the GLONASS G1 base frequency (Hz).
+const FreqL1Glonass float64 = 1.60200e9
 
 // BiasFreq1Glo is the GLONASS G1 bias frequency (Hz/n).
 const BiasFreq1Glo float64 = 0.56250e6
 
 // fReq2Glo is the GLONASS G2 base frequency (Hz).
-const Freq2Glo float64 = 1.24600e9
+const FreqL2Glonass float64 = 1.24600e9
 
 // BiasFreq2Glo is the GLONASS G2 bias frequency (Hz/n).
 const BiasFreq2Glo float64 = 0.43750e6
@@ -57,14 +61,14 @@ const BiasFreq2Glo float64 = 0.43750e6
 // Freq3Glo is the GLONASS G3 frequency (Hz).
 const Freq3Glo float64 = 1.202025e9
 
-// Freq1BD is the BeiDou B1 frequency (Hz).
-const Freq1BD float64 = 1.561098e9
+// FreqB1Beidou is the BeiDou B1 frequency (Hz).
+const FreqB1Beidou float64 = 1.561098e9
 
-// Freq2BD is the BeiDou B2 frequency (Hz).
-const Freq2BD float64 = 1.20714e9
+// FreqB2Beidou is the BeiDou B2 frequency (Hz).
+const FreqB2Beidou float64 = 1.17645e9
 
-// Freq3BD is the BeiDou B3 frequency (Hz).
-const Freq3BD float64 = 1.26852e9
+// FreqB3Beidou is the BeiDou B3 frequency (Hz).
+const FreqB3Beidou float64 = 1.26852e9
 
 // LeaderLengthBytes is the length of the message frame leader in bytes.
 const LeaderLengthBytes = 3
@@ -80,8 +84,8 @@ const CRCLengthBits = CRCLengthBytes * 8
 
 // GetPhaseRangeLightMilliseconds gets the phase range of the signal in
 // light milliseconds.
-func GetPhaseRangeLightMilliseconds(rangeMetres float64) float64 {
-	return rangeMetres * OneLightMillisecond
+func GetPhaseRangeLightMilliseconds(rangeMilliseconds float64) float64 {
+	return rangeMilliseconds * OneLightMillisecond
 }
 
 // GetScaledRange combines the components of the range from an MSM message and
@@ -108,11 +112,11 @@ func GetScaledRange(wholeMillis, fractionalMillis uint, delta int) uint64 {
 	//       8 bits  |     29 bits fractional
 	//        whole
 	//
-	//     |--- approx Range ----|
-	//     |whole    |fractional |
+	//     |--- Approx Range ----|
+	//     | whole  | fractional |
 	//                           |------- delta --------|
 	//     w wwww wwwf ffff ffff f000 0000 0000 0000 0000
-	//     + pos or neg delta    dddd dddd dddd dddd dddd <- 20-bit signed delta
+	//     + pos or neg delta    sddd dddd dddd dddd dddd <- 20-bit signed delta
 	//
 	//
 	// The two parts of the approximate value are uint and much bigger than the
@@ -145,20 +149,31 @@ func GetPhaseRangeMilliseconds(scaledRange uint64) float64 {
 // and returns the result as a 41-bit scaled integer, 8 bits whole, 33 bits
 // fractional.
 func GetScaledPhaseRange(wholeMillis, fractionalMillis uint, delta int) uint64 {
-	// This is similar to getScaledRange, but the amounts shifted are different.
-	// The incoming delta value is 24 bits signed and the delta and the fractional
-	// part share 3 bits, producing a 39-bit result.
+	// This is similar to getScaledRange, but the amounts shifted are different. The
+	// phase range is made up from the range values (8 bits whole milliseconds,
+	// 10s bit fractional milliseconds) plus a 24-bit signed delta which is in units
+	// of (2 to the power -31) so the delta value can be
+	// plus or minus (2 to the power -8) to (2 to the power -31).  The result is a
+	// 39-bit scaled integer, 8 bits whole, 31 bits fractional.
 	//
-	//     ------ Range -------
-	//     whole     fractional
+	// The fractional range and the delta overlap by two bits, ignoring the sign,
+	// so if both are at their maximum values, adding them together would cause the
+	// fractional part of the result to overflow.  However, the maximum whole
+	// millisecond value is only 254, as 255 indicates that the reading is invalid.
+	// So, the result will always fit into 39 bits.
+	//
+	//     |--- Approx Range ----|
+	//     | whole  | fractional |
+	//                       |---------- delta -----------|
 	//     876 5432 1098 7654 3210 9876 5432 1098 7654 3210
 	//     www wwww wfff ffff fff0 0000 0000 0000 0000 0000
-	//     + or -             dddd dddd dddd dddd dddd dddd <- phase range rate delta.
+	//     + or -             sddd dddd dddd dddd dddd dddd <- phase range rate delta.
 
-	return getScaledValue(wholeMillis, 31, fractionalMillis, 21, delta)
+	result := getScaledValue(wholeMillis, 31, fractionalMillis, 21, delta)
+	return result
 }
 
-// GetScaledPhaseRangeRate takes the comonent values of the phase range rate
+// GetScaledPhaseRangeRate takes the component values of the phase range rate
 // and returns them as a scaled integer with a scale factor of 10,000.
 func GetScaledPhaseRangeRate(wholeMillis, fractionalMillis int) int64 {
 
@@ -182,23 +197,23 @@ func GetApproxRange(wholeMillis, fractionalMillis uint) float64 {
 	return float64(scaledRange) / twoToPowerTen
 }
 
-// GetWavelength returns the carrier wavelength for a signal ID.
+// GetSignalWavelength returns the carrier wavelength for a signal ID.
 // The result depends upon the constellation, each of which has its
 // own list of signals and equivalent wavelengths.  Some of the possible
 // signal IDs are not used and so have no associated wavelength, so the
 // result may be an error.
 //
-func GetWavelength(constellation string, signalID uint) float64 {
+func GetSignalWavelength(constellation string, signalID uint) float64 {
 
 	switch constellation {
 	case "GPS":
-		return getSigWaveLenGPS(signalID)
+		return getSignalWavelengthGPS(signalID)
 	case "Galileo":
-		return getSigWaveLenGalileo(signalID)
+		return getSignalWavelengthGalileo(signalID)
 	case "GLONASS":
-		return getSigWaveLenGlo(signalID)
-	case "BeiDou":
-		return getSigWaveLenBD(signalID)
+		return getSignalWavelengthGlonass(signalID)
+	case "Beidou":
+		return getSignalWavelengthBeidou(signalID)
 	default:
 		return 0
 	}
@@ -250,146 +265,199 @@ func GetNumberOfSignalCells(bitStream []byte, startPosition, bitsPerCell uint) i
 	return len(cells)
 }
 
-// getSigWaveLenGPS returns the signal carrier wavelength for a GPS satellite
-// if it's defined.
-func getSigWaveLenGPS(signalID uint) float64 {
-	// Only some signal IDs are in use.
-	var frequency float64
+// getSignalFrequencyGPS returns the frequency of each GPS signal, 0 if
+// the ID is out of range or not in use.
+func getSignalFrequencyGPS(signalID uint) float64 {
+	// Each of the 32 signals is transmitted on a defined frequency  These are
+	// named L1 (1575.42 MHz) and L2 (1227.60 MHz). In the future, there will be a
+	// third frequency L5 (1176.45 MHz).
+	// See https://www.sciencedirect.com/topics/mathematics/l1-frequency
+	// and the RTKLIB source code.
+
 	switch signalID {
 	case 2:
-		frequency = Freq1
+		return Freq1
 	case 3:
-		frequency = Freq1
+		return Freq1
 	case 4:
-		frequency = Freq1
+		return Freq1
 	case 8:
-		frequency = Freq2
+		return Freq2
 	case 9:
-		frequency = Freq2
+		return Freq2
 	case 10:
-		frequency = Freq2
+		return Freq2
 	case 15:
-		frequency = Freq2
+		return Freq2
 	case 16:
-		frequency = Freq2
+		return Freq2
 	case 17:
-		frequency = Freq2
+		return Freq2
 	case 22:
-		frequency = Freq5
+		return Freq5
 	case 23:
-		frequency = Freq5
+		return Freq5
 	case 24:
-		frequency = Freq5
+		return Freq5
 	case 30:
-		frequency = Freq1
+		return Freq1
 	case 31:
-		frequency = Freq1
+		return Freq1
 	case 32:
-		frequency = Freq1
+		return Freq1
 	default:
 		return 0 // No matching frequency.
+	}
+}
+
+// getSignalWavelengthGPS returns the signal carrier wavelength for a GPS satellite
+// if it's defined.
+func getSignalWavelengthGPS(signalID uint) float64 {
+	frequency := getSignalFrequencyGPS(signalID)
+	if frequency == 0 {
+		// Avoid division by zero.
+		return 0
 	}
 	return SpeedOfLightMS / frequency
 }
 
-// GetSigWaveLenGalileo returns the signal carrier wavelength for a Galileo satellite
-// if it's defined.
-func getSigWaveLenGalileo(signalID uint) float64 {
-	// Only some signal IDs are in use.
-	var frequency float64
+// getSignalFrequencyGalileo returns the frequency of each Galileo signal, 0 if
+// the ID is out of range.
+func getSignalFrequencyGalileo(signalID uint) float64 {
+	// Each of the 32 signals is transmitted on a defined frequency  These are
+	// named E1 (1575.42 MHz, same as GPS L1), E5a (1176.45, same as GPS L5),
+	// E5b (1207.14 MHz), E5a+b (1191.8) and E6 (1278.75 MHz).
+	// See https://www.esa.int/Applications/Navigation/Galileo/Galileo_navigation_signals_and_frequencies
+	// and the RTKLIB source code.
+
 	switch signalID {
 	case 2:
-		frequency = Freq1
+		return Freq1 // L1
 	case 3:
-		frequency = Freq1
+		return Freq1
 	case 4:
-		frequency = Freq1
+		return Freq1
 	case 5:
-		frequency = Freq1
+		return Freq1
 	case 6:
-		frequency = Freq1
+		return Freq1
 	case 8:
-		frequency = Freq6
+		return Freq6 // E6
 	case 9:
-		frequency = Freq6
+		return Freq6
 	case 10:
-		frequency = Freq6
+		return Freq6
 	case 11:
-		frequency = Freq6
+		return Freq6
 	case 12:
-		frequency = Freq6
+		return Freq6
 	case 14:
-		frequency = Freq7
+		return Freq7
 	case 15:
-		frequency = Freq7
+		return Freq7 // E5b
 	case 16:
-		frequency = Freq7
+		return Freq7
 	case 18:
-		frequency = Freq8
+		return Freq8
 	case 19:
-		frequency = Freq8
+		return Freq8
 	case 20:
-		frequency = Freq8
+		return Freq8 // E5a+b
 	case 22:
-		frequency = Freq5
+		return Freq5
 	case 23:
-		frequency = Freq5
+		return Freq5
 	case 24:
-		frequency = Freq5
+		return Freq5
 	default:
 		return 0 // No matching frequency.
+	}
+}
+
+// getSignalWavelengthGalileo returns the signal carrier wavelength for a Galileo satellite
+// if it's defined.
+func getSignalWavelengthGalileo(signalID uint) float64 {
+	frequency := getSignalFrequencyGalileo(signalID)
+	if frequency == 0 {
+		// Avoid division by zero.
+		return 0
 	}
 	return SpeedOfLightMS / frequency
 }
 
-// GetSigWaveLenGlo gets the signal carrier wavelength for a GLONASS satellite
+// getSignalFrequencyGlonass returns the frequency of each Glonass signal, 0 if
+// the ID is out of range.
+func getSignalFrequencyGlonass(signalID uint) float64 {
+
+	// See https://gssc.esa.int/navipedia/index.php/GLONASS_Signal_Plan
+
+	switch signalID {
+	case 2:
+		return FreqL1Glonass
+	case 3:
+		return FreqL1Glonass
+	case 8:
+		return FreqL2Glonass
+	case 9:
+		return FreqL2Glonass
+	default:
+		return 0 // No matching frequency.
+	}
+}
+
+// getSignalWavelengthGlonass gets the signal carrier wavelength for a GLONASS satellite
 // if it's defined.
 //
-func getSigWaveLenGlo(signalID uint) float64 {
-	// Only some signal IDs are in use.
-	var frequency float64
+func getSignalWavelengthGlonass(signalID uint) float64 {
+	frequency := getSignalFrequencyGlonass(signalID)
+	if frequency == 0 {
+		// Avoid division by zero.
+		return 0
+	}
+	return SpeedOfLightMS / frequency
+}
+
+// getSignalFrequencyBeidou returns the frequency of each Beidou signal, 0 if
+// the ID is out of range.
+func getSignalFrequencyBeidou(signalID uint) float64 {
+	// Each of the 32 signals is broadcast on a defined frequency.  These are
+	// B1: 1561.098 MHz
+	// B2a: 1176.45 MHz
+	// B3I: 1268.52 MHz
+	// See https://gssc.esa.int/navipedia/index.php/BeiDou_Signal_Plan#BeiDou_B1I_Band
+
 	switch signalID {
 	case 2:
-		frequency = Freq1Glo
+		return FreqB1Beidou
 	case 3:
-		frequency = Freq1Glo
+		return FreqB1Beidou
+	case 4:
+		return FreqB1Beidou
 	case 8:
-		frequency = Freq2Glo
+		return FreqB3Beidou
 	case 9:
-		frequency = Freq2Glo
+		return FreqB3Beidou
+	case 10:
+		return FreqB3Beidou
+	case 14:
+		return FreqB2Beidou
+	case 15:
+		return FreqB2Beidou
+	case 16:
+		return FreqB2Beidou
 	default:
 		return 0 // No matching frequency.
 	}
-	return SpeedOfLightMS / frequency
 }
 
 // GetSigWaveLenBD returns the signal carrier wavelength for a Beidou satellite
 // if it's defined.
 //
-func getSigWaveLenBD(signalID uint) float64 {
-	// Only some signal IDs are in use.
-	var frequency float64
-	switch signalID {
-	case 2:
-		frequency = Freq1BD
-	case 3:
-		frequency = Freq1BD
-	case 4:
-		frequency = Freq1BD
-	case 8:
-		frequency = Freq3BD
-	case 9:
-		frequency = Freq3BD
-	case 10:
-		frequency = Freq3BD
-	case 14:
-		frequency = Freq2BD
-	case 15:
-		frequency = Freq2BD
-	case 16:
-		frequency = Freq2BD
-	default:
-		return 0 // No matching frequency.
+func getSignalWavelengthBeidou(signalID uint) float64 {
+	frequency := getSignalFrequencyBeidou(signalID)
+	if frequency == 0 {
+		// Avoid division by zero.
+		return 0
 	}
 	return SpeedOfLightMS / frequency
 }
@@ -460,8 +528,8 @@ func getScaledValue(v1, shift1, v2, shift2 uint, delta int) uint64 {
 	return scaledResult
 }
 
-// SlicesEqual returns true if uint slices a and b contain the same
-// elements.  A nil argument is equivalent to an empty slice.
+// SlicesEqual returns true if uint slices a and b are the same length and
+// contain the same elements.  A nil argument is equivalent to an empty slice.
 // https://yourbasic.org/golang/compare-slices/
 func SlicesEqual(a, b []uint) bool {
 	if len(a) != len(b) {

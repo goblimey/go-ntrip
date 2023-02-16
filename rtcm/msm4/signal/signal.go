@@ -13,10 +13,6 @@ import (
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
-// invalidRange is the invalid value for the whole millis range in an MSM
-// satellite cell.
-const invalidRange = 0xff
-
 // InvalidRangeDelta is the invalid value for the range delta in an MSM4
 // signal cell. 15 bit two's complement 100 0000 0000 0000
 const InvalidRangeDelta = -16384
@@ -77,9 +73,10 @@ type Cell struct {
 // New creates an MSM Signal Cell.
 func New(signalID uint, satelliteCell *msm4satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, wavelength float64) *Cell {
 
-	var satelliteID uint
-	var rangeWhole uint
-	var rangeFractional uint
+	// Default values if satellite is nil.
+	var satelliteID uint = 0
+	var rangeWhole uint = utils.InvalidRange
+	var rangeFractional uint = 0
 
 	if satelliteCell != nil {
 		satelliteID = satelliteCell.SatelliteID
@@ -105,22 +102,20 @@ func New(signalID uint, satelliteCell *msm4satellite.Cell, rangeDelta, phaseRang
 // String returns a readable version of a signal cell.
 func (cell *Cell) String() string {
 	var rangeM string
-	r, rangeError := cell.RangeInMetres()
-	if rangeError == nil {
+	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+		rangeM = "invalid"
+	} else {
+		r := cell.RangeInMetres()
 		rangeM = fmt.Sprintf("%.3f", r)
-	} else {
-		rangeM = rangeError.Error()
 	}
-
 	var phaseRange string
-	pr, prError := cell.PhaseRange()
-	if prError == nil {
-		phaseRange = fmt.Sprintf("%.3f", pr)
+	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+		phaseRange = "invalid"
 	} else {
-		phaseRange = prError.Error()
+		pr := cell.PhaseRange()
+		phaseRange = fmt.Sprintf("%.3f", pr)
 	}
-
-	return fmt.Sprintf("%2d, %2d {%s, %s, %d, %v, %d}",
+	return fmt.Sprintf("%2d %2d {%s, %s, %d, %v, %d}",
 		cell.SatelliteID, cell.SignalID, rangeM, phaseRange,
 		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
 		cell.CarrierToNoiseRatio)
@@ -156,12 +151,22 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 	// Pos is the position within the message bitstream.
 	pos := startOfSignalCells
+	bitsInStream := uint(len(bitStream) * 8)
+	bitsLeft := bitsInStream - pos
 
 	// Find the number of signal cells, ignoring any padding.
 
 	numSignalCells := utils.GetNumberOfSignalCells(bitStream, pos, bitsPerCell)
 
-	if !header.MultipleMessage {
+	if header.MultipleMessage {
+		// The message doesn't contain all the signal cells but there should be
+		// at least one.
+		if bitsLeft < bitsPerCell {
+			message := fmt.Sprintf("overrun - want at least one %d-bit signal cell when multiple message flag is set, got only %d bits left",
+				bitsPerCell, bitsLeft)
+			return nil, errors.New(message)
+		}
+	} else {
 		// This message should contain all the signal cells.  Check that
 		// there are the expected number.
 		if numSignalCells < header.NumSignalCells {
@@ -175,7 +180,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 	// Get the range deltas.
 	rangeDelta := make([]int, 0)
-	for i := 0; i < header.NumSignalCells; i++ {
+	for i := 0; i < numSignalCells; i++ {
 		rd := int(utils.GetBitsAsInt64(bitStream, pos, lenRangeDelta))
 		pos += lenRangeDelta
 		rangeDelta = append(rangeDelta, rd)
@@ -183,7 +188,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 	// Get the phase range deltas.
 	phaseRangeDelta := make([]int, 0)
-	for i := 0; i < header.NumSignalCells; i++ {
+	for i := 0; i < numSignalCells; i++ {
 		prd := int(utils.GetBitsAsInt64(bitStream, pos, lenPhaseRangeDelta))
 		pos += lenPhaseRangeDelta
 		phaseRangeDelta = append(phaseRangeDelta, prd)
@@ -191,7 +196,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 	// Get the lock time indicators.
 	lockTimeIndicator := make([]uint, 0)
-	for i := 0; i < header.NumSignalCells; i++ {
+	for i := 0; i < numSignalCells; i++ {
 		lti := uint(utils.GetBitsAsUint64(bitStream, pos, lenLockTimeIndicator))
 		pos += lenLockTimeIndicator
 		lockTimeIndicator = append(lockTimeIndicator, lti)
@@ -199,7 +204,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 	// Get the half-cycle ambiguity indicator bits.
 	halfCycleAmbiguity := make([]bool, 0)
-	for i := 0; i < header.NumSignalCells; i++ {
+	for i := 0; i < numSignalCells; i++ {
 		hca := (utils.GetBitsAsUint64(bitStream, pos, lenHalfCycleAmbiguity) == 1)
 		pos += lenHalfCycleAmbiguity
 		halfCycleAmbiguity = append(halfCycleAmbiguity, hca)
@@ -207,7 +212,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 	// Get the Carrier to Noise Ratio values.
 	cnr := make([]uint, 0)
-	for i := 0; i < header.NumSignalCells; i++ {
+	for i := 0; i < numSignalCells; i++ {
 		c := uint(utils.GetBitsAsUint64(bitStream, pos, lenCNR))
 		pos += lenCNR
 		cnr = append(cnr, c)
@@ -233,19 +238,25 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 	for i := range header.Cells {
 		signalCells[i] = make([]Cell, 0)
 		for j := range header.Cells[i] {
-			if header.Cells[i][j] {
+			// Beware!  We are consuming cells in a loop controlled by cranking through the
+			// 1 bits in the cell mask.  If the multiple message flag is set, only some of
+			// those cells are in this message.
+			if c < numSignalCells {
 
-				signalID := header.Signals[j]
+				if header.Cells[i][j] {
 
-				wavelength := utils.GetWavelength(header.Constellation, signalID)
+					signalID := header.Signals[j]
 
-				cell := New(signalID, &satCells[i], rangeDelta[c], phaseRangeDelta[c],
-					lockTimeIndicator[c], halfCycleAmbiguity[c], cnr[c], wavelength)
+					wavelength := utils.GetSignalWavelength(header.Constellation, signalID)
 
-				signalCells[i] = append(signalCells[i], *cell)
+					cell := New(signalID, &satCells[i], rangeDelta[c], phaseRangeDelta[c],
+						lockTimeIndicator[c], halfCycleAmbiguity[c], cnr[c], wavelength)
 
-				// Prepare to process the next set of signal fields.
-				c++
+					signalCells[i] = append(signalCells[i], *cell)
+
+					// Prepare to process the next set of signal fields.
+					c++
+				}
 			}
 		}
 	}
@@ -265,7 +276,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 // This is a helper function for RangeInMetres, exposed for unit testing.
 func (cell *Cell) GetAggregateRange() uint64 {
 
-	if cell.RangeWholeMillisFromSatelliteCell == invalidRange {
+	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
 		return 0
 	}
 
@@ -297,7 +308,7 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 	// range value in the signal cell is merged with the range values from the
 	// satellite cell.
 
-	if cell.RangeWholeMillisFromSatelliteCell == invalidRange {
+	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
 		return 0
 	}
 
@@ -327,7 +338,7 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 
 // RangeInMetres gives the distance from the satellite to the GPS device derived from
 // the satellite and signal cell, in metres.
-func (cell *Cell) RangeInMetres() (float64, error) {
+func (cell *Cell) RangeInMetres() float64 {
 
 	// Get the range as a 37-bit scaled integer, 8 bits whole, 29 bits fractional
 	// representing the transit time in milliseconds.
@@ -344,19 +355,14 @@ func (cell *Cell) RangeInMetres() (float64, error) {
 	// satellite to the receiver.
 	rangeInMetres := rangeInMillis * utils.OneLightMillisecond
 
-	return rangeInMetres, nil
-}
-
-// GetPhaseRangeLightMilliseconds gets the phase range of the signal in light milliseconds.
-func (cell *Cell) GetPhaseRangeLightMilliseconds(rangeMetres float64) float64 {
-	return rangeMetres * utils.OneLightMillisecond
+	return rangeInMetres
 }
 
 // PhaseRange combines the range and the phase range from an MSM4
 // message and returns the result in cycles. It returns zero if the input
 // measurements are invalid and an error if the signal is not in use.
 //
-func (cell *Cell) PhaseRange() (float64, error) {
+func (cell *Cell) PhaseRange() float64 {
 
 	// In the RTKLIB, the decode_msm4 function uses the range from the
 	// satellite and the phase range from the signal cell to derive the
@@ -381,5 +387,5 @@ func (cell *Cell) PhaseRange() (float64, error) {
 	// and divide by the wavelength to get cycles.
 	phaseRangeCycles := phaseRangeLMS / cell.Wavelength
 
-	return phaseRangeCycles, nil
+	return phaseRangeCycles
 }

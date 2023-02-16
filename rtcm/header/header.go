@@ -457,6 +457,13 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 
 	cellMask := utils.GetBitsAsUint64(bitStream, pos, lenCellMaskBits)
 
+	pos += lenCellMaskBits
+
+	// Shift (lenCellMaskBits) bits to the top of cellMask, ready for
+	// getCells:  0000000 .... bbbbbb => bbbbbb00000 ....
+	shift := 64 - lenCellMaskBits
+	cellMask = cellMask << shift
+
 	header := New(messageType, stationID, epochTime, multipleMessage, issueOfDataStation,
 		sessionTransmissionTime, clockSteeringIndicator, externalClockIndicator,
 		gnssDivergenceFreeSmoothingIndicator, gnssSmoothingInterval,
@@ -626,17 +633,18 @@ func getCells(cellMask uint64, numberOfSatellites, numberOfSignalTypes int) [][]
 	// However, if there are a lot of signal cells, they may be spread over
 	// several messages.
 
-	numberOfCells := numberOfSatellites * numberOfSignalTypes
+	const bitsInCellMask = 64
 	cellNumber := 0
 	cells := make([][]bool, 0)
 	for i := 0; i < numberOfSatellites; i++ {
 		row := make([]bool, 0)
 		for j := 0; j < numberOfSignalTypes; j++ {
 			cellNumber++
-			bitPosition := numberOfCells - cellNumber
+			// bit 63 is first bit, bit 62 is second bit ...
+			shift := uint(bitsInCellMask - cellNumber)
 			// Shift down to remove the lower bits.
-			shiftedDown := cellMask >> bitPosition
-			// Mask out any higher bits to isolate the bit we want.
+			shiftedDown := cellMask >> shift
+			// Isolate the bit we want.
 			bit := shiftedDown & 1
 			val := bit == 1
 			row = append(row, val)

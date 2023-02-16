@@ -88,9 +88,9 @@ func main() {
 
 	// Run HandleMessages with a single channel connected to a
 	// goroutine that displays each message in readable form.
-	var channels []chan rtcm.Message
+	var channels []chan rtcm.RTCM3Message
 	const channelCap = 1000
-	stdoutChannel := make(chan rtcm.Message, channelCap)
+	stdoutChannel := make(chan rtcm.RTCM3Message, channelCap)
 	defer close(stdoutChannel)
 	channels = append(channels, stdoutChannel)
 	go writeReadableMessages(stdoutChannel, rtcmHandler, os.Stdout)
@@ -133,7 +133,7 @@ func openFile(fileName string) (io.Reader, error) {
 // decodes them to readable form and writes the result to the given
 // writer.  If the channel is closed or there is a write error, it
 // terminates.  It can be run in a go routine.
-func writeReadableMessages(ch chan rtcm.Message, rtcmHandler *rtcm.RTCM, writer io.Writer) {
+func writeReadableMessages(ch chan rtcm.RTCM3Message, rtcmHandler *rtcm.RTCM, writer io.Writer) {
 
 	for {
 		message, ok := <-ch

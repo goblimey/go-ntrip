@@ -51,7 +51,7 @@ func TestNew(t *testing.T) {
 				CarrierToNoiseRatio:                    cnr}},
 		{"nil satellite", 2, nil, rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, 0.0,
 			Cell{SignalID: 2, SatelliteID: 0,
-				RangeWholeMillisFromSatelliteCell:      0,
+				RangeWholeMillisFromSatelliteCell:      utils.InvalidRange,
 				RangeFractionalMillisFromSatelliteCell: 0,
 				Wavelength:                             0.0,
 				RangeDelta:                             rangeDelta,
@@ -83,8 +83,8 @@ func TestGetSignalCells(t *testing.T) {
 	satellites := []uint{satelliteID0, satelliteID1}
 	const signalID0 = 8
 
-	wavelength0 := utils.GetWavelength("GPS", signalID0)
-	wavelength1 := utils.GetWavelength("GPS", signalID1)
+	wavelength0 := utils.GetSignalWavelength("GPS", signalID0)
+	wavelength1 := utils.GetSignalWavelength("GPS", signalID1)
 
 	signals := []uint{signalID0, signalID1}
 	// Satellite 42 received signals 5 and 7, satellite 43 received signal 5 only.
@@ -187,16 +187,18 @@ func TestGetMS4SignalCellsWithShortBitStream(t *testing.T) {
 	signals := []uint{signalID0, signalID1}
 	// Satellite 42 received signals 5 and 7, satellite 43 received signal 5 only.
 	cellMask := [][]bool{{true, true}, {true, false}}
-	header := header.Header{MessageType: 1074, NumSignalCells: 3,
-		Satellites: satellites, Signals: signals, Cells: cellMask}
+	headerForSingleMessage := header.Header{MessageType: 1074, MultipleMessage: false,
+		NumSignalCells: 3, Satellites: satellites, Signals: signals, Cells: cellMask}
+	headerForMultiMessage := header.Header{MessageType: 1074, MultipleMessage: true,
+		NumSignalCells: 3, Satellites: satellites, Signals: signals, Cells: cellMask}
 	satData := []satellite.Cell{
 		satellite.Cell{SatelliteID: satelliteID0,
 			RangeWholeMillis: 0x81, RangeFractionalMillis: 0x201},
 		satellite.Cell{SatelliteID: satelliteID1,
 			RangeWholeMillis: 1, RangeFractionalMillis: 2}}
 
-	// The bit stream is taken from a working example, then one byte is removed.
-	// The original contains three signal cells - three 15-bit signed range
+	// The bit stream is taken from a working example.
+	// It contains three signal cells - three 15-bit signed range
 	// delta, followed by three 22-bit signed phase range delta, three 4-bit
 	// unsigned phase lock time indicators, three single bit half-cycle ambiguity
 	// indicators, three 6-bit unsigned GNSS Signal Carrier to Noise Ratio (CNR)
@@ -207,24 +209,46 @@ func TestGetMS4SignalCellsWithShortBitStream(t *testing.T) {
 	bitStream := []byte{
 		0x40, 0x03, 0xff, 0xfc, 0x00, 0x07,
 		0xff, 0xff, 0xe0, 0x00, 0x00, 0x00,
-		0x00, 0x03, 0xe0, 0x36, 0x10, // 0x20,
+		0x00, 0x03, 0xe0, 0x36, 0x10, 0x20,
 	}
 
-	want := "overrun - want 3 MSM4 signals, got 2"
-
-	// Expect an error.
-	_, got := GetSignalCells(bitStream, 0, &header, satData)
-
-	// Check the error.
-	if got == nil {
-		t.Error("want an overrun error")
-		return
+	// The test calls provide only part of the bitstream, to provoke an overrun error.
+	var testData = []struct {
+		description string
+		header      *header.Header
+		bitStream   []byte
+		want        string
+	}{
+		{
+			"single", &headerForSingleMessage, bitStream[:17],
+			"overrun - want 3 MSM4 signals, got 2",
+		},
+		{
+			"multiple", &headerForMultiMessage, bitStream[:5],
+			"overrun - want at least one 48-bit signal cell when multiple message flag is set, got only 40 bits left",
+		},
 	}
 
-	if got.Error() != want {
-		t.Errorf("want the error\n\"%s\"\ngot \"%s\"",
-			want, got.Error())
-		return
+	for _, td := range testData {
+
+		// Expect an error.
+		gotMessage, gotError := GetSignalCells(td.bitStream, 0, td.header, satData)
+
+		if gotMessage != nil {
+			t.Errorf("%s: expected a nil message and an error", td.description)
+		}
+
+		// Check the error.
+		if gotError == nil {
+			t.Errorf("%s: expected an overrun error", td.description)
+			return
+		}
+
+		if gotError.Error() != td.want {
+			t.Errorf("%s: expected the error\n\"%s\"\ngot \"%s\"",
+				td.description, td.want, gotError.Error())
+			return
+		}
 	}
 }
 
@@ -365,7 +389,7 @@ func TestGetAggregatePhaseRange(t *testing.T) {
 	}
 
 	cellWithInvalidPhaseRange := Cell{
-		RangeWholeMillisFromSatelliteCell:      invalidRange,
+		RangeWholeMillisFromSatelliteCell:      utils.InvalidRange,
 		RangeFractionalMillisFromSatelliteCell: 1,
 		PhaseRangeDelta:                        1,
 	}
@@ -437,7 +461,7 @@ func TestGetPhaseRange(t *testing.T) {
 
 	wantPhaseRange := rangeLM / wantWavelength
 
-	wavelength := utils.GetWavelength("GPS", signalID)
+	wavelength := utils.GetSignalWavelength("GPS", signalID)
 
 	if wavelength != wantWavelength {
 		if wantWavelength != wavelength {
@@ -478,12 +502,7 @@ func TestGetPhaseRange(t *testing.T) {
 		return
 	}
 
-	gotPhaseRange, phaseRangError := signalCell.PhaseRange()
-
-	if phaseRangError != nil {
-		t.Error(phaseRangError)
-		return
-	}
+	gotPhaseRange := signalCell.PhaseRange()
 
 	if !utils.EqualWithin(3, wantPhaseRange, gotPhaseRange) {
 		t.Errorf("expected %f got %f", wantPhaseRange, gotPhaseRange)
@@ -503,12 +522,7 @@ func TestGetPhaseRange(t *testing.T) {
 
 	signalCell.PhaseRangeDelta = biggestDelta
 
-	gotPhaseRange2, phaseRangError2 := signalCell.PhaseRange()
-
-	if phaseRangError2 != nil {
-		t.Error(phaseRangError2)
-		return
-	}
+	gotPhaseRange2 := signalCell.PhaseRange()
 
 	if !utils.EqualWithin(3, wantBiggestPhaseRange, gotPhaseRange2) {
 		t.Errorf("expected %f got %f", wantBiggestPhaseRange, gotPhaseRange2)
@@ -524,25 +538,22 @@ func TestString(t *testing.T) {
 	const rangeFractional = 0x200 // 0.5
 
 	const rangeDelta = 0x2000 // 1/2048 - 15 bit signed 00100000 00000000
-	const phaseRangeDelta = 6
+	// 22 bits signed  01 0000 0000 0000 0000 0000, will be shifted up to 24 bits
+	// to give 0100 0000 0000 0000 0000 0000.  Which is a delta of 1/512.
+	const phaseRangeDelta = 0x100000
 	const lockTimeIndicator = 7
 	const halfCycleAmbiguity = true
 	const cnr = 8
+	const rangeMilliseconds = (2.5 + 1.0/2048.0)
+	const phaseRangeMilliseconds = 2.5 + 1.0/512.0
 
-	const twoToPower29 = 0x20000000 // 10 0000 0000 0000 0000 0000 0000 0000
-	const twoToPowerMinus29 = 1 / float64(twoToPower29)
-	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
-
-	const rangeMilliseconds = 2.5 + float64(twoToPowerMinus29)
-
-	rangeMetres := rangeMilliseconds * utils.OneLightMillisecond
+	wantRange := rangeMilliseconds * utils.OneLightMillisecond
+	phaseRangeMetres := phaseRangeMilliseconds * utils.OneLightMillisecond
 	var signalID uint = 16
 
-	wavelength := utils.GetWavelength("GPS", signalID)
+	wavelength := utils.GetSignalWavelength("GPS", signalID)
 
-	wantPhaseRange := rangeMetres / wavelength
-
-	const wantRange = (2.5 + (float64(1) / float64(2048))) * utils.OneLightMillisecond
+	wantPhaseRange := phaseRangeMetres / wavelength
 
 	satCell := satellite.New(satelliteID, rangeWhole, rangeFractional)
 
@@ -559,9 +570,9 @@ func TestString(t *testing.T) {
 		Want               string // expected result
 	}{
 		{"all values", 2, satCell, rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, wavelength,
-			fmt.Sprintf("1, 2 {%.3f, %.3f, 7, true, 8}", wantRange, wantPhaseRange)},
+			fmt.Sprintf(" 1  2 {%.3f, %.3f, 7, true, 8}", wantRange, wantPhaseRange)},
 		{"nil satellite", 2, nil, rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, 0.0,
-			"1, 2 {r, pr, 7, true, 8}"},
+			" 0  2 {invalid, invalid, 7, true, 8}"},
 	}
 	for _, td := range testData {
 		cell := *New(
@@ -569,7 +580,7 @@ func TestString(t *testing.T) {
 			td.HalfCycleAmbiguity, td.CNR, wavelength)
 		got := cell.String()
 		if got != td.Want {
-			t.Errorf("%s: want %v, got %v", td.Comment, td.Want, got)
+			t.Errorf("%s: want %s, got %s", td.Comment, td.Want, got)
 		}
 	}
 }

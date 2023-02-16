@@ -60,12 +60,8 @@ func New(id, wholeMillis, fractionalMillis uint) *Cell {
 
 func (cell *Cell) String() string {
 
-	// invalidRange is the invalid value for the whole millis range in an MSM4
-	// satellite cell.
-	const invalidRange = 0xff
-
 	var approxRange string
-	if cell.RangeWholeMillis == invalidRange {
+	if cell.RangeWholeMillis == utils.InvalidRange {
 		approxRange = "invalid"
 	} else {
 		// The range values are valid.
@@ -96,7 +92,7 @@ func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites [
 	minBits := len(Satellites) * (lenWholeMillis + lenFractionalMillis)
 
 	if (((len(bitStream)) * 8) - int(startOfSatelliteData)) <= minBits {
-		message := fmt.Sprintf("overrun - not enough data for %d MSM4 satellite cells - %d %d",
+		message := fmt.Sprintf("overrun - not enough data for %d MSM4 satellite cells - need %d bits, got %d",
 			len(Satellites), minBits, bitsLeft)
 		return nil, errors.New(message)
 	}

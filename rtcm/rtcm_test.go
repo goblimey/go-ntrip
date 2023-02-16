@@ -15,6 +15,24 @@ import (
 	"github.com/goblimey/go-tools/switchwriter"
 )
 
+// A complete message frame (including 3-byte leader and 3-byte CRC).  The message
+// type is the bottom half of byte 3 and all of byte 4 - 0x449 - decimal 1097.
+var validMessageFrame = []byte{
+	0xd3, 0x00, 0xaa, 0x44, 0x90, 0x00, 0x33, 0xf6, 0xea, 0xe2, 0x00, 0x00, 0x0c, 0x50, 0x00, 0x10,
+	0x08, 0x00, 0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x3f, 0xaa, 0xaa, 0xb2, 0x42, 0x8a, 0xea, 0x68,
+	0x00, 0x00, 0x07, 0x65, 0xce, 0x68, 0x1b, 0xb4, 0xc8, 0x83, 0x7c, 0xe6, 0x11, 0x30, 0x10, 0x3f,
+	0x05, 0xff, 0x4f, 0xfc, 0xe0, 0x4f, 0x61, 0x68, 0x59, 0xb6, 0x86, 0xb5, 0x1b, 0xa1, 0x31, 0xb9,
+	0xd9, 0x71, 0x55, 0x57, 0x07, 0xa0, 0x00, 0xd3, 0x2e, 0x0c, 0x99, 0x01, 0x98, 0xc4, 0xfa, 0x16,
+	0x0e, 0xfa, 0x6e, 0xac, 0x07, 0x19, 0x7a, 0x07, 0x3a, 0xa4, 0xfc, 0x53, 0xc4, 0xfb, 0xff, 0x97,
+	0x00, 0x4c, 0x6f, 0xf8, 0x65, 0xda, 0x4e, 0x61, 0xe4, 0x75, 0x2c, 0x4b, 0x01, 0xe5, 0x21, 0x0d,
+	0x4f, 0xc0, 0x0b, 0x02, 0xb0, 0xb0, 0x2f, 0x0c, 0x02, 0x70, 0x94, 0x23, 0x0b, 0xc3, 0xe9, 0xe0,
+	0x97, 0xd1, 0x70, 0x63, 0x00, 0x45, 0x8d, 0xe9, 0x71, 0xd7, 0xe5, 0xeb, 0x5f, 0xf8, 0x78, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4d, 0xf5, 0x5a,
+}
+
+var lenValidMessageInBits = len(validMessageFrame) * 8
+
 // maxEpochTime is the value of a GPS and Beidou epoch time
 // just before it rolls over.
 const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
@@ -36,25 +54,13 @@ func init() {
 	logger = log.New(writer, "rtcm_test", 0)
 }
 
-func TestReadValidMessage(t *testing.T) {
-	d := [...]byte{
-		// Message type   --------- 0x449 - 1097.
-		0xd3, 0x00, 0xaa, 0x44, 0x90, 0x00, 0x33, 0xf6, 0xea, 0xe2, 0x00, 0x00, 0x0c, 0x50, 0x00, 0x10,
-		0x08, 0x00, 0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x3f, 0xaa, 0xaa, 0xb2, 0x42, 0x8a, 0xea, 0x68,
-		0x00, 0x00, 0x07, 0x65, 0xce, 0x68, 0x1b, 0xb4, 0xc8, 0x83, 0x7c, 0xe6, 0x11, 0x30, 0x10, 0x3f,
-		0x05, 0xff, 0x4f, 0xfc, 0xe0, 0x4f, 0x61, 0x68, 0x59, 0xb6, 0x86, 0xb5, 0x1b, 0xa1, 0x31, 0xb9,
-		0xd9, 0x71, 0x55, 0x57, 0x07, 0xa0, 0x00, 0xd3, 0x2e, 0x0c, 0x99, 0x01, 0x98, 0xc4, 0xfa, 0x16,
-		0x0e, 0xfa, 0x6e, 0xac, 0x07, 0x19, 0x7a, 0x07, 0x3a, 0xa4, 0xfc, 0x53, 0xc4, 0xfb, 0xff, 0x97,
-		0x00, 0x4c, 0x6f, 0xf8, 0x65, 0xda, 0x4e, 0x61, 0xe4, 0x75, 0x2c, 0x4b, 0x01, 0xe5, 0x21, 0x0d,
-		0x4f, 0xc0, 0x0b, 0x02, 0xb0, 0xb0, 0x2f, 0x0c, 0x02, 0x70, 0x94, 0x23, 0x0b, 0xc3, 0xe9, 0xe0,
-		0x97, 0xd1, 0x70, 0x63, 0x00, 0x45, 0x8d, 0xe9, 0x71, 0xd7, 0xe5, 0xeb, 0x5f, 0xf8, 0x78, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4d, 0xf5, 0x5a,
-	}
+// TestReadNextRTCM3MessageFrame checks that ReadNextRTCM3MessageFrame correctly
+// handles a valid message.
+func TestReadNextRTCM3MessageFrameWithValidMessage(t *testing.T) {
+
 	const wantType = 1097
 
-	validMessage := d[:]
-	r := bytes.NewReader(validMessage)
+	r := bytes.NewReader(validMessageFrame)
 	reader := bufio.NewReader(r)
 
 	now := time.Now()
@@ -63,7 +69,8 @@ func TestReadValidMessage(t *testing.T) {
 
 	frame1, readError1 := handler.ReadNextRTCM3MessageFrame(reader)
 	if readError1 != nil {
-		t.Fatal(readError1)
+		t.Error(readError1)
+		return
 	}
 
 	message, messageFetchError := handler.GetMessage(frame1)
@@ -87,6 +94,88 @@ func TestReadValidMessage(t *testing.T) {
 	if wantType != gotType {
 		t.Errorf("expected type %d got %d", wantType, gotType)
 	}
+}
+
+// TestReadNextRTCM3MessageFrameWithShortBitStream checks that ReadNextRTCM3MessageFrame
+// handles a short bitstream.
+func TestReadNextRTCM3MessageFrameWithShortBitStream(t *testing.T) {
+	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44, 0x90, 0x00}
+
+	r := bytes.NewReader(messageFrameWithLengthZero)
+	reader := bufio.NewReader(r)
+
+	now := time.Now()
+	handler := New(now, logger)
+	handler.StopOnEOF = true
+
+	// ReadNextRTCM3MessageFrame calls GetMessageLengthAndType.  That returns
+	// an error because the message length is zero.  ReadNextRTCM3MessageFrame
+	// should eat the error message and return a yte slice containing the five
+	// bytes that it consumed.
+	frame, err := handler.ReadNextRTCM3MessageFrame(reader)
+
+	if err != nil {
+		t.Errorf("want no error, got %v", err)
+	}
+
+	if frame == nil {
+		t.Error("want a message frame, got nil")
+	}
+
+	if len(frame) != 5 {
+		t.Errorf("want a message frame of length 5, got length %d", len(frame))
+	}
+
+	if frame[0] != 0xd3 {
+		t.Errorf("want a message frame starting 0xd3, got first byte of 0x%02x", frame[0])
+	}
+}
+
+// TestGetMessageLengthAndType checks GetMessageLengthAndType
+func TestGetMessageLengthAndType(t *testing.T) {
+
+	messageFrameWithIncorrectStart := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	messageFrameWithLengthTooBig := []byte{0xd3, 0xff, 0xff, 0xff, 0xff, 0xff}
+	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44, 0x90, 0x00}
+
+	var testData = []struct {
+		description       string
+		bitStream         []byte
+		wantMessageType   int
+		wantMessageLength uint
+		wantError         string
+	}{
+		{"valid", validMessageFrame, 1097, 170, ""},
+		{"invalid", validMessageFrame[:4], NonRTCMMessage, 0,
+			"the message is too short to get the header and the length"},
+		{"invalid", messageFrameWithIncorrectStart, NonRTCMMessage, 0,
+			"message starts with 0xff not 0xd3"},
+		{"invalid", messageFrameWithLengthZero, 1097, 0,
+			"zero length message type 1097"},
+		{"invalid", messageFrameWithLengthTooBig, NonRTCMMessage, 0,
+			"bits 8-13 of header are 63, must be 0"},
+	}
+	for _, td := range testData {
+		handler := New(time.Now(), logger)
+		gotMessageLength, gotMessageType, gotError := handler.GetMessageLengthAndType(td.bitStream)
+		if td.wantError != "" {
+			if td.wantError != gotError.Error() {
+				t.Errorf("%s: want %s, got %s", td.description, td.wantError, gotError.Error())
+			}
+		}
+		if td.wantMessageLength != gotMessageLength {
+			t.Errorf("%s: want %d, got %v", td.description, td.wantMessageLength, gotMessageLength)
+		}
+
+		if td.wantMessageType != gotMessageType {
+			t.Errorf("%s: want %d, got %d", td.description, td.wantMessageType, gotMessageType)
+		}
+	}
+
+}
+
+func TestGetMessageLengthAndTypeWithShortBitstream(t *testing.T) {
+	// The message bit stream is less than 5 bytes long.
 }
 
 // TestHandleMessages tests the handleMessages method.
@@ -342,7 +431,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 }
 
 func TestReadAlmostCompleteMessage(t *testing.T) {
-	d := [...]byte{
+	data := []byte{
 		0xd3, 0x00, 0xf4, 0x43, 0x50, 0x00, 0x49, 0x96, 0x84, 0x2e, 0x00, 0x00, 0x40, 0xa0, 0x85, 0x80,
 		0x00, 0x00, 0x00, 0x20, 0x00, 0x80, 0x5f, 0xa9, 0xc8, 0x88, 0xea, 0x08, 0xe9, 0x88, 0x8a, 0x6a,
 		0x60, 0x00, 0x00, 0x00, 0x00, 0xd6, 0x0a, 0x1b, 0xc5, 0x57, 0x9f, 0xf8, 0x92, 0xf2, 0x2e, 0x2d,
@@ -359,8 +448,6 @@ func TestReadAlmostCompleteMessage(t *testing.T) {
 		0x4f, 0xc5, 0xa2, 0x24, 0x35, 0x0c, 0xcc, 0x52, 0xcc, 0x95, 0x23, 0xcd, 0x93, 0x44, 0x8d, 0x23,
 		0x40, 0x6f, 0xd4, 0xef, 0x32, 0x4c, 0x80, 0x00, 0x2b, 0x08, 0xc2, 0xa0, 0x98, 0x31, 0x0a, 0xc3,
 		0x00, 0xa8, 0x2e, 0x0a, 0xc8, 0x18, 0x8d, 0x72, 0x48, 0x75}
-
-	var data []byte = d[:]
 
 	r := bytes.NewReader(data)
 	imReader := bufio.NewReader(r)
@@ -384,6 +471,31 @@ func TestReadAlmostCompleteMessage(t *testing.T) {
 
 	t.Log(len(message.RawData))
 
+}
+
+func TestReadEmptyBuffer(t *testing.T) {
+	data := []byte{}
+
+	r := bytes.NewReader(data)
+	imReader := bufio.NewReader(r)
+
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = false
+
+	// This should read the empty buffer, hit EOF and ignore it.
+	m, err := rtcm.ReadNextRTCM3Message(imReader)
+
+	if err != nil {
+		t.Errorf("Expected no error, got %s", err.Error())
+	}
+
+	if m != nil {
+		if m.RawData == nil {
+			t.Errorf("want nil RTCM3Message, got a struct with nil RawData")
+		}
+		t.Errorf("Expected nil frame, got %d bytes of RawData", len(m.RawData))
+	}
 }
 
 // TestReadJunk checks that ReadNextChunk handles interspersed junk correctly.
@@ -557,6 +669,152 @@ func TestGetMessageWithRealData(t *testing.T) {
 	}
 }
 
+//TestGetMessageWithNoData checks that GetMessage correctly a bit stream with no data.
+func TestGetMessageWithNoData(t *testing.T) {
+
+	empty := make([]byte, 0)
+	some := make([]byte, 1)
+
+	var testData = []struct {
+		description string
+		frame       []byte
+		want        string
+	}{
+		{"nil", nil, "zero length message frame"},
+		{"empty", empty, "zero length message frame"},
+		{"some", some, ""},
+	}
+	for _, td := range testData {
+		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+		handler := New(startTime, logger)
+		gotMessage, gotError := handler.GetMessage(td.frame)
+		if td.want == "" {
+			if gotMessage == nil {
+				t.Error("expected a message")
+			}
+			if gotError != nil {
+				t.Errorf("%s: want a message, got error %v", td.description, gotError.Error())
+			}
+		} else {
+			if gotMessage != nil {
+				t.Error("expected a nil message")
+			}
+			if gotError.Error() != td.want {
+				t.Errorf("%s: want %s, got %v", td.description, td.want, gotError)
+			}
+		}
+	}
+}
+
+// TestReadGetMessageWithShortBitStream checks that GetMessage handles a short
+// bitstream correctly.
+func TestReadGetMessageWithShortBitStream(t *testing.T) {
+	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44}
+
+	now := time.Now()
+	handler := New(now, logger)
+	handler.StopOnEOF = true
+
+	const wantWarning = "the message is too short to get the header and the length"
+
+	// GetMessage calls GetMessageLengthAndType.  That returns an error because the
+	// bit stream is too short.  GetMessage should
+	// should eat the error message and return a byte slice containing the five
+	// bytes that it consumed.
+	message, err := handler.GetMessage(messageFrameWithLengthZero)
+
+	if err == nil {
+		t.Error("want an error")
+		return
+	}
+
+	if err.Error() != wantWarning {
+		t.Errorf("want error - %s, got %v", wantWarning, err)
+	}
+
+	if message == nil {
+		t.Error("want a message, got nil")
+		return
+	}
+
+	if message.RawData == nil {
+		t.Error("want some raw data, got nil")
+		return
+	}
+
+	if len(message.RawData) != 4 {
+		t.Errorf("want a message frame of length 4, got length %d", len(message.RawData))
+	}
+
+	if message.Warning != wantWarning {
+		t.Errorf("want warning - %s, got %s", wantWarning, message.Warning)
+	}
+}
+
+// TestGetMessageWithNonRTCMMessage checks that GetMessage handles a bit stream
+// containing a non-RTCM message correctly.
+func TestGetMessageWithNonRTCMMessage(t *testing.T) {
+	// A bit stream containing just the non_RTCM message "plain text".
+	plainTextBytes := []byte{'p', 'l', 'a', 'i', 'n', ' ', 't', 'e', 'x', 't'}
+	// A bit stream containing the non_RTCM message "plain text" followed by the
+	// start of an RTCM message.
+	plainTextBytesWithD3 := []byte{'p', 'l', 'a', 'i', 'n', ' ', 't', 'e', 'x', 't', 0xd3}
+	const plainText = "plain text"
+
+	var testData = []struct {
+		description string
+		bitStream   []byte
+	}{
+		{"plain text", plainTextBytes},
+		{"plain text with D3", plainTextBytesWithD3},
+	}
+	for _, td := range testData {
+		startTime := time.Now()
+		handler := New(startTime, logger)
+		handler.StopOnEOF = true
+		// ReadNextMessageFrame should strip off any training D3 byte.
+		r := bytes.NewReader(td.bitStream)
+		messageReader := bufio.NewReader(r)
+		bitStream, frameError := handler.ReadNextRTCM3MessageFrame(messageReader)
+		if frameError != nil {
+			t.Error(frameError)
+			return
+		}
+
+		gotMessage, gotError := handler.GetMessage(bitStream)
+
+		if gotError != nil {
+			t.Error(gotError)
+			// return
+		}
+
+		if gotMessage == nil {
+			t.Error("want a message, got nil")
+			return
+		}
+
+		if gotMessage.MessageType != NonRTCMMessage {
+			t.Errorf("want a NONRTCMMessage, got message type %d", gotMessage.MessageType)
+			return
+		}
+
+		if gotMessage.RawData == nil {
+			t.Error("want some raw data, got nil")
+			return
+		}
+
+		if len(gotMessage.RawData) != len(plainText) {
+			t.Errorf("want a message frame of length %d, got length %d",
+				len(plainText), len(gotMessage.RawData))
+		}
+
+		if string(gotMessage.RawData) != plainText {
+			t.Errorf("want raw data - %s, got %s",
+				plainText, string(gotMessage.RawData))
+		}
+	}
+}
+
 func TestReadNextMessageFrame(t *testing.T) {
 	r := bytes.NewReader(realData)
 	realDataReader := bufio.NewReader(r)
@@ -581,8 +839,15 @@ func TestReadNextMessageFrame(t *testing.T) {
 	}
 }
 
-// TestRealData reads the first message from the real data and checks it in detail.
-func TestRealData(t *testing.T) {
+// TestWithRealData reads the first message from the real data and checks it in detail.
+func TestWithRealData(t *testing.T) {
+
+	const wantRangeWholeMilliSecs = 81
+	const wantRangeFractionalMilliSecs = 435
+	// The data was produced by a real device and then converted to RINEX format.
+	// These values were taken from the RINEX.
+	const wantRange = 24410527.355
+
 	r := bytes.NewReader(realData)
 	realDataReader := bufio.NewReader(r)
 	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
@@ -597,7 +862,7 @@ func TestRealData(t *testing.T) {
 	}
 
 	if m.MessageType != 1077 {
-		t.Errorf("expected message type 1007, got %d", m.MessageType)
+		t.Errorf("expected message type 1077, got %d", m.MessageType)
 		return
 	}
 
@@ -619,14 +884,16 @@ func TestRealData(t *testing.T) {
 		return
 	}
 
-	if message.Satellites[0].RangeWholeMillis != 81 {
-		t.Errorf("expected range whole  of 81, got %d",
+	if message.Satellites[0].RangeWholeMillis != wantRangeWholeMilliSecs {
+		t.Errorf("expected range whole  of %d, got %d",
+			wantRangeWholeMilliSecs,
 			message.Satellites[0].RangeWholeMillis)
 		return
 	}
 
-	if message.Satellites[0].RangeFractionalMillis != 435 {
-		t.Errorf("expected range fractional 435, got %d",
+	if message.Satellites[0].RangeFractionalMillis != wantRangeFractionalMilliSecs {
+		t.Errorf("expected range fractional %d, got %d",
+			wantRangeFractionalMilliSecs,
 			message.Satellites[0].RangeFractionalMillis)
 		return
 	}
@@ -660,17 +927,10 @@ func TestRealData(t *testing.T) {
 		return
 	}
 
-	// Checking the resulting range in metres against the value
-	// in the RINEX data produced from this message.
+	rangeMetres := message.Signals[0][0].RangeInMetres()
 
-	rangeMetres, rangeError := message.Signals[0][0].RangeInMetres()
-
-	if rangeError != nil {
-		t.Error(rangeError)
-	}
-
-	if !utils.EqualWithin(3, 24410527.355, rangeMetres) {
-		t.Errorf("expected range 24410527.355 metres, got %3.6f", rangeMetres)
+	if !utils.EqualWithin(3, wantRange, rangeMetres) {
+		t.Errorf("expected range %f metres, got %3.6f", wantRange, rangeMetres)
 		return
 	}
 }
@@ -1162,5 +1422,156 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	}
 	if expectedMillis5 != millis5 {
 		t.Errorf("expected millis %x result %x", expectedMillis5, millis5)
+	}
+}
+
+// TestMSM4 checks the MSM4 function.
+func TestMSM4(t *testing.T) {
+
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1073, false},
+		{1074, true},
+		{1075, false},
+		{1084, true},
+		{1094, true},
+		{1104, true},
+		{1114, true},
+		{1124, true},
+		{1133, false},
+		{1134, true},
+		{1135, false},
+	}
+	for _, td := range testData {
+		message := RTCM3Message{MessageType: td.messageType}
+		got := message.MSM4()
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestMSM7 checks the MSM7 function.
+func TestMSM7(t *testing.T) {
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1076, false},
+		{1077, true},
+		{1078, false},
+		{1087, true},
+		{1094, false},
+		{1097, true},
+		{1104, false},
+		{1127, true},
+		{1136, false},
+		{1137, true},
+		{1138, false},
+	}
+	for _, td := range testData {
+		message := RTCM3Message{MessageType: td.messageType}
+		got := message.MSM7()
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestMSM checks the MSM function.
+func TestMSM(t *testing.T) {
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1076, false},
+		{1074, true},
+		{1077, true},
+		{1107, true},
+		{1116, false},
+		{1117, true},
+		{1118, false},
+		{1127, true},
+		{1134, true},
+		{1137, true},
+		{1136, false},
+		{1137, true},
+		{1138, false},
+	}
+	for _, td := range testData {
+		message := RTCM3Message{MessageType: td.messageType}
+		got := message.MSM()
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestMSM checks the displayable function.
+func TestDispayable(t *testing.T) {
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1005, true},
+		{1076, false},
+		{1074, true},
+		{1077, true},
+		{1107, true},
+		{1116, false},
+		{1117, true},
+		{1118, false},
+		{1127, true},
+		{1134, true},
+		{1137, true},
+		{1136, false},
+		{1137, true},
+		{1138, false},
+	}
+	for _, td := range testData {
+		message := RTCM3Message{MessageType: td.messageType}
+		got := message.displayable()
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestPrepareForDisplayWithInvalidMessage checks that PrepareforDisplay
+// handles an invalid message correctly.
+func TestPrepareForDisplayWithInvalidMessage(t *testing.T) {
+	// PrepareForDisplay checks that the message hasn't already been
+	// analysed.  If not, it calls Analyse.  If that returns an error,
+	// it marks the message as invalid.  Force Analyse to fail using
+	// an incomplete bit stream.
+
+	shortBitStream := testData[:16]
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	rtcm := New(startTime, logger)
+	rtcm.StopOnEOF = true
+
+	message := RTCM3Message{MessageType: 1077, RawData: shortBitStream, Valid: true}
+
+	message.PrepareForDisplay(rtcm)
+
+	if message.Valid {
+		t.Error("want the message to be marked as invalid")
+	}
+}
+
+// TestSetDisplayWriter checks SetDisplayWriter
+func TestSetDisplayWriter(t *testing.T) {
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	handler := New(startTime, logger)
+	handler.SetDisplayWriter(logger.Writer())
+
+	if handler.displayWriter != logger.Writer() {
+		t.Error("SetDisplayWriter failed to set the writer")
 	}
 }

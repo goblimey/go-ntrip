@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
 const maxMessageType = 4095 // the message type is a 12-bit unsigned quantity.
@@ -222,14 +224,18 @@ func TestGetMSMHeader(t *testing.T) {
 	// The function returns the broken out header and the bit position
 	// of the start of the next part of the message. (In the real world
 	// that comes immediately after this cell mask, so the position is
-	// just the length of this bit stream, ignoring the final three
-	// padding bits.)
+	// just the length of this bit stream consumed so far.)
 
 	// 0100 0011  0101| 0000   0000 0001|  0000 0000   0000 0000
+	//                                                       satellite mask:
 	// 0000 0000  0000 10|1|0  11|00 0010  0|10|0 1|1|11   1|000 0000
 	// 0000 0000   0000 0000   0000 0000   0000 0000   0000 0000
+	//                           signal mask:
 	// 0000 0000   0000 1110   1|000 0000   0000 0000   0000 0000
+	//               cell mask:
 	// 0001 0101   0|111 1100  0000 1|000
+	//
+	// The cell mask is 4X3 bits - 111, 110, 000, 001.
 
 	bitStream := []byte{
 		0x43, 0x50, 0x01, 0x00, 0x00,
@@ -245,27 +251,19 @@ func TestGetMSMHeader(t *testing.T) {
 	const lenHeaderWithoutCellMask = 169
 	// The length of the cell mask (4 satellites, 3 signals).
 	const lenCellMask = 12
+
+	// Expect to be at this position in the bit stream after reading the header.
+	const wantPosition = lenHeaderWithoutCellMask + lenCellMask
+
 	// The expected satellite IDs
-	satellites := []uint{60, 61, 62, 64}
+	wantSatellites := []uint{60, 61, 62, 64}
 	// The signal types we expect to observe
-	signals := []uint{27, 29, 31}
+	wantSignals := []uint{27, 29, 31}
 	// The expected broken-out cell mask values.
-	cellMask := [][]bool{
+	wantCellBools := [][]bool{
 		{true, true, true}, {true, true, false},
 		{false, false, false}, {false, false, true},
 	}
-	// Expect to be at this position of the bit stream after reading the header.
-	const wantPos = lenHeaderWithoutCellMask
-	// Expect this error message if the bit stream is short by two bytes
-	// (so not all the fixed-length items are there).
-	// wantMinLengthError :=
-	// fmt.Sprintf("bitstream is too short for an MSM header - got %d bits, expected at least %d",
-	// 	(len(bitStream)-2)*8, lenHeaderWithoutCellMask)
-	// Expect this error if the bit stream is short by one byte
-	// (so it includes part of the cell mask but is incomplete).
-	//wantLengthError :=
-	// fmt.Sprintf("bitstream is too short for an MSM header with %d cell mask bits - got %d bits, expected at least %d",
-	// 	lenCellMask, (len(bitStream)-1)*8, wantPos)
 
 	wantHeader := Header{
 		MessageType:                          1077,
@@ -281,36 +279,9 @@ func TestGetMSMHeader(t *testing.T) {
 		GNSSSmoothingInterval:                7,
 		SatelliteMask:                        0x001d,
 		SignalMask:                           0x2a,
-		CellMask:                             0xf81,
+		CellMask:                             0xf810000000000000,
 		NumSignalCells:                       12,
 	}
-
-	// This bitstream is below the minimum length for an MSM header.
-	//_, _, err := GetMSMHeader(bitStream[:len(bitStream)-2])
-
-	// if minLengthError == nil {
-	// 	t.Errorf("expected an error")
-	// } else {
-
-	// 	if minLengthError.Error() != wantMinLengthError {
-	// 		t.Errorf("expected error \"%s\", got \"%s\"",
-	// 			wantMinLengthError, minLengthError.Error())
-
-	// 	}
-	// }
-
-	// This bitstream is above the minimum length but still short.
-	// _, _, lengthError := GetMSMHeader(bitStream[:len(bitStream)-1])
-
-	// if lengthError == nil {
-	// 	t.Errorf("expected an error")
-	// } else {
-	// 	if lengthError.Error() != wantLengthError {
-	// 		t.Errorf("expected error \"%s\", got \"%s\"",
-	// 			wantLengthError, lengthError.Error())
-
-	// 	}
-	// }
 
 	header, gotPos, err := GetMSMHeader(bitStream)
 
@@ -319,8 +290,8 @@ func TestGetMSMHeader(t *testing.T) {
 		return
 	}
 
-	if gotPos != uint(wantPos) {
-		t.Errorf("got position %d, want %d", gotPos, wantPos)
+	if gotPos != uint(wantPosition) {
+		t.Errorf("got position %d, want %d", gotPos, wantPosition)
 	}
 
 	if header.Constellation != wantHeader.Constellation {
@@ -375,6 +346,7 @@ func TestGetMSMHeader(t *testing.T) {
 
 	if header.ExternalClockIndicator != wantHeader.ExternalClockIndicator {
 		t.Errorf("got external CLI %d, want %d",
+
 			header.ExternalClockIndicator, wantHeader.ExternalClockIndicator)
 	}
 
@@ -398,48 +370,139 @@ func TestGetMSMHeader(t *testing.T) {
 			header.NumSignalCells, wantHeader.NumSignalCells)
 	}
 
-	if len(satellites) == len(header.Satellites) {
-		for i := range satellites {
-			if satellites[i] != header.Satellites[i] {
+	if len(wantSatellites) == len(header.Satellites) {
+		for i := range wantSatellites {
+			if wantSatellites[i] != header.Satellites[i] {
 				t.Errorf("satellite %d want %d got %d",
-					i, satellites[i], header.Satellites[i])
+					i, wantSatellites[i], header.Satellites[i])
 			}
 		}
 	} else {
-		t.Errorf("want %d satellites, got %d", len(satellites), len(header.Satellites))
+		t.Errorf("want %d satellites, got %d", len(wantSatellites), len(header.Satellites))
 		return
 	}
 
-	if len(signals) == len(header.Signals) {
-		for i := range signals {
-			if signals[i] != header.Signals[i] {
+	if len(wantSignals) == len(header.Signals) {
+		for i := range wantSignals {
+			if wantSignals[i] != header.Signals[i] {
 				t.Errorf("signal %d want %d got %d",
-					i, signals[i], header.Signals[i])
+					i, wantSignals[i], header.Signals[i])
 			}
 		}
 	} else {
-		t.Errorf("want %d signals, got %d", len(signals), len(header.Signals))
+		t.Errorf("want %d signals, got %d", len(wantSignals), len(header.Signals))
 		return
 	}
 
 	// Check the cell mask.
-	if len(cellMask) == len(header.Cells) {
-		for i := range cellMask {
-			if len(cellMask[i]) == len(header.Cells[i]) {
-				for j := range cellMask[i] {
-					if cellMask[i][j] != (header.Cells[i][j]) {
+	if len(wantCellBools) == len(header.Cells) {
+		for i := range wantCellBools {
+			if len(wantCellBools[i]) == len(header.Cells[i]) {
+				for j := range wantCellBools[i] {
+					if wantCellBools[i][j] != (header.Cells[i][j]) {
 						t.Errorf("cellMask[%d][%d]: want %v, got %v",
-							i, j, cellMask[i][j], header.Cells[i][j])
+							i, j, wantCellBools[i][j], header.Cells[i][j])
 					}
 				}
 			} else {
 				t.Errorf("cellMask[%d] want %d items, got %d",
-					i, len(cellMask), len(header.Cells))
+					i, len(wantCellBools), len(header.Cells))
 			}
 		}
 	} else {
 		t.Errorf("cellMask: want %d items, got %d",
-			len(cellMask), len(header.Cells))
+			len(wantCellBools), len(header.Cells))
+	}
+}
+
+// TestGetMSMHeaderWithShortBitStream checks GetMSMHeader returns the correct
+// error if the bit stream is too short.
+func TestGetMSMHeaderWithShortBitStream(t *testing.T) {
+	// The fixed-length firlds in a bit stream containing an MSM header must
+	// be at least 169 bits in toatl.  This bit stream is 21 bytes, 168 bits,
+	// so just too short.
+	bitStream := []byte{
+		0x43, 0x50, 0x01, 0x00, 0x00,
+		0x00, 0x0a, 0xc2, 0x4f, 0x80,
+		0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x0e, 0x80, 0x00, 0x00,
+		0x15,
+	}
+
+	const wantError = "bitstream is too short for an MSM header - got 168 bits, expected at least 169"
+	const wantPos = 0
+
+	gotHeader, gotPos, gotError := GetMSMHeader(bitStream)
+
+	if gotError == nil {
+		t.Error("expected an error")
+		return
+	}
+
+	if gotError.Error() != wantError {
+		t.Errorf("want error\n%s\ngot\n%s", wantError, gotError.Error())
+		return
+	}
+
+	if wantPos != gotPos {
+		t.Errorf("want position %d, got %d", wantPos, gotPos)
+	}
+
+	if gotHeader != nil {
+		t.Error("want  nil header, got non-nil")
+	}
+}
+
+// TestGetMSMHeaderWithShortCellMask checks GetMSMHeader returns the correct
+// error if the cell mask is too short.
+func TestGetMSMHeaderWithShortCellMask(t *testing.T) {
+
+	// The cell mask is variable-length and comes at the end of the bit
+	// stream.  the length is given by the number of bits set in the
+	// satellite mask (4 in this case), multiplied by the number of bits in
+	// the signal mask (3 in this case), ie the cell mask should be 12 bits
+	// followed by three bits of padding.
+	//
+	// This is a correct bit stream, 181 bits plus 3 bits of padding
+	// 0100 0011  0101| 0000   0000 0001|  0000 0000   0000 0000
+	//                                                       satellite mask:
+	// 0000 0000  0000 10|1|0  11|00 0010  0|10|0 1|1|11   1|000 0000
+	// 0000 0000   0000 0000   0000 0000   0000 0000   0000 0000
+	//                           signal mask:
+	// 0000 0000   0000 1110   1|000 0000   0000 0000   0000 0000
+	//               cell Mask:       padding:
+	// 0001 0101   0|111 1100  0000 1|000
+
+	// This one has lost the last byte:
+	bitStream := []byte{
+		0x43, 0x50, 0x01, 0x00, 0x00,
+		0x00, 0x0a, 0xc2, 0x4f, 0x80,
+		0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x0e, 0x80, 0x00, 0x00,
+		0x15, 0x7c,
+	}
+
+	const wantError = "bitstream is too short for an MSM header with 12 cell mask bits - got 176 bits, expected at least 181"
+	const wantPos = 0
+
+	gotHeader, gotPos, gotError := GetMSMHeader(bitStream)
+
+	if gotError == nil {
+		t.Error("expected an error")
+		return
+	}
+
+	if gotError.Error() != wantError {
+		t.Errorf("want error\n%s\ngot\n%s", wantError, gotError.Error())
+		return
+	}
+
+	if wantPos != gotPos {
+		t.Errorf("want position %d, got %d", wantPos, gotPos)
+	}
+
+	if gotHeader != nil {
+		t.Error("want  nil header, got non-nil")
 	}
 }
 
@@ -582,30 +645,97 @@ func TestGetTitle(t *testing.T) {
 	}
 }
 
-func TestString(t *testing.T) {
+// TestString checks that String() works.
+func TestStringSingle(t *testing.T) {
 	const satMask = 3
 	const sigMask = 7
 	const cellMask = 1
-
-	header := New(1074, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask)
-
 	utc, _ := time.LoadLocation("UTC")
-	header.UTCTime = time.Date(2023, time.February, 14, 1, 2, 3, int(4*time.Millisecond), utc)
-	const want = `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
+	utcTime := time.Date(2023, time.February, 14, 1, 2, 3, int(4*time.Millisecond), utc)
+
+	// The result contains "single message" or "multiple message", depending
+	// on the multiple message flag.
+	resultTemplate := `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
 time 2023-02-14 01:02:03.004 +0000 UTC (epoch time 3)
-stationID 2, single message, sequence number 1, session transmit time 5
+stationID 2, %s message, sequence number 1, session transmit time 5
 clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
 2 satellites, 3 signal types, 6 signals
 `
 
-	got := header.String()
+	var testData = []struct {
+		H          *Header
+		WantString string
+	}{
+		{
+			New(1074, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			fmt.Sprintf(resultTemplate, "single"),
+		},
 
-	if want != got {
-		t.Errorf("want\n%s\ngot\n%s", want, got)
+		{
+			New(1074, 2, 3, true, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			fmt.Sprintf(resultTemplate, "multiple"),
+		},
+	}
+
+	for _, td := range testData {
+		header := td.H
+		header.UTCTime = utcTime
+		got := header.String()
+
+		if td.WantString != got {
+			t.Errorf("want\n%s\ngot\n%s", td.WantString, got)
+		}
+
 	}
 }
 
+// TestGetSatellites checks that getSatellites deciphers a bit mask correctly.
 func TestGetSatellites(t *testing.T) {
-	const satMask = 0x0000000000000001
+	// 1    5    9    13   17   21   25   29   33   37   41   45   49   53   57   61
+	// 1000 0000 0000 0000 0100 0000 0000 0000 0100 0000 0000 0000 0000 0000 0000 0010
+	const satMask = 0x8000000040000002
+	want := []uint{1, 34, 63}
+	got := getSatellites(satMask)
+
+	if !utils.SlicesEqual(want, got) {
+		t.Errorf("want %v got  %v", want, got)
+	}
+}
+
+// TestGetSignals checks that getSignals deciphers a bit mask correctly.
+func TestGetSignals(t *testing.T) {
+	// 1    5    9    13   17   21   25   29
+	// 0100 0000 0000 0000 1111 0000 0000 0001
+	const satMask = 0x4000f001
+	want := []uint{2, 17, 18, 19, 20, 32}
+
+	got := getSignals(satMask)
+
+	if !utils.SlicesEqual(want, got) {
+		t.Errorf("want %v got  %v", want, got)
+	}
+}
+
+// TestGetCells checks that getCells deciphers a bit mask correctly.
+func TestGetCells(t *testing.T) {
+
+	// <- 3X2 mask ->
+	// 0001 1011 0000 | 0000 0000 0000 0000 0000 .....
+	const cellMask uint64 = 0x1b00000000000000
+	want := [][]bool{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+	got := getCells(cellMask, 4, 2)
+
+	for i, _ := range want {
+		for j, _ := range want[i] {
+			if want[i][j] != got[i][j] {
+				t.Errorf("expected [%d][%d] to be %v", i, j, want[1][1])
+			}
+		}
+	}
 }

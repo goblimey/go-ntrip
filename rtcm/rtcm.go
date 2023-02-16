@@ -397,13 +397,12 @@ func (handler *RTCM) GetMessageLengthAndType(bitStream []byte) (uint, int, error
 	// a 0xd3 byte in a stream of binary data.
 	sanityCheck := utils.GetBitsAsUint64(bitStream, 8, 6)
 	if sanityCheck != 0 {
-		errorMessage := fmt.Sprintf("bits 8 -13 of header are %d, must be 0", sanityCheck)
+		errorMessage := fmt.Sprintf("bits 8-13 of header are %d, must be 0", sanityCheck)
 		return 0, NonRTCMMessage, errors.New(errorMessage)
 	}
 
 	// The bottom ten bits of the header is the message length.
 	length := uint(utils.GetBitsAsUint64(bitStream, 14, 10))
-	message, messageFetchError := rtcm.GetMessage(frame)
 
 	// The 12-bit message type follows the header.
 	messageType := int(utils.GetBitsAsUint64(bitStream, 24, 12))
@@ -523,8 +522,9 @@ func (handler *RTCM) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, er
 	handler.makeLogEntry(logEntry)
 	var n int = 1
 	var expectedFrameLength uint = 0
-	buf := make([]byte, 1)
 	for {
+		// Read and handle the next byte.
+		buf := make([]byte, 1)
 		l, readErr := reader.Read(buf)
 		// We've read some text, so log any read error, but ignore it.  If it's
 		// a hard error it will be caught on the next call.
@@ -571,6 +571,7 @@ func (handler *RTCM) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, er
 		// read the remaining bytes of the frame.
 		switch {
 		case n < leaderLengthBytes+2:
+			// We haven't read enough bytes to figure out the message length yet.
 			continue
 
 		case n == leaderLengthBytes+2:
@@ -601,10 +602,6 @@ func (handler *RTCM) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, er
 			// We know how many bytes we want, so we could just read that many using one
 			// Read call, but if the input stream is a serial connection, we would
 			// probably need several of those, so we might as well do it this way.
-			continue
-
-		case expectedFrameLength == 0:
-			// We haven't figured out the message length yet.
 			continue
 
 		case n >= int(expectedFrameLength):
@@ -765,8 +762,8 @@ func (r *RTCM) SetDisplayWriter(displayWriter io.Writer) {
 }
 
 // GetMessage extracts an RTCM3 message from the given bit stream and returns it
-// as an RTC3Message. If the data doesn't contain a valid message, it returns a
-// message with type NonRTCMMessage.
+// as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
+// doesn't contain a valid message, it returns a message with type NonRTCMMessage.
 //
 func (handler *RTCM) GetMessage(bitStream []byte) (*RTCM3Message, error) {
 
@@ -791,11 +788,6 @@ func (handler *RTCM) GetMessage(bitStream []byte) (*RTCM3Message, error) {
 			Warning:     formatError.Error(),
 		}
 		return &message, formatError
-	}
-
-	if messageType == NonRTCMMessage {
-		message := RTCM3Message{MessageType: messageType, RawData: bitStream}
-		return &message, nil
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -852,7 +844,10 @@ func (rtcm *RTCM) Analyse(message *RTCM3Message) error {
 
 	switch {
 	case message.MSM4():
-		msm4Message, err := msm4message.GetMessage(messageBitStream)
+		msm4Message, msm4Error := msm4message.GetMessage(messageBitStream)
+		if msm4Error != nil {
+			return msm4Error
+		}
 		// Convert the EpochTime to UTC.  This requires keeping a notion of time
 		// over many messages, potentially for many days, so it must be done by
 		// this module.
@@ -874,9 +869,12 @@ func (rtcm *RTCM) Analyse(message *RTCM3Message) error {
 			// Leave the UTCTime set to zero.
 		}
 		message.SetReadable(msm4Message)
-		return err
+		return nil
 	case message.MSM7():
-		msm7Message, err := msm7message.GetMessage(messageBitStream)
+		msm7Message, msm7Error := msm7message.GetMessage(messageBitStream)
+		if msm7Error != nil {
+			return msm7Error
+		}
 		// Convert the EpochTime to UTC.  This requires keeping a notion of time
 		// over many messages, potentially for many days, so it must be done by
 		// this module.
@@ -898,12 +896,15 @@ func (rtcm *RTCM) Analyse(message *RTCM3Message) error {
 			// Leave the UTCTime set to zero.
 		}
 		message.SetReadable(msm7Message)
-		return err
+		return nil
 
 	case message.MessageType == 1005:
-		readable, err := message1005.GetMessage(messageBitStream)
+		readable, m1005Error := message1005.GetMessage(messageBitStream)
+		if m1005Error != nil {
+			return m1005Error
+		}
 		message.SetReadable(readable)
-		return err
+		return nil
 	case message.MessageType == 1230:
 		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this.)"
 		message.SetReadable(readable)
@@ -1071,21 +1072,21 @@ func (handler *RTCM) DisplayMessage(message *RTCM3Message) string {
 		if !ok {
 			return ("expected the readable message to be *Message1005\n")
 		}
-		return leader + m.Display()
+		return leader + m.String()
 
 	case message.MSM4():
 		m, ok := message.PrepareForDisplay(handler).(*msm4message.Message)
 		if !ok {
 			return ("expected the readable message to be an MSM4\n")
 		}
-		return leader + m.Display()
+		return leader + m.String()
 
 	case message.MSM7():
 		m, ok := message.PrepareForDisplay(handler).(*msm7message.Message)
 		if !ok {
 			return ("expected the readable message to be an MSM7\n")
 		}
-		return leader + m.Display()
+		return leader + m.String()
 
 	default:
 		return leader + "\n"

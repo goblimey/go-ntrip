@@ -3,6 +3,8 @@ package satellite
 import (
 	"fmt"
 	"testing"
+
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
 // Tests for the handling of an MSM4 satellite cell.
@@ -12,21 +14,20 @@ func TestNew(t *testing.T) {
 
 	const rangeWhole uint = 1
 	const rangeFractional uint = 2
-	const invalidRange = 0xff
 
 	var testData = []struct {
 		Description      string
 		ID               uint
 		WholeMillis      uint
 		FractionalMillis uint
-		Want             Cell // expected result
+		Want             Cell
 	}{
 		{"MSM4, all valid", 1, rangeWhole, rangeFractional,
 			Cell{SatelliteID: 1,
 				RangeWholeMillis: 1, RangeFractionalMillis: 2}},
-		{"MSM4 with invalid range", 2, invalidRange, rangeFractional,
+		{"MSM4 with invalid range", 2, utils.InvalidRange, rangeFractional,
 			Cell{SatelliteID: 2,
-				RangeWholeMillis: invalidRange, RangeFractionalMillis: rangeFractional}},
+				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional}},
 	}
 	for _, td := range testData {
 		got := *New(td.ID, td.WholeMillis, td.FractionalMillis)
@@ -79,7 +80,7 @@ func TestGetSatelliteCells(t *testing.T) {
 func TestGetSatelliteCellsShortMessage(t *testing.T) {
 	const satelliteID1 = 42
 	const satelliteID2 = 43
-	const wantError = "overrun - not enough data for 2 MSM4 satellite cells - 36 32"
+	const wantError = "overrun - not enough data for 2 MSM4 satellite cells - need 36 bits, got 32"
 
 	satellites := []uint{satelliteID1, satelliteID2}
 
