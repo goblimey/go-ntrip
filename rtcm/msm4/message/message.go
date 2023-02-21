@@ -45,17 +45,17 @@ func (message *Message) String() string {
 func (message *Message) DisplaySatelliteCells() string {
 
 	if len(message.Satellites) < 1 {
-		return "No satellites\n"
+		return "No Satellites\n"
 	}
 
 	heading := ""
 
-	heading = fmt.Sprintf("%d Satellites\nsatellite ID {range ms}\n",
+	heading = fmt.Sprintf("%d Satellites\nSatellite ID {range ms}\n",
 		len(message.Satellites))
 
 	body := ""
 	for i := range message.Satellites {
-		body += message.Satellites[i].String()
+		body += message.Satellites[i].String() + "\n"
 	}
 
 	return heading + body
@@ -66,20 +66,18 @@ func (message *Message) DisplaySatelliteCells() string {
 func (message *Message) DisplaySignalCells() string {
 
 	if len(message.Signals) < 1 {
-		return "No signals|n"
+		return "No Signals\n"
 	}
 
-	var heading string
-
-	heading = fmt.Sprintf("%d Signals\nsat ID sig ID {range (delta), lock time ind, half cycle ambiguity,\n",
+	heading := fmt.Sprintf(
+		"%d Signals\nSat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}\n",
 		len(message.Signals))
-	heading += "        Carrier Noise Ratio}\n"
 
 	body := ""
 
 	for i := range message.Signals {
 		for j := range message.Signals[i] {
-			body += fmt.Sprintf("%s\n", message.Signals[i][j].String())
+			body += message.Signals[i][j].String() + "\n"
 		}
 	}
 

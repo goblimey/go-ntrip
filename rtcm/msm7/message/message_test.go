@@ -26,7 +26,7 @@ var message1077Bitstream = []byte{
 	// 0110 00|1|0 00|00 0000
 	//
 	// The header is 185 bits long, with 16 cell mask bits.
-	//
+	// 
 	/* 0 */ 0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00,
 	//                   64 bit satellite mask
 	// 0|00|0 0|0|00   0|000 1000   0100 0000   1010 0000

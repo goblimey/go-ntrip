@@ -99,7 +99,7 @@ func TestGetSignalCells(t *testing.T) {
 			RangeWholeMillis: rangeWhole1, RangeFractionalMillis: rangeFractional1},
 	}
 
-	// The bit stream stats at bit 8 and contains three signal cells - three
+	// The bit stream starts at bit 8 and contains three signal cells - three
 	// 15-bit signed range delta (8193, -1, 0), followed by three 22-bit signed
 	// phase range delta (-1, 0, 1), three 4-bit unsigned phase lock time
 	// indicators (0xf, 0, 1), three single bit half-cycle ambiguity indicators

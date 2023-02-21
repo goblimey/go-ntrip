@@ -13,15 +13,6 @@ import (
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
-// InvalidRangeDelta is the invalid value for the range delta in an MSM4
-// signal cell. 15 bit two's complement 100 0000 0000 0000
-const InvalidRangeDelta = -16384
-
-// InvalidPhaseRangeDelta is the invalid value for the phase range delta
-// in an MSM4 signal cell.  22 bit two's complement signed:
-// 10 0000 0000 0000 0000 0000
-const InvalidPhaseRangeDelta = -2097152
-
 // Cell holds the data from an MSM4 message for one signal
 // from one satellite, plus values copied from the satellite.
 type Cell struct {
@@ -230,13 +221,17 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 	// Figuring this out is a bit messy, because the order information
 	// is distributed over the satellite, signal and cell masks.
 
-	signalCells := make([][]Cell, len(header.Satellites))
+	
 
 	// c is the index into the slices of signal fields captured above.
 	c := 0
 
+	// Create a slice of slices of cells ...
+	signalCells := make([][]Cell, 0)
+	// ... and populate it.
 	for i := range header.Cells {
-		signalCells[i] = make([]Cell, 0)
+		cellSlice := make([]Cell, 0)
+		signalCells = append(signalCells, cellSlice)
 		for j := range header.Cells[i] {
 			// Beware!  We are consuming cells in a loop controlled by cranking through the
 			// 1 bits in the cell mask.  If the multiple message flag is set, only some of
@@ -280,7 +275,7 @@ func (cell *Cell) GetAggregateRange() uint64 {
 		return 0
 	}
 
-	if cell.RangeDelta == InvalidRangeDelta {
+	if cell.RangeDelta == utils.InvalidRangeDelta {
 		// The range is valid but the delta is not.
 		return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
 			cell.RangeFractionalMillisFromSatelliteCell, 0)
@@ -314,7 +309,7 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 
 	var delta int
 
-	if cell.PhaseRangeDelta == InvalidPhaseRangeDelta {
+	if cell.PhaseRangeDelta == utils.InvalidPhaseRangeDelta {
 		// The range is valid but the delta is not.  Use just the range.
 		delta = 0
 	} else {

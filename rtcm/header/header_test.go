@@ -13,24 +13,71 @@ const maxMessageType = 4095 // the message type is a 12-bit unsigned quantity.
 // TestNew checks that New creates a header correctly.
 func TestNew(t *testing.T) {
 
-	var testData = []struct {
-		MessageType       int
-		WantConstellation string
-	}{
-		{1137, "NavIC/IRNSS"},
-		{1133, "unknown"},
+	const wantSatelliteMask = 3
+	const wantSignalMask = 7
+	const wantCellMask = 1
+	const wantMessageType = 1074
+	const wantStationID = 1
+	const wantEpochTime = 2
+	const wantMultipleMessage = true
+	const wantIssue = 3
+	const wantTransTime = 4
+	const wantClockSteeringIndicator = 5
+	const wantExternalClockSteeringIndicator = 6
+	const wantSmoothing = true
+	const wantSmoothingInterval = 7
+
+	gotHeader := New(wantMessageType, wantStationID, wantEpochTime, wantMultipleMessage,
+		wantIssue, wantTransTime, wantClockSteeringIndicator,
+		wantExternalClockSteeringIndicator, true, wantSmoothingInterval,
+		wantSatelliteMask, wantSignalMask, wantCellMask)
+
+	if gotHeader.MessageType != wantMessageType {
+		t.Errorf("want %d got %d", wantMessageType, gotHeader.MessageType)
 	}
 
-	for _, td := range testData {
-		header := NewWithMessageType(td.MessageType)
+	if gotHeader.StationID != wantStationID {
+		t.Errorf("want %d got %d", wantStationID, gotHeader.StationID)
+	}
 
-		if td.MessageType != header.MessageType {
-			t.Errorf("want %d, got %d", td.MessageType, header.MessageType)
-		}
+	if gotHeader.EpochTime != wantEpochTime {
+		t.Errorf("want %d got %d", wantEpochTime, gotHeader.EpochTime)
+	}
 
-		if td.WantConstellation != header.Constellation {
-			t.Errorf("want %s, got %s", td.WantConstellation, header.Constellation)
-		}
+	if !gotHeader.MultipleMessage {
+		t.Errorf("want %v got %v", wantMultipleMessage, gotHeader.MultipleMessage)
+	}
+
+	if gotHeader.IssueOfDataStation != wantIssue {
+		t.Errorf("want %d got %d", wantIssue, gotHeader.IssueOfDataStation)
+	}
+	if gotHeader.EpochTime != wantEpochTime {
+		t.Errorf("want %d got %d", wantEpochTime, gotHeader.EpochTime)
+	}
+
+	if gotHeader.ClockSteeringIndicator != wantClockSteeringIndicator {
+		t.Errorf("want %d got %d", wantClockSteeringIndicator, gotHeader.ClockSteeringIndicator)
+	}
+	if gotHeader.ExternalClockSteeringIndicator != wantExternalClockSteeringIndicator {
+		t.Errorf("want %d got %d", wantExternalClockSteeringIndicator, gotHeader.ExternalClockSteeringIndicator)
+	}
+	if !gotHeader.GNSSDivergenceFreeSmoothingIndicator {
+		t.Errorf("want %v got %v", wantSmoothing, gotHeader.GNSSDivergenceFreeSmoothingIndicator)
+	}
+	if gotHeader.GNSSSmoothingInterval != wantSmoothingInterval {
+		t.Errorf("want %d got %d", wantSmoothingInterval, gotHeader.GNSSSmoothingInterval)
+	}
+	if gotHeader.GNSSSmoothingInterval != wantSmoothingInterval {
+		t.Errorf("want %d got %d", wantSmoothingInterval, gotHeader.GNSSSmoothingInterval)
+	}
+	if gotHeader.SatelliteMask != wantSatelliteMask {
+		t.Errorf("want %d got %d", wantSatelliteMask, gotHeader.SatelliteMask)
+	}
+	if gotHeader.SignalMask != wantSignalMask {
+		t.Errorf("want %d got %d", wantSignalMask, gotHeader.SignalMask)
+	}
+	if gotHeader.CellMask != wantCellMask {
+		t.Errorf("want %d got %d", wantSmoothingInterval, gotHeader.CellMask)
 	}
 }
 
@@ -274,7 +321,7 @@ func TestGetMSMHeader(t *testing.T) {
 		IssueOfDataStation:                   3,
 		SessionTransmissionTime:              4,
 		ClockSteeringIndicator:               2,
-		ExternalClockIndicator:               1,
+		ExternalClockSteeringIndicator:       1,
 		GNSSDivergenceFreeSmoothingIndicator: true,
 		GNSSSmoothingInterval:                7,
 		SatelliteMask:                        0x001d,
@@ -344,10 +391,10 @@ func TestGetMSMHeader(t *testing.T) {
 			header.GNSSSmoothingInterval, wantHeader.GNSSSmoothingInterval)
 	}
 
-	if header.ExternalClockIndicator != wantHeader.ExternalClockIndicator {
+	if header.ExternalClockSteeringIndicator != wantHeader.ExternalClockSteeringIndicator {
 		t.Errorf("got external CLI %d, want %d",
 
-			header.ExternalClockIndicator, wantHeader.ExternalClockIndicator)
+			header.ExternalClockSteeringIndicator, wantHeader.ExternalClockSteeringIndicator)
 	}
 
 	if header.SatelliteMask != wantHeader.SatelliteMask {

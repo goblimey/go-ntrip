@@ -203,14 +203,14 @@ func processMessages(config *jsonconfig.Config) {
 	}
 
 	const channelCap = 100
-	var channels []chan rtcm.Message
-	stdoutChannel := make(chan rtcm.Message, channelCap)
+	var channels []chan rtcm.RTCM3Message
+	stdoutChannel := make(chan rtcm.RTCM3Message, channelCap)
 	defer close(stdoutChannel)
 	channels = append(channels, stdoutChannel)
 	go writeMessagesToStdout(stdoutChannel)
 
 	// Make a log of all messages.
-	verbatimChannel := make(chan rtcm.Message, channelCap)
+	verbatimChannel := make(chan rtcm.RTCM3Message, channelCap)
 	defer close(verbatimChannel)
 	channels = append(channels, verbatimChannel)
 	verbatimLog := dailylogger.New(logDir, "verbatim.", ".log")
@@ -218,7 +218,7 @@ func processMessages(config *jsonconfig.Config) {
 
 	if config.RecordMessages {
 		// Make a log of the RTCM messages.
-		rtcmChannel := make(chan rtcm.Message, channelCap)
+		rtcmChannel := make(chan rtcm.RTCM3Message, channelCap)
 		defer close(rtcmChannel)
 		channels = append(channels, rtcmChannel)
 		rtcmLog := dailylogger.New(logDir, "data.", ".rtcm")
@@ -228,7 +228,7 @@ func processMessages(config *jsonconfig.Config) {
 	if config.DisplayMessages {
 		// Make a log of the RTCM messages in readable form
 		// (which is VERY verbose).
-		displayChannel := make(chan rtcm.Message, channelCap)
+		displayChannel := make(chan rtcm.RTCM3Message, channelCap)
 		defer close(displayChannel)
 		channels = append(channels, displayChannel)
 		displayLog := dailylogger.New(logDir, "rtcmfilter.display.", ".log")
@@ -240,7 +240,7 @@ func processMessages(config *jsonconfig.Config) {
 	handleMessages(rtcmHandler, reader, channels)
 }
 
-func handleMessages(rtcmHandler *rtcm.RTCM, reader io.Reader, channels []chan rtcm.Message) {
+func handleMessages(rtcmHandler *rtcm.RTCM, reader io.Reader, channels []chan rtcm.RTCM3Message) {
 
 	// Read and process messages until the connection dies.
 	rtcmHandler.HandleMessages(reader, channels)
@@ -249,7 +249,7 @@ func handleMessages(rtcmHandler *rtcm.RTCM, reader io.Reader, channels []chan rt
 // writeMessagesToStdout receives the messages from the channel and writes them
 // to the given writer.  If the channel is closed or there is an error while
 // writing, it terminates.  It can be run in a go routine.
-func writeMessagesToStdout(ch chan rtcm.Message) {
+func writeMessagesToStdout(ch chan rtcm.RTCM3Message) {
 	for {
 		message, ok := <-ch
 		if !ok {
@@ -276,7 +276,7 @@ func writeMessagesToStdout(ch chan rtcm.Message) {
 // writeAllMessages receives the messages from the channel and writes them
 // to the given writer.  If the channel is closed or there is an error while
 // writing, it terminates.  It can be run in a go routine.
-func writeAllMessages(ch chan rtcm.Message, writer io.Writer) {
+func writeAllMessages(ch chan rtcm.RTCM3Message, writer io.Writer) {
 	for {
 		message, ok := <-ch
 		if !ok {
@@ -298,7 +298,7 @@ func writeAllMessages(ch chan rtcm.Message, writer io.Writer) {
 // writeRTCMMessages receives the messages from the channel and writes them
 // to the given writer.  If the channel is closed or there is an error while
 // writing, it terminates.  It can be run in a go routine.
-func writeRTCMMessages(ch chan rtcm.Message, writer io.Writer) {
+func writeRTCMMessages(ch chan rtcm.RTCM3Message, writer io.Writer) {
 	for {
 		message, ok := <-ch
 		if !ok {
@@ -326,7 +326,7 @@ func writeRTCMMessages(ch chan rtcm.Message, writer io.Writer) {
 // decodes them to readable form and writes the result to the given log file.
 // If the channel is closed or there is a write error, it terminates.
 // It can be run in a go routine.
-func writeReadableMessages(ch chan rtcm.Message, rtcmHandler *rtcm.RTCM, writer io.Writer) {
+func writeReadableMessages(ch chan rtcm.RTCM3Message, rtcmHandler *rtcm.RTCM, writer io.Writer) {
 
 	for {
 		message, ok := <-ch

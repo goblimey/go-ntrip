@@ -9,6 +9,15 @@ import (
 // or MSM7 satellite cell.
 const InvalidRange = 0xff
 
+// InvalidRangeDelta is the invalid value for the range delta in an MSM4
+// signal cell. 15 bit two's complement 100 0000 0000 0000
+const InvalidRangeDelta = -16384
+
+// InvalidPhaseRangeDelta is the invalid value for the phase range delta
+// in an MSM4 signal cell.  22 bit two's complement signed:
+// 10 0000 0000 0000 0000 0000
+const InvalidPhaseRangeDelta = -2097152
+
 // SpeedOfLightMS is the speed of light in metres per second.
 const SpeedOfLightMS = 299792458.0
 

@@ -95,8 +95,8 @@ type Header struct {
 	// ClockSteeringIndicator - uint2.
 	ClockSteeringIndicator uint
 
-	// ExternalClockIndicator - uint2.
-	ExternalClockIndicator uint
+	// ExternalClockSteeringIndicator - uint2.
+	ExternalClockSteeringIndicator uint
 
 	// GNSSDivergenceFreeSmoothingIndicator - bit(1).
 	GNSSDivergenceFreeSmoothingIndicator bool
@@ -168,7 +168,7 @@ func New(
 	issueOfDataStation uint,
 	sessionTransmissionTime uint,
 	clockSteeringIndicator uint,
-	externalClockIndicator uint,
+	externalClockSteeringIndicator uint,
 	gnssDivergenceFreeSmoothingIndicator bool,
 	gnssSmoothingInterval uint,
 	satelliteMask uint64,
@@ -195,7 +195,7 @@ func New(
 		IssueOfDataStation:                   issueOfDataStation,
 		SessionTransmissionTime:              sessionTransmissionTime,
 		ClockSteeringIndicator:               clockSteeringIndicator,
-		ExternalClockIndicator:               externalClockIndicator,
+		ExternalClockSteeringIndicator:       externalClockSteeringIndicator,
 		GNSSDivergenceFreeSmoothingIndicator: gnssDivergenceFreeSmoothingIndicator,
 		GNSSSmoothingInterval:                gnssSmoothingInterval,
 		NumSignalCells:                       numberOfSignalCells,
@@ -239,7 +239,7 @@ func (header *Header) String() string {
 	line += fmt.Sprintf("stationID %d, %s message, sequence number %d, session transmit time %d\n",
 		header.StationID, mode, header.IssueOfDataStation, header.SessionTransmissionTime)
 	line += fmt.Sprintf("clock steering %d, external clock %d\n",
-		header.ClockSteeringIndicator, header.ExternalClockIndicator)
+		header.ClockSteeringIndicator, header.ExternalClockSteeringIndicator)
 	line += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
 		header.GNSSDivergenceFreeSmoothingIndicator, header.GNSSSmoothingInterval)
 	line += fmt.Sprintf("%d satellites, %d signal types, %d signals\n",
