@@ -259,8 +259,8 @@ func TestGetScaledPhaseRangeRate(t *testing.T) {
 	}
 }
 
-// TestGetApproxRange checks GetApproxRange
-func TestGetApproxRange(t *testing.T) {
+// TestGetApproxRangeMilliseconds checks GetApproxRangeMilliseconds
+func TestGetApproxRangeMilliseconds(t *testing.T) {
 
 	var testData = []struct {
 		whole    uint
@@ -274,7 +274,30 @@ func TestGetApproxRange(t *testing.T) {
 	}
 
 	for _, td := range testData {
-		got := GetApproxRange(td.whole, td.fraction)
+		got := GetApproxRangeMilliseconds(td.whole, td.fraction)
+		if !EqualWithin(6, td.want, got) {
+			t.Errorf("%d %d want %f got %f",
+				td.whole, td.fraction, td.want, got)
+		}
+	}
+}
+
+// TestGetApproxRangeMetres checks GetApproxRangeMetres
+func TestGetApproxRangeMetres(t *testing.T) {
+
+	var testData = []struct {
+		whole    uint
+		fraction uint
+		want     float64
+	}{
+		{1, 0, 1.0 * OneLightMillisecond},
+		{1, 512, 1.5 * OneLightMillisecond},
+		{255, 0, 255.0 * OneLightMillisecond},
+		{255, 1, (255.0 + 1.0/1024.0) * OneLightMillisecond},
+	}
+
+	for _, td := range testData {
+		got := GetApproxRangeMetres(td.whole, td.fraction)
 		if !EqualWithin(6, td.want, got) {
 			t.Errorf("%d %d want %f got %f",
 				td.whole, td.fraction, td.want, got)
@@ -795,6 +818,90 @@ func TestSlicesEqual(t *testing.T) {
 		if td.want != got {
 			t.Errorf("%s want %v got %v",
 				td.description, td.want, got)
+		}
+	}
+}
+
+// TestMSM4 checks the MSM4 function.
+func TestMSM4(t *testing.T) {
+
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1073, false},
+		{1074, true},
+		{1075, false},
+		{1084, true},
+		{1094, true},
+		{1104, true},
+		{1114, true},
+		{1124, true},
+		{1133, false},
+		{1134, true},
+		{1135, false},
+	}
+	for _, td := range testData {
+		got := MSM4(td.messageType)
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestMSM7 checks the MSM7 function.
+func TestMSM7(t *testing.T) {
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1076, false},
+		{1077, true},
+		{1078, false},
+		{1087, true},
+		{1094, false},
+		{1097, true},
+		{1104, false},
+		{1127, true},
+		{1136, false},
+		{1137, true},
+		{1138, false},
+	}
+	for _, td := range testData {
+		got := MSM7(td.messageType)
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestMSM checks the MSM function.
+func TestMSM(t *testing.T) {
+	var testData = []struct {
+		messageType int
+		want        bool
+	}{
+		{NonRTCMMessage, false},
+		{1076, false},
+		{1074, true},
+		{1077, true},
+		{1107, true},
+		{1116, false},
+		{1117, true},
+		{1118, false},
+		{1127, true},
+		{1134, true},
+		{1137, true},
+		{1136, false},
+		{1137, true},
+		{1138, false},
+	}
+	for _, td := range testData {
+		got := MSM(td.messageType)
+		if got != td.want {
+			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
 		}
 	}
 }

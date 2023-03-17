@@ -3,6 +3,8 @@ package message1005
 import (
 	"testing"
 
+	"github.com/goblimey/go-ntrip/rtcm/testdata"
+
 	"github.com/kylelemons/godebug/diff"
 )
 
@@ -32,7 +34,7 @@ func TestString(t *testing.T) {
 	const want = `message type 1005 - Base Station Information
 stationID 2, ITRF realisation year 3, ignored 0xf,
 x 12345, ignored 0x1, y 23456, ignored 0x2, z 34567,
-ECEF coords in metres (  1.2345,  2.3456,  3.4567)
+ECEF coords in metres (1.2345, 2.3456, 3.4567)
 `
 
 	got := New(1005, 2, 3, 0xf, 12345, 1, 23456, 2, 34567)
@@ -48,30 +50,14 @@ ECEF coords in metres (  1.2345,  2.3456,  3.4567)
 // error message.
 func TestGetMessage(t *testing.T) {
 
-	// bitStream1005 contains a message type 1005:
-	// message type:    Station ID:        ITRF year
-	//                                             ign:   x:
-	// 0011 1110   1101|0000   0000 0010|  0000 11|11  11|00 0000
-	//                                                 ig y:
-	// 0000 0000   0000 0001   1110 0010   0100 0000|  01|00 0000
-	//                                                    z:
-	// 0000 0000   0000 0011   1001 0100   0100 0111|  10|00 0000
-	// 0000 0000   0000 0101   0100 0110   0100 1110
-	var bitStream1005 = []byte{
-		0x3e, 0xd0, 0x02, 0x0f, 0xc0,
-		0x00, 0x01, 0xe2, 0x40, 0x40,
-		0x00, 0x03, 0x94, 0x47, 0x80,
-		0x00, 0x05, 0x46, 0x4e,
-	}
-
 	var testData = []struct {
 		description string
 		bitStream   []byte
 		wantError   string
 		wantMessage *Message
 	}{
-		{"complete", bitStream1005, "", New(1005, 2, 3, 0xf, 123456, 1, 234567, 2, 345678)},
-		{"short", bitStream1005[:18], "overrun - expected 152 bits in a message type 1005, got 144", nil},
+		{"complete", testdata.MessageFrameType1005[3:], "", New(1005, 2, 3, 0xf, 123456, 1, 234567, 2, 345678)},
+		{"short", testdata.MessageFrameType1005[:18], "overrun - expected 152 bits in a message type 1005, got 144", nil},
 	}
 
 	for _, td := range testData {
@@ -105,5 +91,22 @@ func TestGetMessage(t *testing.T) {
 				t.Errorf("want: %v\n got: %v\n", *td.wantMessage, *gotMessage)
 			}
 		}
+	}
+}
+
+// TestIncorrectMessageType checks an obscure case where GetMessage is called
+// on a bit stream that doesn't contain a message of type 1005.
+func TestIncorrectMessageType(t *testing.T) {
+	const want = "expected message type 1005 got 1077"
+	message, err := GetMessage(testdata.Message1077)
+	if err == nil {
+		t.Error("expected an error")
+		return
+	}
+	if err.Error() != want {
+		t.Errorf("want %s, got %s", want, err.Error())
+	}
+	if message != nil {
+		t.Error("expected the message to be nil")
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/msm7/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
+
+	"github.com/kylelemons/godebug/diff"
 )
 
 // TestNew checks that New correctly creates an MSM7 signal
@@ -490,20 +492,20 @@ func TestGetPhaseRange(t *testing.T) {
 	//     whole     fractional
 	//     876 5432 1098 7654 3210 9876 5432 1098 7654 3210
 	//     www wwww wfff ffff fff0 0000 0000 0000 0000 0000
-	//     + or -             dddd dddd dddd dddd dddd dddd <- phase range rate delta.
+	//     + or -             dddd dddd dddd dddd dddd dddd <- 24-bit signed phase range delta.
 	//   0|100 0000 0100 0000 000|
 	//                        0000 0000 0000 0000 0000 0001
 	const wantAggregate = 0x4040000001
 
 	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
 	const twoToPowerMinus31 = 1 / float64(twoToPower31)
-	const rangeMilliseconds = 128.5 + float64(twoToPowerMinus31)
+	const phaseRangeMilliseconds = 128.5 + float64(twoToPowerMinus31)
 	const wantWavelength = utils.SpeedOfLightMS / utils.Freq2
 
-	rangeLM := rangeMilliseconds * utils.OneLightMillisecond
+	phaseRangeLightMillis := phaseRangeMilliseconds * utils.OneLightMillisecond
 	var signalID uint = 16
 
-	wantPhaseRange := rangeLM / wantWavelength
+	wantPhaseRange := phaseRangeLightMillis / wantWavelength
 
 	wavelength := utils.GetSignalWavelength("GPS", signalID)
 
@@ -529,14 +531,14 @@ func TestGetPhaseRange(t *testing.T) {
 	}
 
 	r := utils.GetPhaseRangeMilliseconds(agg)
-	if !utils.EqualWithin(6, r, rangeMilliseconds) {
-		t.Errorf("want range %f got %f", rangeMilliseconds, r)
+	if !utils.EqualWithin(6, r, phaseRangeMilliseconds) {
+		t.Errorf("want range %f got %f", phaseRangeMilliseconds, r)
 		return
 	}
 
 	rlm := utils.GetPhaseRangeLightMilliseconds(r)
-	if !utils.EqualWithin(3, rangeLM, rlm) {
-		t.Errorf("want range %f got %f", rangeLM, rlm)
+	if !utils.EqualWithin(3, phaseRangeLightMillis, rlm) {
+		t.Errorf("want range %f got %f", phaseRangeLightMillis, rlm)
 		return
 	}
 
@@ -806,43 +808,97 @@ func TestGetSignalCellsWithShortBitStream(t *testing.T) {
 
 func TestString(t *testing.T) {
 
-	// These values and results are copied from some of the above tests.
-	const rangeWhole uint = 0x80       // 1000 0000 (128 millis)
-	const rangeFractional uint = 0x200 // 10 bits 1000 ... (0.5 millis)
-	const rangeDelta = int(0x40000)    // 20 bits 0100 ...
-	const twoToPower11 = 0x800         //                        1000 0000 0000
-	const twoToPowerMinus11 = float64(1) / twoToPower11
+	// Scale factors
+	const twoToPower29 = 0x20000000 // 0010 0000 0000 0000 0000 0000 0000 0000
+	const twoToPowerMinus29 = 1 / float64(twoToPower29)
 	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
 	const twoToPowerMinus31 = 1 / float64(twoToPower31)
-	const rangeMilliseconds = 128.5 + float64(twoToPowerMinus31)
-	const wavelength = utils.SpeedOfLightMS / utils.Freq2
+
+	// These values and results are copied from some of the above tests.
 	const signalID uint = 16
 	const extendedInfo = 5
-	const wholePhaseRangeRate = 6
+	const rangeWhole uint = 0x80       // 1000 0000 (128 millis)
+	const rangeWholeInvalid = 255      // This marks the range value as invalid.
+	const rangeFractional uint = 0x200 // 10 bits 1000 0000 ... (0.5 millis)
+	const rangeDelta = int(0x40000)    // 20 bits 0100 0000 ... (1/2048 millis)
 	const phaseRangeDelta int = 1
+	const approxPhaseRangeRate = 6
 	const phaseRangeRateDelta = 7890
-	const wantPhaseRangeRate = 6.789
 	const lockTimeIndicator = 4
 	const halfCycleAmbiguity = true
 	const cnr = 5
-	const wantRange float64 = (128.5 + twoToPowerMinus11) * utils.OneLightMillisecond // 11 1111 1111
+	const wavelength = utils.SpeedOfLightMS / utils.Freq2
 
-	rangeLM := rangeMilliseconds * utils.OneLightMillisecond
-	wantPhaseRange := rangeLM / wavelength
+	const rangeMilliseconds = 128.5 + 1/float64(2048)
+	const wantRangeMetresWhenAllValid float64 = rangeMilliseconds * utils.OneLightMillisecond
+	const wantPhaseRangeRate = 6.789
 
-	want := fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %d, %v, %d, %.3f}",
-		wantRange, wantPhaseRange, lockTimeIndicator, halfCycleAmbiguity,
-		cnr, wantPhaseRangeRate)
+	// Phase Range
+	const phaseRangeMilliseconds = 128.5 + float64(twoToPowerMinus31*float64(phaseRangeDelta))
+	phaseRangeLightMilliseconds := phaseRangeMilliseconds * utils.OneLightMillisecond
+	wantPhaseRangeWhenAllValid := phaseRangeLightMilliseconds / wavelength
 
-	satelliteCell := satellite.New(1, rangeWhole, rangeFractional,
-		extendedInfo, wholePhaseRangeRate)
+	invalidRangeDeltaBytes := []byte{0x80, 0x00, 0x00} // 20 bits plus filler: 1000 0000 0000 0000 0000 filler 0000
+	invalidRangeDelta := int(utils.GetBitsAsInt64(invalidRangeDeltaBytes, 0, 20))
 
-	signalCell := New(signalID, satelliteCell, rangeDelta, phaseRangeDelta,
+	invalidPhaseRangeRateBytes := []byte{0x80, 0x00} // 14 bits plus filler: 1000 0000 0000 00 filler 00
+	invalidPhaseRangeRate := int(utils.GetBitsAsInt64(invalidPhaseRangeRateBytes, 0, 14))
+
+	// A satellite cell with valid range and phase range rate.
+	satelliteCellAllValid := satellite.New(1, rangeWhole, rangeFractional,
+		extendedInfo, approxPhaseRangeRate)
+
+	// A satellite cell with invalid range.
+	satelliteCellWithInvalidRange := satellite.New(1, rangeWholeInvalid, rangeFractional,
+		extendedInfo, approxPhaseRangeRate)
+
+	// A satellite cell with invalid phase range rate
+	satelliteCellWithInvalidPhaseRangeRate :=
+		satellite.New(1, rangeWhole, rangeFractional,
+			extendedInfo, invalidPhaseRangeRate)
+
+	signalCellAllValid := New(signalID, satelliteCellAllValid, rangeDelta, phaseRangeDelta,
 		lockTimeIndicator, halfCycleAmbiguity, cnr, phaseRangeRateDelta, wavelength)
 
-	got := signalCell.String()
+	signalCellWithInvalidRange := New(signalID, satelliteCellWithInvalidRange,
+		invalidRangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity,
+		cnr, phaseRangeRateDelta, wavelength)
 
-	if want != got {
-		t.Errorf("\nwant %s\n got %s", want, got)
+	signalCellWithInvalidPhaseRangeRate := New(signalID, satelliteCellWithInvalidPhaseRangeRate,
+		rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr,
+		phaseRangeRateDelta, wavelength)
+
+	var testData = []struct {
+		description string
+		cell        *Cell
+		want        string
+	}{
+		{
+			"all valid", signalCellAllValid,
+			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %d, %v, %d, %.3f}",
+				wantRangeMetresWhenAllValid, wantPhaseRangeWhenAllValid, lockTimeIndicator, halfCycleAmbiguity,
+				cnr, wantPhaseRangeRate),
+		},
+		{
+			"invalid range", signalCellWithInvalidRange,
+			fmt.Sprintf(" 1 16 {invalid, invalid, %d, %v, %d, %.3f}",
+				lockTimeIndicator, halfCycleAmbiguity,
+				cnr, wantPhaseRangeRate),
+		},
+		{
+			"invalid phase range rate", signalCellWithInvalidPhaseRangeRate,
+			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %d, %v, %d, invalid}",
+				wantRangeMetresWhenAllValid, wantPhaseRangeWhenAllValid, lockTimeIndicator, halfCycleAmbiguity,
+				cnr),
+		},
+	}
+
+	for _, td := range testData {
+
+		got := td.cell.String()
+
+		if td.want != got {
+			t.Errorf("%s\n%s", td.description, diff.Diff(td.want, got))
+		}
 	}
 }

@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/message1005"
-	msm4message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
-	msm7message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
+	msm4Message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
+	msm7Message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
+	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 
-	crc24q "github.com/goblimey/go-crc24q/crc24q"
+	"github.com/goblimey/go-crc24q/crc24q"
 )
 
 // The rtcm package contains logic to read and decode and display RTCM3
@@ -77,12 +78,6 @@ import (
 // defined ready to support emerging equipment that's expected to give
 // better accuracy in the future.
 
-// NonRTCMMessage indicates a Message that does contain RTCM data.  Typically
-// it will be a stream of data in other formats (NMEA, UBX etc).
-// According to the spec, message numbers start at 1, but I've
-// seen messages of type 0.
-const NonRTCMMessage = -1
-
 // oneLightMillisecond is the distance in metres traveled by light in one
 // millisecond.  The value can be used to convert a range in milliseconds to a
 // distance in metres.  The speed of light is 299792458.0 metres/second.
@@ -90,6 +85,12 @@ const oneLightMillisecond float64 = 299792.458
 
 // defaultWaitTimeOnEOF is the default value for RTCM.WaitTimeOnEOF.
 const defaultWaitTimeOnEOF = 100 * time.Microsecond
+
+// maxTimeStamp is the maximum value of a 30-bit timestamp.
+const maxTimeStamp = 0x3fffffff // maximum 30-bit value
+
+// glonssInvalidDay is the invalid value for the day part of the day value.
+const glonassInvalidDay = 7
 
 // glonassDayBitMask is used to extract the Glonass day from the timestamp
 // in an MSM7 message.  The 30 bit time value is a 3 bit day (0 is Sunday)
@@ -114,10 +115,6 @@ var glonassTimeOffset = time.Duration(-1*3) * time.Hour
 // UTC.  Currently (Jan 2020) Beidou is 14 seconds behind UTC.
 var beidouLeapSeconds = 14
 var beidouTimeOffset = time.Duration(beidouLeapSeconds) * time.Second
-
-var locationUTC *time.Location
-var locationGMT *time.Location
-var locationMoscow *time.Location
 
 // startOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
 const startOfMessageFrame byte = 0xd3
@@ -198,134 +195,10 @@ type RTCM struct {
 	previousGlonassDay uint
 }
 
-// RTCM3Message contains an RTCM3 message, possibly broken out into readable form,
-// or a stream of non-RTCM data.  RTCM3Message type NonRTCMMessage indicates the
-// second case.
-type RTCM3Message struct {
-	// MessageType is the type of the RTCM message (the message number).
-	// RTCM messages all have a positive message number.  Type NonRTCMMessage
-	// is negative and indicates a stream of bytes that doesn't contain a
-	// valid RTCM message, for example an NMEA message or a corrupt RTCM.
-	MessageType int
-
-	// Valid is true if the message is valid - complete and the CRC checks.
-	Valid bool
-
-	// Complete is true if the message is complete.  The last bytes in a
-	// log of messages may not be complete.
-	Complete bool
-
-	// CRCValid is true if the Cyclic Redundancy Check bits are valid.
-	CRCValid bool
-
-	// Warning contains any error message encountered while fetching
-	// the message.
-	Warning string
-
-	// RawData is the message frame in its original binary form
-	//including the header and the CRC.
-	RawData []byte
-
-	// readable is a broken out version of the RTCM message.  It's accessed
-	// via the Readable method and the message is only decoded on the
-	// first call.  (Lazy evaluation.)
-	readable interface{}
-}
-
-// Copy makes a copy of the message and its contents.
-func (message *RTCM3Message) Copy() RTCM3Message {
-	// Make a copy of the raw data.
-	rawData := make([]byte, len(message.RawData))
-	copy(rawData, message.RawData)
-	// Create a new message.  Omit the readable part - it may not be needed
-	// and if it is needed, it will be created automatically at that point.
-	var newMessage = RTCM3Message{
-		MessageType: message.MessageType,
-		RawData:     rawData,
-		Valid:       message.Valid,
-		Complete:    message.Complete,
-		CRCValid:    message.CRCValid,
-		Warning:     message.Warning,
-	}
-	return newMessage
-}
-
-// MSM4 returns true if the message is an MSM type 4.
-func (message *RTCM3Message) MSM4() bool {
-
-	switch message.MessageType {
-	// GPS
-	case 1074: // GPS
-		return true
-	case 1084: // Glonass
-		return true
-	case 1094: // Galileo
-		return true
-	case 1104: // SBAS
-		return true
-	case 1114: // QZSS
-		return true
-	case 1124: // Beidou
-		return true
-	case 1134: // NavIC/IRNSS
-		return true
-	default:
-		return false
-	}
-}
-
-// MSM7 returns true if the message is an MSM type 7.
-func (message *RTCM3Message) MSM7() bool {
-	switch message.MessageType {
-	case 1077:
-		return true
-	case 1087:
-		return true
-	case 1097:
-		return true
-	case 1107:
-		return true
-	case 1117:
-		return true
-	case 1127:
-		return true
-	case 1137:
-		return true
-	default:
-		return false
-	}
-}
-
-// MSM returns true if the message type in the header is an Multiple Signal
-// Message of any type.
-func (message *RTCM3Message) MSM() bool {
-	if message.MessageType == NonRTCMMessage {
-		return false
-	}
-
-	return message.MSM4() || message.MSM7()
-}
-
-// displayable is true if the message type is one that we know how
-// to display in a readable form.
-func (message *RTCM3Message) displayable() bool {
-	// we currently can display messages of type 1005, MSM4 and MSM7.
-
-	if message.MessageType == NonRTCMMessage {
-		return false
-	}
-
-	if message.MSM() || message.MessageType == 1005 {
-		return true
-	}
-
-	return false
-}
-
 // HandleMessages reads from the input stream until it's exhausted, extracting any
 // valid RTCM messages and copying them to those output channels which are not nil.
 //
-func (rtcm *RTCM) HandleMessages(reader io.Reader, channels []chan RTCM3Message) {
+func (rtcm *RTCM) HandleMessages(reader io.Reader, channels []chan rtcm3.Message) {
 	// HandleMessages is the core of a number of applications including the NTRIP
 	// server.  It reads from the input stream until it's exhausted, extracting any
 	// valid RTCM messages and copying them to those output channels which are not nil.
@@ -378,19 +251,19 @@ func (rtcm *RTCM) HandleMessages(reader io.Reader, channels []chan RTCM3Message)
 	}
 }
 
-// GetMessageLengthAndType extracts the message length and the message type from an
+// getMessageLengthAndType extracts the message length and the message type from an
 // RTCMs message frame or returns an error, implying that this is not the start of a
 // valid message.  The bit stream must be at least 5 bytes long.
-func (handler *RTCM) GetMessageLengthAndType(bitStream []byte) (uint, int, error) {
+func (handler *RTCM) getMessageLengthAndType(bitStream []byte) (uint, int, error) {
 
 	if len(bitStream) < leaderLengthBytes+2 {
-		return 0, NonRTCMMessage, errors.New("the message is too short to get the header and the length")
+		return 0, utils.NonRTCMMessage, errors.New("the message is too short to get the header and the length")
 	}
 
 	// The message header is 24 bits.  The top byte is startOfMessage.
 	if bitStream[0] != startOfMessageFrame {
 		message := fmt.Sprintf("message starts with 0x%0x not 0xd3", bitStream[0])
-		return 0, NonRTCMMessage, errors.New(message)
+		return 0, utils.NonRTCMMessage, errors.New(message)
 	}
 
 	// The next six bits must be zero.  If not, we've just come across
@@ -398,7 +271,7 @@ func (handler *RTCM) GetMessageLengthAndType(bitStream []byte) (uint, int, error
 	sanityCheck := utils.GetBitsAsUint64(bitStream, 8, 6)
 	if sanityCheck != 0 {
 		errorMessage := fmt.Sprintf("bits 8-13 of header are %d, must be 0", sanityCheck)
-		return 0, NonRTCMMessage, errors.New(errorMessage)
+		return 0, utils.NonRTCMMessage, errors.New(errorMessage)
 	}
 
 	// The bottom ten bits of the header is the message length.
@@ -578,7 +451,7 @@ func (handler *RTCM) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, er
 			// We have the first three bytes of the frame so we have enough data to find
 			// the length and the type of the message (which we will need in a later trip
 			// around this loop).
-			messageLength, messageType, err := handler.GetMessageLengthAndType(frame)
+			messageLength, messageType, err := handler.getMessageLengthAndType(frame)
 			if err != nil {
 				// We thought we'd found the start of a message, but it's something else
 				// that happens to start with the start of frame byte.
@@ -628,7 +501,7 @@ func (handler *RTCM) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, er
 // ReadNextRTCM3Message gets the next message frame from a reader, extracts
 // and returns the message.  It returns any read error that it encounters,
 // such as EOF.
-func (rtcm *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*RTCM3Message, error) {
+func (rtcm *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*rtcm3.Message, error) {
 
 	frame, err1 := rtcm.ReadNextRTCM3MessageFrame(reader)
 	if err1 != nil {
@@ -644,33 +517,6 @@ func (rtcm *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*RTCM3Message, err
 	return message, messageFetchError
 }
 
-// PrepareForDisplay returns a broken out version of the message - for example,
-// if the message type is 1005, it's a Message1005.
-func (m *RTCM3Message) PrepareForDisplay(r *RTCM) interface{} {
-	var err error
-	if m.readable == nil {
-		err = r.Analyse(m)
-		if err != nil {
-			// Message can't be analysed.  Log an error and mark the message
-			// as not valid.
-			log.Println(err.Error())
-			m.Valid = false
-		}
-	}
-
-	return m.readable
-}
-
-func (m *RTCM3Message) SetReadable(r interface{}) {
-	m.readable = r
-}
-
-func init() {
-	locationUTC, _ = time.LoadLocation("UTC")
-	locationGMT, _ = time.LoadLocation("GMT")
-	locationMoscow, _ = time.LoadLocation("Europe/Moscow")
-}
-
 // New creates an RTCM object using the given year, month and day to
 // identify which week the times in the messages refer to.
 func New(startTime time.Time, logger *log.Logger) *RTCM {
@@ -678,7 +524,7 @@ func New(startTime time.Time, logger *log.Logger) *RTCM {
 	rtcm := RTCM{logger: logger, WaitTimeOnEOF: defaultWaitTimeOnEOF}
 
 	// Convert the start date to UTC.
-	startTime = startTime.In(locationUTC)
+	startTime = startTime.In(utils.LocationUTC)
 
 	// Get the start of last Sunday in UTC. (If today is Sunday, the start
 	// of today.)
@@ -740,11 +586,11 @@ func New(startTime time.Time, logger *log.Logger) *RTCM {
 	// rolls over at 21:00 UTC the day before.
 
 	// Unlike GPS, we have a real timezone to work with - Moscow.
-	startTimeMoscow := startTime.In(locationMoscow)
+	startTimeMoscow := startTime.In(utils.LocationMoscow)
 	startOfDayMoscow := time.Date(startTimeMoscow.Year(), startTimeMoscow.Month(),
-		startTimeMoscow.Day(), 0, 0, 0, 0, locationMoscow)
+		startTimeMoscow.Day(), 0, 0, 0, 0, utils.LocationMoscow)
 
-	rtcm.startOfThisGlonassDay = startOfDayMoscow.In(locationUTC)
+	rtcm.startOfThisGlonassDay = startOfDayMoscow.In(utils.LocationUTC)
 
 	rtcm.startOfNextGlonassDay =
 		rtcm.startOfThisGlonassDay.AddDate(0, 0, 1)
@@ -765,7 +611,7 @@ func (r *RTCM) SetDisplayWriter(displayWriter io.Writer) {
 // as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
 // doesn't contain a valid message, it returns a message with type NonRTCMMessage.
 //
-func (handler *RTCM) GetMessage(bitStream []byte) (*RTCM3Message, error) {
+func (handler *RTCM) GetMessage(bitStream []byte) (*rtcm3.Message, error) {
 
 	if len(bitStream) == 0 {
 		return nil, errors.New("zero length message frame")
@@ -773,21 +619,12 @@ func (handler *RTCM) GetMessage(bitStream []byte) (*RTCM3Message, error) {
 
 	if bitStream[0] != startOfMessageFrame {
 		// This is not an RTCM message.
-		message := RTCM3Message{
-			MessageType: NonRTCMMessage,
-			RawData:     bitStream,
-		}
-		return &message, nil
+		return rtcm3.NewNonRTCM(bitStream), nil
 	}
 
-	messageLength, messageType, formatError := handler.GetMessageLengthAndType(bitStream)
+	messageLength, messageType, formatError := handler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
-		message := RTCM3Message{
-			MessageType: messageType,
-			RawData:     bitStream,
-			Warning:     formatError.Error(),
-		}
-		return &message, formatError
+		return rtcm3.New(messageType, formatError.Error(), bitStream), formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -799,41 +636,59 @@ func (handler *RTCM) GetMessage(bitStream []byte) (*RTCM3Message, error) {
 	// The message is analysed only when necessary (lazy evaluation).  For
 	// now, just copy the byte stream into the Message.
 	if expectedFrameLength > frameLength {
-		// The message is incomplete, return what we have.
-		// (This can happen if it's the last message in the input stream.)
+		// The message is incomplete, return what we have as a
+		// non-RTCM3 message.  (This can happen if it's the last message
+		// in the input stream.)
 		warning := "incomplete message frame"
-		message := RTCM3Message{
-			MessageType: messageType,
-			RawData:     bitStream[:frameLength],
-			Warning:     warning,
-		}
-		return &message, errors.New(warning)
+		return rtcm3.New(utils.NonRTCMMessage, warning, bitStream[:frameLength]), errors.New(warning)
 	}
 
 	// We have a complete message.
 
-	message := RTCM3Message{
-		MessageType: messageType,
-		RawData:     bitStream[:expectedFrameLength],
-		Complete:    true,
-	}
-
 	// Check the CRC.
 	if !CheckCRC(bitStream) {
-		errorMessage := "CRC failed"
-		message.Warning = errorMessage
-		return &message, errors.New(errorMessage)
+		warning := "CRC is not valid"
+		return rtcm3.New(utils.NonRTCMMessage, warning, bitStream[:frameLength]), errors.New(warning)
 	}
-	message.CRCValid = true
 
-	// the message is complete and the CRC check passes, so it's valid.
+	// The message is complete and the CRC check passes, so it's valid.
+	message := rtcm3.New(messageType, "", bitStream[:expectedFrameLength])
 	message.Valid = true
+	message.CRCValid = true
+	message.Complete = true
 
-	return &message, nil
+	// If the message is an MSM7, get the time (for the heading if displaying)
+	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
+	// station ID followed by the 30-bit epoch time, followed by lots of other
+	// stuff and finally a 3-byte CRC.  If we get to here then the leader and
+	// CRC are present and the message contains at least a complete header.
+
+	const startBit = 48 // Leader plus 24 bits.
+	const timestampLength = 30
+
+	if utils.MSM(message.MessageType) {
+
+		// The message is an MSM so get the timestamp and set the UTCTime.
+
+		timestamp := uint(utils.GetBitsAsUint64(bitStream, startBit, timestampLength))
+
+		utcTime, timeError := handler.getTimeFromTimeStamp(message.MessageType, timestamp)
+
+		if timeError != nil {
+			message.ErrorMessage = timeError.Error()
+			return message, timeError
+		}
+
+		message.UTCTime = &utcTime
+
+		return message, nil
+	}
+
+	return message, nil
 }
 
 // Analyse decodes the raw byte stream and fills in the broken out message.
-func (rtcm *RTCM) Analyse(message *RTCM3Message) error {
+func Analyse(message *rtcm3.Message) {
 	var readable interface{}
 
 	// The raw data contains the whole message frame: the leader, the MSM message
@@ -843,88 +698,116 @@ func (rtcm *RTCM) Analyse(message *RTCM3Message) error {
 	messageBitStream := message.RawData[low:high]
 
 	switch {
-	case message.MSM4():
-		msm4Message, msm4Error := msm4message.GetMessage(messageBitStream)
-		if msm4Error != nil {
-			return msm4Error
-		}
-		// Convert the EpochTime to UTC.  This requires keeping a notion of time
-		// over many messages, potentially for many days, so it must be done by
-		// this module.
-		switch msm4Message.Header.MessageType {
-		case 1074:
-			msm4Message.Header.UTCTime =
-				rtcm.GetUTCFromGPSTime(msm4Message.Header.EpochTime)
-		case 1084:
-			msm4Message.Header.UTCTime =
-				rtcm.GetUTCFromGlonassTime(msm4Message.Header.EpochTime)
-		case 1094:
-			msm4Message.Header.UTCTime =
-				rtcm.GetUTCFromGalileoTime(msm4Message.Header.EpochTime)
-		case 1124:
-			msm4Message.Header.UTCTime =
-				rtcm.GetUTCFromBeidouTime(msm4Message.Header.EpochTime)
-		default:
-			// This MSM is one that we don't know how to decode.
-			// Leave the UTCTime set to zero.
-		}
-		message.SetReadable(msm4Message)
-		return nil
-	case message.MSM7():
-		msm7Message, msm7Error := msm7message.GetMessage(messageBitStream)
-		if msm7Error != nil {
-			return msm7Error
-		}
-		// Convert the EpochTime to UTC.  This requires keeping a notion of time
-		// over many messages, potentially for many days, so it must be done by
-		// this module.
-		switch msm7Message.Header.MessageType {
-		case 1077:
-			msm7Message.Header.UTCTime =
-				rtcm.GetUTCFromGPSTime(msm7Message.Header.EpochTime)
-		case 1087:
-			msm7Message.Header.UTCTime =
-				rtcm.GetUTCFromGlonassTime(msm7Message.Header.EpochTime)
-		case 1097:
-			msm7Message.Header.UTCTime =
-				rtcm.GetUTCFromGalileoTime(msm7Message.Header.EpochTime)
-		case 1127:
-			msm7Message.Header.UTCTime =
-				rtcm.GetUTCFromBeidouTime(msm7Message.Header.EpochTime)
-		default:
-			// This MSM is one that we don't know how to decode.
-			// Leave the UTCTime set to zero.
-		}
-		message.SetReadable(msm7Message)
-		return nil
+
+	case utils.MSM4(message.MessageType):
+		analyseMSM4(messageBitStream, message)
+
+	case utils.MSM7(message.MessageType):
+		analyseMSM7(messageBitStream, message)
 
 	case message.MessageType == 1005:
-		readable, m1005Error := message1005.GetMessage(messageBitStream)
-		if m1005Error != nil {
-			return m1005Error
-		}
-		message.SetReadable(readable)
-		return nil
+		analyse1005(messageBitStream, message)
+
 	case message.MessageType == 1230:
-		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this.)"
-		message.SetReadable(readable)
-		return nil
+		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this)"
+		message.Readable = readable
+
 	case message.MessageType == 4072:
 		readable = "(Message type 4072 is in an unpublished format defined by U-Blox.)"
-		message.SetReadable(readable)
-		return nil
+		message.Readable = readable
+
 	default:
-		errorMessage := fmt.Sprintf("message type %d currently cannot be displayed",
-			message.MessageType)
-		message.SetReadable(errorMessage)
-		return errors.New(errorMessage)
+		readable := fmt.Sprintf("message type %d currently cannot be displayed", message.MessageType)
+		message.Readable = readable
 	}
+}
+
+func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
+	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
+	if msm4Error != nil {
+		message.ErrorMessage = msm4Error.Error()
+		message.Valid = false
+		return
+	}
+
+	message.Readable = msm4Message
+}
+
+func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
+	msm7Message, msm7Error := msm7Message.GetMessage(messageBitStream)
+	if msm7Error != nil {
+		message.ErrorMessage = msm7Error.Error()
+		message.Valid = false
+		return
+	}
+
+	message.Readable = msm7Message
+}
+
+func analyse1005(messageBitStream []byte, message *rtcm3.Message) {
+	message1005, message1005Error := message1005.GetMessage(messageBitStream)
+	if message1005Error != nil {
+		message.ErrorMessage = message1005Error.Error()
+		return
+	}
+
+	message.Readable = message1005
+	message.Valid = true
+}
+
+// getTimeFromTimeStamp converts the 30-bit timestamp in the MSM header to a time value
+// in the UTC timezone.  The message must be an MSM as others don't have a timestamp.
+func (handler *RTCM) getTimeFromTimeStamp(messageType int, timestamp uint) (time.Time, error) {
+
+	var zeroTimeValue time.Time
+	if timestamp > maxTimeStamp {
+		e := errors.New("out of range")
+		return zeroTimeValue, e
+	}
+
+	// Convert the EpochTime to UTC.  This requires keeping a notion of time
+	// over many messages, potentially for many days, so it must be done by
+	// this module.
+	//
+	// The Glonass timestamp has an invalid value, so the Glonass converter can
+	// return an error.
+
+	var utcTime time.Time
+	switch messageType {
+	case utils.MessageTypeMSM4GPS:
+		utcTime = handler.getUTCFromGPSTime(timestamp)
+	case utils.MessageTypeMSM7GPS:
+		utcTime = handler.getUTCFromGPSTime(timestamp)
+	case utils.MessageTypeMSM4Glonass:
+		utcTime, err := handler.getUTCFromGlonassTime(timestamp)
+		if err != nil {
+			return utcTime, err
+		}
+	case utils.MessageTypeMSM7Glonass:
+		utcTime, err := handler.getUTCFromGlonassTime(timestamp)
+		if err != nil {
+			return utcTime, err
+		}
+	case utils.MessageTypeMSM4Galileo:
+		utcTime = handler.getUTCFromGalileoTime(timestamp)
+	case utils.MessageTypeMSM7Galileo:
+		utcTime = handler.getUTCFromGalileoTime(timestamp)
+	case utils.MessageTypeMSM4Beidou:
+		utcTime = handler.getUTCFromBeidouTime(timestamp)
+	case utils.MessageTypeMSM7Beidou:
+		utcTime = handler.getUTCFromBeidouTime(timestamp)
+	default:
+		// This MSM is one that we don't know how to decode.
+		return zeroTimeValue, errors.New("unknown message type")
+	}
+
+	return utcTime, nil
 }
 
 // GetUTCFromGPSTime converts a GPS time to UTC, using the start time
 // to find the correct epoch.
 //
-func (rtcm *RTCM) GetUTCFromGPSTime(gpsTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromGPSTime(gpsTime uint) time.Time {
 	// The GPS week starts at midnight at the start of Sunday
 	// but GPS time is ahead of UTC by a few leap seconds, so in
 	// UTC terms the week starts on Saturday a few seconds before
@@ -948,11 +831,11 @@ func (rtcm *RTCM) GetUTCFromGPSTime(gpsTime uint) time.Time {
 
 // GetUTCFromGlonassTime converts a Glonass epoch time to UTC using
 // the start time to give the correct Glonass epoch.
-func (rtcm *RTCM) GetUTCFromGlonassTime(epochTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromGlonassTime(timestamp uint) (time.Time, error) {
 	// The Glonass epoch time is two bit fields giving the day and
 	// milliseconds since the start of the day.  The day is 0: Sunday,
-	// 1: Monday and so on, but three hours ahead of UTC.  The Glonass
-	// day starts at midnight.
+	// 1: Monday ... 6: Saturday, 7: invalid.  The Glonass day starts
+	// at midnight in the Moscow timezone, so three hours ahead of UTC.
 	//
 	// day = 1, glonassTime = 1 is 1 millisecond into Russian Monday,
 	// which in UTC is Sunday 21:00:00 plus one millisecond.
@@ -968,8 +851,16 @@ func (rtcm *RTCM) GetUTCFromGlonassTime(epochTime uint) time.Time {
 	// will be producing RTCM3 messages something like once per second, so
 	// this assumption is safe.)
 
-	day, millis := ParseGlonassEpochTime(epochTime)
+	var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
 
+	day, millis := ParseGlonassTimeStamp(timestamp)
+
+	if day == glonassInvalidDay {
+		// The day value indicates an invalid time stamp.
+		return zeroTimeValue, errors.New("invalid day")
+	}
+
+	// The timestamp is valid.
 	if day != rtcm.previousGlonassDay {
 		// The day has rolled over.
 		rtcm.startOfThisGlonassDay =
@@ -980,21 +871,21 @@ func (rtcm *RTCM) GetUTCFromGlonassTime(epochTime uint) time.Time {
 	}
 
 	offset := time.Duration(millis) * time.Millisecond
-	return rtcm.startOfThisGlonassDay.Add(offset)
+	return rtcm.startOfThisGlonassDay.Add(offset), nil
 }
 
 // GetUTCFromGalileoTime converts a Galileo time to UTC, using the same epoch
 // as the start time.
 //
-func (rtcm *RTCM) GetUTCFromGalileoTime(galileoTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromGalileoTime(galileoTime uint) time.Time {
 	// Galileo time is currently (Jan 2020) the same as GPS time.
-	return rtcm.GetUTCFromGPSTime(galileoTime)
+	return rtcm.getUTCFromGPSTime(galileoTime)
 }
 
 // GetUTCFromBeidouTime converts a Baidou time to UTC, using the Beidou
 // epoch given by the start time.
 //
-func (rtcm *RTCM) GetUTCFromBeidouTime(epochTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromBeidouTime(epochTime uint) time.Time {
 	// BeiDou - the first few seconds of UTC Sunday are in one week,
 	// then the epoch time rolls over and all subsequent times are
 	// in the next week.
@@ -1014,7 +905,7 @@ func (rtcm *RTCM) GetUTCFromBeidouTime(epochTime uint) time.Time {
 //
 func GetStartOfLastSundayUTC(now time.Time) time.Time {
 	// Convert the time to UTC, which may change the day.
-	now = now.In(locationUTC)
+	now = now.In(utils.LocationUTC)
 
 	// Crank the day back to Sunday.  (It may already be there.)
 	for {
@@ -1024,73 +915,112 @@ func GetStartOfLastSundayUTC(now time.Time) time.Time {
 		now = now.AddDate(0, 0, -1)
 	}
 
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, locationUTC)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, utils.LocationUTC)
 }
 
 // DisplayMessage takes the given Message object and returns it
 // as a readable string.
 //
-func (handler *RTCM) DisplayMessage(message *RTCM3Message) string {
+func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 
-	if message.MessageType == NonRTCMMessage {
-		return fmt.Sprintf("not RTCM, %d bytes, %s\n%s\n",
-			len(message.RawData), message.Warning, hex.Dump(message.RawData))
+	display := fmt.Sprintf("message type %d, frame length %d %s\n",
+		message.MessageType, len(message.RawData), message.Status())
+
+	display += hex.Dump(message.RawData) + "\n"
+
+	if len(message.ErrorMessage) > 0 {
+		display += message.ErrorMessage + "\n"
 	}
-
-	status := ""
-	if message.Valid {
-		status = "valid"
-	} else {
-		if message.Complete {
-			status = "complete "
-		} else {
-			status = "incomplete "
-		}
-		if message.CRCValid {
-			status += "CRC check passed"
-		} else {
-			status += "CRC check failed"
-		}
-	}
-
-	leader := fmt.Sprintf("message type %d, frame length %d %s %s\n",
-		message.MessageType, len(message.RawData), status, message.Warning)
-	leader += fmt.Sprintf("%s\n", hex.Dump(message.RawData))
 
 	if !message.Valid {
-		return leader
+		return display
 	}
 
-	if !message.displayable() {
-		return leader
+	if message.MessageType == utils.NonRTCMMessage {
+		return display
 	}
 
+	readable := PrepareForDisplay(message)
+
+	// In some cases the displayable is a simple string.
+	m, ok := readable.(string)
+	if ok {
+		display += m + "\n"
+		return display
+	}
+
+	if !message.Valid {
+		if len(message.ErrorMessage) > 0 {
+			display += message.ErrorMessage + "\n"
+		} else {
+			display += "invalid message\n"
+		}
+		return display
+	}
+
+	// The message is a set of broken out fields.  Create a readable version.  If that reveals
+	// an error, the Valid flag will be unset and a warning added to the message.
 	switch {
 
 	case message.MessageType == 1005:
-		m, ok := message.PrepareForDisplay(handler).(*message1005.Message)
+		m, ok := readable.(*message1005.Message)
 		if !ok {
-			return ("expected the readable message to be *Message1005\n")
+			// Internal error:  the message says the data are a type 1005 (base position)
+			// message but when decoded they are not.
+			display += "expected the readable message to be *Message1005\n"
+			if len(message.ErrorMessage) > 0 {
+				display += message.ErrorMessage + "\n"
+			}
+			break
 		}
-		return leader + m.String()
+		display += m.String()
 
-	case message.MSM4():
-		m, ok := message.PrepareForDisplay(handler).(*msm4message.Message)
+	case utils.MSM4(message.MessageType):
+		m, ok := readable.(*msm4Message.Message)
 		if !ok {
-			return ("expected the readable message to be an MSM4\n")
+			// Internal error:  the message says the data are an MSM4
+			// message but when decoded they are not.
+			display += "expected the readable message to be an MSM4\n"
+			if len(message.ErrorMessage) > 0 {
+				display += message.ErrorMessage + "\n"
+			}
+			break
 		}
-		return leader + m.String()
+		display += m.String()
 
-	case message.MSM7():
-		m, ok := message.PrepareForDisplay(handler).(*msm7message.Message)
+	case utils.MSM7(message.MessageType):
+		m, ok := readable.(*msm7Message.Message)
 		if !ok {
-			return ("expected the readable message to be an MSM7\n")
+			// Internal error:  the message says the data are an MSM4
+			// message but when decoded they are not.
+			display += "expected the readable message to be an MSM7\n"
+			if len(message.ErrorMessage) > 0 {
+				display += message.ErrorMessage + "\n"
+			}
+			break
 		}
-		return leader + m.String()
+		display += m.String()
 
-	default:
-		return leader + "\n"
+		// The default case can't be reached - Readable is only set if the
+		// rtcm handler's PrepareForDisplay has been called.  That calls
+		// Analyse which sets Readable field to an error message if it can't
+		// display the message.  That case was taken care of earlier.
+		//
+		// default:
+		// 	display += "the message is not displayable\n"
 	}
+
+	return display
+}
+
+// PrepareForDisplay creates and returns the readable component of the message
+// ready for String to display it.
+func PrepareForDisplay(message *rtcm3.Message) interface{} {
+	// Do this at most once for each message.
+	if message.Readable == nil {
+		Analyse(message)
+	}
+	return message.Readable
 }
 
 // CheckCRC checks the CRC of a message frame.
@@ -1120,10 +1050,10 @@ func CheckCRC(frame []byte) bool {
 	return true
 }
 
-// ParseGlonassEpochTime separates out the two parts of a Glonass
+// ParseGlonassTimeStamp separates out the two parts of a Glonass
 // epoch time value -3/27 day/milliseconds from start of day.
 //
-func ParseGlonassEpochTime(epochTime uint) (uint, uint) {
+func ParseGlonassTimeStamp(epochTime uint) (uint, uint) {
 	// fmt.Printf("ParseGlonassEpochTime %x\n", epochTime)
 	day := (epochTime & glonassDayBitMask) >> 27
 	millis := epochTime &^ glonassDayBitMask

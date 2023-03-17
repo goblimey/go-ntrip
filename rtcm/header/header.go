@@ -4,7 +4,6 @@ package header
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
@@ -12,7 +11,7 @@ import (
 // Field lengths in bits.
 const lenMessageType = 12
 const lenStationID = 12
-const lenEpochTime = 30
+const lenTimeStamp = 30
 const lenMultipleMessageFlag = 1
 const lenIssueOfDataStation = 3
 const lenSessionTransmissionTime = 7
@@ -29,15 +28,11 @@ const maxLengthOfCellMask = 64
 
 // The minimum length of an MSM header
 const minBitsInHeader = lenMessageType + lenStationID +
-	lenEpochTime + lenMultipleMessageFlag + lenIssueOfDataStation +
+	lenTimeStamp + lenMultipleMessageFlag + lenIssueOfDataStation +
 	lenSessionTransmissionTime + lenClockSteeringIndicator +
 	lenExternalClockIndicator + lenGNSSDivergenceFreeSmoothingIndicator +
 	lenGNSSSmoothingInterval + lenSatelliteMask +
 	lenSignalMask
-
-// dateLayout defines the layout of dates when they are displayed.  It
-// produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone".
-const dateLayout = "2006-01-02 15:04:05.999 -0700 MST"
 
 // Header holds the header for MSM Messages.  Message types 1074,
 // 1077, 1084, 1087 etc have an MSM header at the start.
@@ -61,13 +56,13 @@ type Header struct {
 	// MessageType - uint12 - one of 1074, 1077 etc.
 	MessageType int
 
-	// Constellation - one of "GPS, "BeiDou" etc.
+	// Constellation - one of "GPS, "Beidou" etc.
 	Constellation string
 
 	// StationID - uint12.
 	StationID uint
 
-	// EpochTime - uint30.
+	// Timestamp - uint30.
 	// The structure of the 30 bits varies with the constellation.  For GPS
 	// and Galileo it's the number of milliseconds from the start of the
 	// current GPS week, which starts at midnight GMT at the start of Sunday
@@ -76,13 +71,10 @@ type Header struct {
 	// top three bits are the day of the week (0 is Sunday) and the rest are
 	// milliseconds from the start of the day in the Moscow time zone.
 	//
-	EpochTime uint
-
-	// The Epoch time translated to a time in the UTC timezone.
-	UTCTime time.Time
+	Timestamp uint
 
 	// MultipleMessage - bit(1) - true if more MSMs follow for this
-	// constellation, station and epoch time.
+	// constellation, station and timestamp.
 	MultipleMessage bool
 
 	// IssueOfDataStation - uint3. (Possibly the position of the message in a
@@ -163,7 +155,7 @@ type Header struct {
 func New(
 	messageType int,
 	stationID uint,
-	epochTime uint,
+	timestamp uint,
 	multipleMessage bool,
 	issueOfDataStation uint,
 	sessionTransmissionTime uint,
@@ -190,7 +182,7 @@ func New(
 		MessageType:                          messageType,
 		Constellation:                        constellation,
 		StationID:                            stationID,
-		EpochTime:                            epochTime,
+		Timestamp:                            timestamp,
 		MultipleMessage:                      multipleMessage,
 		IssueOfDataStation:                   issueOfDataStation,
 		SessionTransmissionTime:              sessionTransmissionTime,
@@ -210,36 +202,22 @@ func New(
 	return &header
 }
 
-// NewWithMessageType creates an MSM header with the message type set (and the
-// constellation, which is derived from the message type).
-func NewWithMessageType(messageType int) *Header {
-
-	constellation := getConstellation(messageType)
-
-	// Create and return the header.
-	header := Header{MessageType: messageType, Constellation: constellation}
-
-	return &header
-}
-
 // String return a text version of the MSMHeader.
 func (header *Header) String() string {
 
 	title := header.getTitle()
 
-	line := fmt.Sprintf("type %d %s %s\n",
-		header.MessageType, header.Constellation, title)
+	line := fmt.Sprintf("type %d %s\n", header.MessageType, title)
 
-	timeStr := header.UTCTime.Format(dateLayout)
-	line += fmt.Sprintf("time %s (epoch time %d)\n", timeStr, header.EpochTime)
 	mode := "single"
 	if header.MultipleMessage {
 		mode = "multiple"
 	}
-	line += fmt.Sprintf("stationID %d, %s message, sequence number %d, session transmit time %d\n",
-		header.StationID, mode, header.IssueOfDataStation, header.SessionTransmissionTime)
-	line += fmt.Sprintf("clock steering %d, external clock %d\n",
-		header.ClockSteeringIndicator, header.ExternalClockSteeringIndicator)
+	line += fmt.Sprintf("stationID %d, timestamp %d, %s message, sequence number %d\n",
+		header.StationID, header.Timestamp, mode, header.IssueOfDataStation)
+	line += fmt.Sprintf("session transmit time %d, clock steering %d, external clock %d\n",
+		header.SessionTransmissionTime, header.ClockSteeringIndicator,
+		header.ExternalClockSteeringIndicator)
 	line += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
 		header.GNSSDivergenceFreeSmoothingIndicator, header.GNSSSmoothingInterval)
 	line += fmt.Sprintf("%d satellites, %d signal types, %d signals\n",
@@ -251,45 +229,44 @@ func (header *Header) String() string {
 // getTitle is a helper for Display.  It gets the title for the display.
 func (header *Header) getTitle() string {
 
-	const titleMSM4 = "Full Pseudoranges and PhaseRanges plus CNR"
-	const titleMSM7 = "Full Pseudoranges and PhaseRanges plus CNR (high resolution)"
+	const titleMSM4 = " Full Pseudoranges and PhaseRanges plus CNR"
+	const titleMSM7 = " Full Pseudoranges and PhaseRanges plus CNR (high resolution)"
 
-	var title string
+	constellation := getConstellation(header.MessageType)
 
 	switch header.MessageType {
-	case 1074:
-		title = titleMSM4
-	case 1077:
-		title = titleMSM7
-	case 1084:
-		title = titleMSM4
-	case 1087:
-		title = titleMSM7
-	case 1094:
-		title = titleMSM4
-	case 1097:
-		title = titleMSM7
-	case 1104:
-		title = titleMSM4
-	case 1107:
-		title = titleMSM7
-	case 1114:
-		title = titleMSM4
-	case 1117:
-		title = titleMSM7
-	case 1124:
-		title = titleMSM4
-	case 1127:
-		title = titleMSM7
-	case 1134:
-		title = titleMSM4
-	case 1137:
-		title = titleMSM7
+	case utils.MessageTypeMSM4GPS:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7GPS:
+		return constellation + titleMSM7
+	case utils.MessageTypeMSM4Glonass:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7Glonass:
+		return constellation + titleMSM7
+	case utils.MessageTypeMSM4Galileo:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7Galileo:
+		return constellation + titleMSM7
+	case utils.MessageTypeMSM4SBAS:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7SBAS:
+		return constellation + titleMSM7
+	case utils.MessageTypeMSM4QZSS:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7QZSS:
+		return constellation + titleMSM7
+	case utils.MessageTypeMSM4Beidou:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7Beidou:
+		return constellation + titleMSM7
+	case utils.MessageTypeMSM4NavicIrnss:
+		return constellation + titleMSM4
+	case utils.MessageTypeMSM7NavicIrnss:
+		return constellation + titleMSM7
 	default:
-		title = "Unknown MSM type"
+		// In this case constellation is set to "unknown constellation"
+		return constellation
 	}
-
-	return title
 }
 
 // GetMSMHeader extracts the header from an MSM message (MSM4 or MSM7).
@@ -367,8 +344,8 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 	stationID := uint(utils.GetBitsAsUint64(bitStream, pos, lenStationID))
 	pos += lenStationID
 
-	epochTime := uint(utils.GetBitsAsUint64(bitStream, pos, lenEpochTime))
-	pos += lenEpochTime
+	timestamp := uint(utils.GetBitsAsUint64(bitStream, pos, lenTimeStamp))
+	pos += lenTimeStamp
 
 	mm := utils.GetBitsAsUint64(bitStream, pos, lenMultipleMessageFlag)
 	multipleMessage := (mm == 1)
@@ -464,7 +441,7 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 	shift := 64 - lenCellMaskBits
 	cellMask = cellMask << shift
 
-	header := New(messageType, stationID, epochTime, multipleMessage, issueOfDataStation,
+	header := New(messageType, stationID, timestamp, multipleMessage, issueOfDataStation,
 		sessionTransmissionTime, clockSteeringIndicator, externalClockIndicator,
 		gnssDivergenceFreeSmoothingIndicator, gnssSmoothingInterval,
 		satelliteMask, signalMask, cellMask)
@@ -492,33 +469,33 @@ func getMSMType(bitStream []byte) (int, uint, error) {
 
 	// Check that the message type is an MSM.
 	switch messageType {
-	case 1074: // GPS
+	case utils.MessageTypeMSM4GPS: // GPS
 		break
-	case 1077:
+	case utils.MessageTypeMSM7GPS:
 		break
-	case 1084: // Glonass
+	case utils.MessageTypeMSM4Glonass:
 		break
-	case 1087:
+	case utils.MessageTypeMSM7Glonass:
 		break
-	case 1094:
+	case utils.MessageTypeMSM4Galileo:
 		break
-	case 1097:
+	case utils.MessageTypeMSM7Galileo:
 		break
-	case 1104: // SBAS
+	case utils.MessageTypeMSM4SBAS:
 		break
-	case 1107:
+	case utils.MessageTypeMSM7SBAS:
 		break
-	case 1114: // QZSS
+	case utils.MessageTypeMSM4QZSS:
 		break
-	case 1117:
+	case utils.MessageTypeMSM7QZSS:
 		break
-	case 1124: // Beidou
+	case utils.MessageTypeMSM4Beidou:
 		break
-	case 1127:
+	case utils.MessageTypeMSM7Beidou:
 		break
-	case 1134: // NavIC/IRNSS
+	case utils.MessageTypeMSM4NavicIrnss:
 		break
-	case 1137:
+	case utils.MessageTypeMSM7NavicIrnss:
 		break
 	default:
 		em := fmt.Sprintf("message type %d is not an MSM4 or an MSM7", messageType)
@@ -535,37 +512,37 @@ func getConstellation(messageType int) string {
 	var constellation string
 
 	switch messageType {
-	case 1074:
+	case utils.MessageTypeMSM4GPS:
 		constellation = "GPS"
-	case 1084:
-		constellation = "GLONASS"
-	case 1094:
+	case utils.MessageTypeMSM4Glonass:
+		constellation = "Glonass"
+	case utils.MessageTypeMSM4Galileo:
 		constellation = "Galileo"
-	case 1104:
+	case utils.MessageTypeMSM4SBAS:
 		constellation = "SBAS"
-	case 1114:
+	case utils.MessageTypeMSM4QZSS:
 		constellation = "QZSS"
-	case 1124:
+	case utils.MessageTypeMSM4Beidou:
 		constellation = "BeiDou"
-	case 1134:
+	case utils.MessageTypeMSM4NavicIrnss:
 		constellation = "NavIC/IRNSS"
-	case 1077:
+	case utils.MessageTypeMSM7GPS:
 		constellation = "GPS"
-	case 1087:
-		constellation = "GLONASS"
-	case 1097:
+	case utils.MessageTypeMSM7Glonass:
+		constellation = "Glonass"
+	case utils.MessageTypeMSM7Galileo:
 		constellation = "Galileo"
-	case 1107:
+	case utils.MessageTypeMSM7SBAS:
 		constellation = "SBAS"
-	case 1117:
+	case utils.MessageTypeMSM7QZSS:
 		constellation = "QZSS"
-	case 1127:
+	case utils.MessageTypeMSM7Beidou:
 		constellation = "BeiDou"
-	case 1137:
+	case utils.MessageTypeMSM7NavicIrnss:
 		constellation = "NavIC/IRNSS"
 
 	default:
-		constellation = "unknown"
+		constellation = "unknown constellation"
 	}
 
 	return constellation

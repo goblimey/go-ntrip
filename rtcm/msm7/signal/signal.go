@@ -140,34 +140,27 @@ func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDel
 
 // String returns a readable version of a signal cell.
 func (cell *Cell) String() string {
-	var rangeM string
+	var rangeMillisecs string
+	var phaseRangeMillisecs string
 	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
-		rangeM = "invalid"
+		rangeMillisecs = "invalid"
+		phaseRangeMillisecs = "invalid"
 	} else {
-		r := cell.RangeInMetres()
-		rangeM = fmt.Sprintf("%.3f", r)
+		rangeMillisecs = fmt.Sprintf("%.3f", cell.RangeInMetres())
+		phaseRangeMillisecs = fmt.Sprintf("%.3f", cell.PhaseRange())
 	}
 
-	var phaseRange string
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
-		phaseRange = "invalid"
-	} else {
-		pr := cell.PhaseRange()
-		phaseRange = fmt.Sprintf("%.3f", pr)
-	}
-
-	var phaseRangeRate string
+	var phaseRangeRateMillisecs string
 	if cell.PhaseRangeRateFromSatelliteCell == InvalidPhaseRangeRate {
-		phaseRangeRate = "invalid"
+		phaseRangeRateMillisecs = "invalid"
 	} else {
-		prr := cell.PhaseRangeRate()
-		phaseRangeRate = fmt.Sprintf("%.3f", prr)
+		phaseRangeRateMillisecs = fmt.Sprintf("%.3f", cell.PhaseRangeRate())
 	}
 
 	return fmt.Sprintf("%2d %2d {%s, %s, %d, %v, %d, %s}",
-		cell.SatelliteID, cell.SignalID, rangeM, phaseRange,
+		cell.SatelliteID, cell.SignalID, rangeMillisecs, phaseRangeMillisecs,
 		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
-		cell.CarrierToNoiseRatio, phaseRangeRate)
+		cell.CarrierToNoiseRatio, phaseRangeRateMillisecs)
 }
 
 // GetAggregateRange takes the range values from an MSM7 signal cell (including some

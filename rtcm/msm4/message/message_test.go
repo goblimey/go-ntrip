@@ -3,11 +3,11 @@ package message
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/msm4/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/msm4/signal"
+	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 
 	"github.com/kylelemons/godebug/diff"
@@ -39,7 +39,7 @@ const wantHalfCycleAmbiguity = true
 const wantCNR = 15
 const wantWavelength = 16.0
 
-// createmessage is a helper function.  It creates a message with known contents.
+// createMessage is a helper function.  It creates a message with known contents.
 func createMessage() *Message {
 	h := header.New(wantMessageType, wantStationID, wantEpochTime, wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator,
@@ -67,8 +67,8 @@ func TestNew(t *testing.T) {
 		t.Errorf("want %d got %d", wantStationID, gotMessage.Header.StationID)
 	}
 
-	if gotMessage.Header.EpochTime != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotMessage.Header.EpochTime)
+	if gotMessage.Header.Timestamp != wantEpochTime {
+		t.Errorf("want %d got %d", wantEpochTime, gotMessage.Header.Timestamp)
 	}
 
 	if !gotMessage.Header.MultipleMessage {
@@ -78,8 +78,8 @@ func TestNew(t *testing.T) {
 	if gotMessage.Header.IssueOfDataStation != wantIssue {
 		t.Errorf("want %d got %d", wantIssue, gotMessage.Header.IssueOfDataStation)
 	}
-	if gotMessage.Header.EpochTime != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotMessage.Header.EpochTime)
+	if gotMessage.Header.Timestamp != wantEpochTime {
+		t.Errorf("want %d got %d", wantEpochTime, gotMessage.Header.Timestamp)
 	}
 
 	if gotMessage.Header.ClockSteeringIndicator != wantClockSteeringIndicator {
@@ -188,11 +188,11 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// TstString checks the String method.
 func TestString(t *testing.T) {
 	const resultTemplateComplete = `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-time 2023-02-14 01:02:03.004 +0000 UTC (epoch time 2)
-stationID 1, multiple message, sequence number 3, session transmit time 4
-clock steering 5, external clock 6
+stationID 1, timestamp 2, multiple message, sequence number 3
+session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
 2 satellites, 3 signal types, 6 signals
 1 Satellites
@@ -204,35 +204,27 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
 `
 
 	const wantIncomplete = `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-time 2023-02-14 01:02:03.004 +0000 UTC (epoch time 2)
-stationID 1, multiple message, sequence number 3, session transmit time 4
-clock steering 5, external clock 6
+stationID 1, timestamp 2, multiple message, sequence number 3
+session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
 2 satellites, 3 signal types, 6 signals
 No Satellites
 No Signals
 `
+	// completeMessage has a header, satellites and Signals.
+	completeMessage := createMessage()
 
-	locationUTC, _ := time.LoadLocation("UTC")
-	timestamp :=
-		time.Date(2023, time.February, 14, 1, 2, 3, int(4*time.Millisecond), locationUTC)
-
-	// MesageComplete has a header, UTCTime, satellites and Signals.
-	messageComplete := createMessage()
-	messageComplete.Header.UTCTime = timestamp
-
-	// messageIncomplete has just a header and UTCTime
-	messageIncomplete := createMessage()
-	messageIncomplete.Satellites = nil
-	messageIncomplete.Signals = nil
-	messageIncomplete.Header.UTCTime = timestamp
+	// incompleteMessage has just a header
+	incompleteMessage := createMessage()
+	incompleteMessage.Satellites = nil
+	incompleteMessage.Signals = nil
 
 	// The expected approximate range given by the satellite cell.
-	approxRange := utils.GetApproxRange(wantRangeWhole, wantRangeFractional)
+	approxRange := utils.GetApproxRangeMetres(wantRangeWhole, wantRangeFractional)
 
-	rangefromSignal := messageComplete.Signals[0][0].RangeInMetres()
+	rangefromSignal := completeMessage.Signals[0][0].RangeInMetres()
 
-	phaseRangefromSignal := messageComplete.Signals[0][0].PhaseRange()
+	phaseRangefromSignal := completeMessage.Signals[0][0].PhaseRange()
 
 	wantComplete :=
 		fmt.Sprintf(resultTemplateComplete, approxRange, rangefromSignal, phaseRangefromSignal)
@@ -242,8 +234,8 @@ No Signals
 		message     *Message
 		want        string
 	}{
-		{"complete", messageComplete, wantComplete},
-		{"incomplete", messageIncomplete, wantIncomplete},
+		{"complete", completeMessage, wantComplete},
+		{"incomplete", incompleteMessage, wantIncomplete},
 	}
 
 	for _, td := range testData {
@@ -257,35 +249,10 @@ No Signals
 
 func TestGetMessage(t *testing.T) {
 
-	bitStream := []byte{
-		// The header is 185 bits long, with 2 cell mask bits.
-		// The type is 1074, Station ID is 1:
-		// 0: 1000 0110 010|0000 0000 0001
-		0x43, 0x20, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00,
-		//                   64 bit satellite mask with satellite 4 marked.
-		// 64: 000|0 0|0|00   0|000 1000   0000 0000   0000 0000 ...
-		0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		//               32 bit signal mask with signals 2 and 16 marked.
-		// 0000 0000   0|010 0000   0000 0000   1000 0000
-		/* 128 */ 0x00, 0x20, 0x00, 0x80,
-		//
-		//                    2 bit cell mask
-		//                       Satellite cell - whole 1, frac 0.25
-		//                                                   Signal cell
-		// 160: 0000 0000   0|11|0 0000  001|0 1000   0000 0|000
-		0x00, 0x60, 0x28, 0x00,
-		// 192: 0100 0000   0000|0001   0000 0000   000|0 0010
-		0x40, 0x01, 0x00, 0x02,
-		// 224: 0000 0000   0000 0000  0|100 0000   0000 0000
-		0x00, 0x00, 0x40, 0x00,
-		// 276: 0000 000|0   011|0 100|0|  1|000 111|0  1000 0|000
-		0x00, 0x68, 0x8e, 0x80,
-	}
-
 	const wantWholeMillis = 1
 	const wantFractionalMillis = 0x100 // 0001 0000 0000
 
-	message, err := GetMessage(bitStream)
+	message, err := GetMessage(testdata.MessageType1074)
 
 	if err != nil {
 		t.Error(err)
@@ -443,5 +410,46 @@ func TestGetMessage(t *testing.T) {
 	if message.Signals[0][1].CarrierToNoiseRatio != 16 {
 		t.Errorf("want 16 got %d",
 			message.Signals[0][1].CarrierToNoiseRatio)
+	}
+}
+
+// TestGetMessageWithErrors checks that GetMessage handles errors correctly.
+func TestGetMessageWithErrors(t *testing.T) {
+	// GetMessage responds with an error message at various points.
+
+	var testData = []struct {
+		Description string
+		BitStream   []byte
+		Want        string
+	}{
+		{
+			"header too short", testdata.MessageType1074[:21],
+			"bitstream is too short for an MSM header - got 168 bits, expected at least 169",
+		},
+		{
+			"satellite cells too short", testdata.MessageType1074[:23],
+			"overrun - not enough data for 1 MSM4 satellite cells - need 18 bits, got 13",
+		},
+		{
+			"Signal cells too short", testdata.MessageType1074[:30],
+			"overrun - want 2 MSM4 signals, got 1",
+		},
+		{
+			"not MSM4", testdata.Message1077,
+			"message type 1077 is not an MSM4",
+		},
+	}
+	for _, td := range testData {
+		gotMessage, gotError := GetMessage(td.BitStream)
+		if gotMessage != nil {
+			t.Error("On error, the message should be nil")
+		}
+		if gotError == nil {
+			t.Error("expected an error")
+		} else {
+			if gotError.Error() != td.Want {
+				t.Errorf("%s:\nwant %s\n got %s", td.Description, td.Want, gotError.Error())
+			}
+		}
 	}
 }

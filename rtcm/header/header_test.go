@@ -3,9 +3,9 @@ package header
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
+	"github.com/kylelemons/godebug/diff"
 )
 
 const maxMessageType = 4095 // the message type is a 12-bit unsigned quantity.
@@ -40,8 +40,8 @@ func TestNew(t *testing.T) {
 		t.Errorf("want %d got %d", wantStationID, gotHeader.StationID)
 	}
 
-	if gotHeader.EpochTime != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotHeader.EpochTime)
+	if gotHeader.Timestamp != wantEpochTime {
+		t.Errorf("want %d got %d", wantEpochTime, gotHeader.Timestamp)
 	}
 
 	if !gotHeader.MultipleMessage {
@@ -51,8 +51,8 @@ func TestNew(t *testing.T) {
 	if gotHeader.IssueOfDataStation != wantIssue {
 		t.Errorf("want %d got %d", wantIssue, gotHeader.IssueOfDataStation)
 	}
-	if gotHeader.EpochTime != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotHeader.EpochTime)
+	if gotHeader.Timestamp != wantEpochTime {
+		t.Errorf("want %d got %d", wantEpochTime, gotHeader.Timestamp)
 	}
 
 	if gotHeader.ClockSteeringIndicator != wantClockSteeringIndicator {
@@ -213,14 +213,14 @@ func TestGetConstellation(t *testing.T) {
 		WantConstellation string
 	}{
 		{1074, "GPS"},
-		{1084, "GLONASS"},
+		{1084, "Glonass"},
 		{1094, "Galileo"},
 		{1104, "SBAS"},
 		{1114, "QZSS"},
 		{1124, "BeiDou"},
 		{1134, "NavIC/IRNSS"},
 		{1077, "GPS"},
-		{1087, "GLONASS"},
+		{1087, "Glonass"},
 		{1097, "Galileo"},
 		{1107, "SBAS"},
 		{1117, "QZSS"},
@@ -228,21 +228,21 @@ func TestGetConstellation(t *testing.T) {
 		{1137, "NavIC/IRNSS"},
 
 		// These message numbers are not for MSM messages and provoke an error response.
-		{0, "unknown"},
-		{1, "unknown"},
-		{1023, "unknown"},
-		{1138, "unknown"},
-		{1073, "unknown"},
-		{1075, "unknown"},
-		{1076, "unknown"},
+		{0, "unknown constellation"},
+		{1, "unknown constellation"},
+		{1023, "unknown constellation"},
+		{1138, "unknown constellation"},
+		{1073, "unknown constellation"},
+		{1075, "unknown constellation"},
+		{1076, "unknown constellation"},
 
-		{maxMessageType, "unknown"},
+		{maxMessageType, "unknown constellation"},
 	}
 
 	for _, td := range testData {
 		constellation := getConstellation(td.MessageType)
 		if td.WantConstellation != constellation {
-			t.Errorf("%d: want constellation %s, got %s",
+			t.Errorf("%d: want %s, got %s",
 				td.MessageType, td.WantConstellation, constellation)
 		}
 	}
@@ -316,7 +316,7 @@ func TestGetMSMHeader(t *testing.T) {
 		MessageType:                          1077,
 		Constellation:                        "GPS",
 		StationID:                            1,
-		EpochTime:                            2,
+		Timestamp:                            2,
 		MultipleMessage:                      true,
 		IssueOfDataStation:                   3,
 		SessionTransmissionTime:              4,
@@ -351,9 +351,9 @@ func TestGetMSMHeader(t *testing.T) {
 			header.StationID, wantHeader.StationID)
 	}
 
-	if header.EpochTime != wantHeader.EpochTime {
+	if header.Timestamp != wantHeader.Timestamp {
 		t.Errorf("got epoch time %d, want %d",
-			header.EpochTime, wantHeader.EpochTime)
+			header.Timestamp, wantHeader.Timestamp)
 	}
 
 	// UTCTime time.Time
@@ -647,28 +647,29 @@ func TestGetMSMHeaderWithCellMaskTooLong(t *testing.T) {
 // TestGetTitle checks that getTitle return the correct title for display.
 func TestGetTitle(t *testing.T) {
 
-	const titleMSM4 = "Full Pseudoranges and PhaseRanges plus CNR"
-	const titleMSM7 = "Full Pseudoranges and PhaseRanges plus CNR (high resolution)"
-	const titleError = "Unknown MSM type"
+	const titleError = "unknown constellation"
 
 	var testData = []struct {
-		MessageType int
-		WantTitle   string
+		messageType int
+		want        string
 	}{
-		{1074, titleMSM4},
-		{1084, titleMSM4},
-		{1094, titleMSM4},
-		{1104, titleMSM4},
-		{1114, titleMSM4},
-		{1124, titleMSM4},
-		{1134, titleMSM4},
-		{1077, titleMSM7},
-		{1087, titleMSM7},
-		{1097, titleMSM7},
-		{1107, titleMSM7},
-		{1117, titleMSM7},
-		{1127, titleMSM7},
-		{1137, titleMSM7},
+		{0, titleError},
+		{1137, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+
+		{1074, "GPS Full Pseudoranges and PhaseRanges plus CNR"},
+		{1084, "Glonass Full Pseudoranges and PhaseRanges plus CNR"},
+		{1094, "Galileo Full Pseudoranges and PhaseRanges plus CNR"},
+		{1104, "SBAS Full Pseudoranges and PhaseRanges plus CNR"},
+		{1114, "QZSS Full Pseudoranges and PhaseRanges plus CNR"},
+		{1124, "BeiDou Full Pseudoranges and PhaseRanges plus CNR"},
+		{1134, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR"},
+		{1077, "GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1087, "Glonass Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1097, "Galileo Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1107, "SBAS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1117, "QZSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1127, "BeiDou Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1137, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 
 		// These message numbers are not for MSM messages
 		{0, titleError},
@@ -682,12 +683,12 @@ func TestGetTitle(t *testing.T) {
 	}
 	for _, td := range testData {
 
-		header := Header{MessageType: td.MessageType}
+		header := Header{MessageType: td.messageType}
 
-		title := header.getTitle()
-		if title != td.WantTitle {
+		got := header.getTitle()
+		if got != td.want {
 			t.Errorf("%d: want title %s, got %s",
-				td.MessageType, td.WantTitle, title)
+				td.messageType, td.want, got)
 		}
 	}
 }
@@ -697,22 +698,19 @@ func TestStringSingle(t *testing.T) {
 	const satMask = 3
 	const sigMask = 7
 	const cellMask = 1
-	utc, _ := time.LoadLocation("UTC")
-	utcTime := time.Date(2023, time.February, 14, 1, 2, 3, int(4*time.Millisecond), utc)
 
 	// The result contains "single message" or "multiple message", depending
 	// on the multiple message flag.
 	resultTemplate := `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-time 2023-02-14 01:02:03.004 +0000 UTC (epoch time 3)
-stationID 2, %s message, sequence number 1, session transmit time 5
-clock steering 6, external clock 7
+stationID 2, timestamp 3, %s message, sequence number 1
+session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
 2 satellites, 3 signal types, 6 signals
 `
 
 	var testData = []struct {
-		H          *Header
-		WantString string
+		hdr  *Header
+		want string
 	}{
 		{
 			New(1074, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
@@ -726,12 +724,10 @@ divergence free smoothing true, smoothing interval 9
 	}
 
 	for _, td := range testData {
-		header := td.H
-		header.UTCTime = utcTime
-		got := header.String()
+		got := td.hdr.String()
 
-		if td.WantString != got {
-			t.Errorf("want\n%s\ngot\n%s", td.WantString, got)
+		if td.want != got {
+			t.Errorf(diff.Diff(td.want, got))
 		}
 
 	}

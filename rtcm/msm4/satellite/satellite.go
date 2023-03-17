@@ -65,7 +65,7 @@ func (cell *Cell) String() string {
 		approxRange = "invalid"
 	} else {
 		// The range values are valid.
-		rangeMillis := utils.GetApproxRange(cell.RangeWholeMillis, cell.RangeFractionalMillis)
+		rangeMillis := utils.GetApproxRangeMetres(cell.RangeWholeMillis, cell.RangeFractionalMillis)
 		approxRange = fmt.Sprintf("%.3f", rangeMillis)
 	}
 

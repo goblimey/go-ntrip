@@ -1,9 +1,13 @@
 package message
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/msm7/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/msm7/signal"
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
 // Message is a broken-out version of an MSM7 message.
@@ -86,6 +90,12 @@ func GetMessage(bitStream []byte) (*Message, error) {
 
 	if headerError != nil {
 		return nil, headerError
+	}
+
+	// Sanity check.  The message type must be an MSM7.
+	if !utils.MSM7(header.MessageType) {
+		em := fmt.Sprintf("message type %d is not an MSM7", header.MessageType)
+		return nil, errors.New(em)
 	}
 
 	satellites, fetchSatellitesError :=

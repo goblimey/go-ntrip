@@ -3,7 +3,41 @@ package utils
 
 import (
 	"math"
+	"time"
 )
+
+// dateLayout defines the layout of dates when they are displayed.  It
+// produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone".
+//
+const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
+
+// NonRTCMMessage indicates a Message that does contain RTCM data.  Typically
+// the incoming data stream will contains RTCM3 messages interspersed with data
+// in other formats (NMEA, UBX etc).  Any non-RTCM messages in between two
+// RTCM3 messages will be presented as a single non-RTCM message.
+//
+const NonRTCMMessage = -1
+
+// Message types.
+const MessageType1005 = 1005 // message type 1005 - base position.
+const MessageTypeMSM4GPS = 1074
+const MessageTypeMSM7GPS = 1077
+const MessageTypeMSM4Glonass = 1084
+const MessageTypeMSM7Glonass = 1087
+const MessageTypeMSM4Galileo = 1094
+const MessageTypeMSM7Galileo = 1097
+const MessageTypeMSM4SBAS = 1104
+const MessageTypeMSM7SBAS = 1107
+const MessageTypeMSM4QZSS = 1114
+const MessageTypeMSM7QZSS = 1117
+const MessageTypeMSM4Beidou = 1124
+const MessageTypeMSM7Beidou = 1127
+const MessageTypeMSM4NavicIrnss = 1134
+const MessageTypeMSM7NavicIrnss = 1137
+
+// These are used to idntify MSM messages - values are filled in by init.
+var MSM4MessageTypes map[int]interface{}
+var MSM7MessageTypes map[int]interface{}
 
 // invalidRange is the invalid value for the whole millis range in an MSM4
 // or MSM7 satellite cell.
@@ -91,10 +125,58 @@ const CRCLengthBytes = 3
 // CRCLengthBits is the length of the Cyclic Redundancy check value in bits.
 const CRCLengthBits = CRCLengthBytes * 8
 
+// Locations (timezones) - set up by the init function.
+var LocationUTC *time.Location
+var LocationGMT *time.Location
+var LocationLondon *time.Location
+var LocationMoscow *time.Location
+var LocationParis *time.Location
+
+func init() {
+	LocationUTC, _ = time.LoadLocation("UTC")
+	LocationGMT, _ = time.LoadLocation("GMT")
+	LocationLondon, _ = time.LoadLocation("Europe/London")
+	LocationMoscow, _ = time.LoadLocation("Europe/Moscow")
+	LocationParis, _ = time.LoadLocation("Europe/Paris")
+
+	MSM4MessageTypes = make(map[int]interface{})
+	MSM4MessageTypes[MessageTypeMSM4GPS] = nil
+	MSM4MessageTypes[MessageTypeMSM4Glonass] = nil
+	MSM4MessageTypes[MessageTypeMSM4Galileo] = nil
+	MSM4MessageTypes[MessageTypeMSM4SBAS] = nil
+	MSM4MessageTypes[MessageTypeMSM4QZSS] = nil
+	MSM4MessageTypes[MessageTypeMSM4Beidou] = nil
+	MSM4MessageTypes[MessageTypeMSM4NavicIrnss] = nil
+
+	MSM7MessageTypes = make(map[int]interface{})
+	MSM7MessageTypes[MessageTypeMSM7GPS] = nil
+	MSM7MessageTypes[MessageTypeMSM7Glonass] = nil
+	MSM7MessageTypes[MessageTypeMSM7Galileo] = nil
+	MSM7MessageTypes[MessageTypeMSM7SBAS] = nil
+	MSM7MessageTypes[MessageTypeMSM7GPS] = nil
+	MSM7MessageTypes[MessageTypeMSM7QZSS] = nil
+	MSM7MessageTypes[MessageTypeMSM7Beidou] = nil
+	MSM7MessageTypes[MessageTypeMSM7NavicIrnss] = nil
+}
+
 // GetPhaseRangeLightMilliseconds gets the phase range of the signal in
 // light milliseconds.
 func GetPhaseRangeLightMilliseconds(rangeMilliseconds float64) float64 {
 	return rangeMilliseconds * OneLightMillisecond
+}
+
+func MSM4(messageType int) bool {
+	_, prs := MSM4MessageTypes[messageType]
+	return prs
+}
+
+func MSM7(messageType int) bool {
+	_, prs := MSM7MessageTypes[messageType]
+	return prs
+}
+
+func MSM(messageType int) bool {
+	return MSM4(messageType) || MSM7(messageType)
 }
 
 // GetScaledRange combines the components of the range from an MSM message and
@@ -197,13 +279,18 @@ func GetScaledPhaseRangeRate(wholeMillis, fractionalMillis int) int64 {
 	return aggregatePhaseRangeRate
 }
 
-// GetApproxRange takes an 8-bit whole value and a 10-bit fractional value (in 1/1024 units)
-// merges them and produces the
-// approximate range.
-func GetApproxRange(wholeMillis, fractionalMillis uint) float64 {
+// GetApproxRangeMilliseconds takes an 8-bit whole value and a 10-bit fractional value (in 1/1024 units)
+// merges them and produces the approximate range in milliseconds.
+func GetApproxRangeMilliseconds(wholeMillis, fractionalMillis uint) float64 {
 	const twoToPowerTen = 0x400 // 100 0000 0000
 	scaledRange := wholeMillis<<10 | fractionalMillis
 	return float64(scaledRange) / twoToPowerTen
+}
+
+// GetApproxRangeMetres takes an 8-bit whole value and a 10-bit fractional value (in 1/1024 units)
+func GetApproxRangeMetres(wholeMillis, fractionalMillis uint) float64 {
+	rangeMillis := GetApproxRangeMilliseconds(wholeMillis, fractionalMillis)
+	return rangeMillis * OneLightMillisecond
 }
 
 // GetSignalWavelength returns the carrier wavelength for a signal ID.

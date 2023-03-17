@@ -7,6 +7,10 @@ import (
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
+// This package handles messages of type 1005 (base position).
+const expectedMessageType = 1005
+
+// Lengths of the fields in the bit stream.
 const lenMessageType = 12
 const lenStationID = 12
 const lenITRFRealisationYear = 6
@@ -85,7 +89,7 @@ func (message *Message) String() string {
 	x := float64(message.AntennaRefX) * scaleFactor
 	y := float64(message.AntennaRefY) * scaleFactor
 	z := float64(message.AntennaRefZ) * scaleFactor
-	l2 += fmt.Sprintf("ECEF coords in metres (%8.4f,%8.4f,%8.4f)\n",
+	l2 += fmt.Sprintf("ECEF coords in metres (%.4f, %.4f, %.4f)\n",
 		x, y, z)
 	return l1 + l2
 }
@@ -111,6 +115,14 @@ func GetMessage(bitStream []byte) (*Message, error) {
 
 	messageType := uint(utils.GetBitsAsUint64(bitStream, pos, lenMessageType))
 	pos += lenMessageType
+
+	// Sanity check.
+	if messageType != expectedMessageType {
+		em := fmt.Sprintf("expected message type %d got %d",
+			expectedMessageType, messageType)
+		return nil, errors.New(em)
+	}
+
 	stationID := uint(utils.GetBitsAsUint64(bitStream, pos, lenStationID))
 	pos += lenStationID
 	itrfRealisationYear := uint(utils.GetBitsAsUint64(bitStream, pos, lenITRFRealisationYear))
