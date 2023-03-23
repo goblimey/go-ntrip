@@ -4,12 +4,16 @@
 // approximate (rough) range, the extended satellite information and the
 // rough phase range rate. The rough range is expressed in light milliseconds,
 // ie the  approximate transit time of the signals from the satellite to the
-// GPS device in whole milliseconds and fractional milliseconds.  The real
-// transit time of each signal can be slightly different due to factors such as
-// ionospheric distortion.  Each signal cell contains a small delta which is
-// added to the rough value given here to give the transit time of that signal.
-// The signal data also contains a phase range rate delta value which is used
-// to correct the rough phase rang rate value.
+// GPS device in whole milliseconds and fractional milliseconds.  The 
+// fractional value is ten bits and is in units of 1/1024 seconds.
+//
+// The real transit time of each signal can be slightly different due to factors 
+// such as ionospheric distortion.  Each signal cell contains a small delta which 
+// is added to the rough value given here to give the transit time of that signal.
+// The satellite cell also contains two other delta values.  The phase range 
+// delta is combined with the satellite range value in a similar way to the range
+// delta.  The signal data also contains a phase range rate delta value which is 
+// used to correct the rough phase rang rate value.
 //
 package satellite
 

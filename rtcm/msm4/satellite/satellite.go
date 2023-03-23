@@ -88,12 +88,15 @@ func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites [
 	// It's more convenient to represent these data as a list of cells, one cell per
 	// satellite, so we gather all the values and then create the cells.
 
-	bitsLeft := len(bitStream)*8 - int(startOfSatelliteData)
-	minBits := len(Satellites) * (lenWholeMillis + lenFractionalMillis)
+	// The frame contain the 24-bit leader, the embedded message and the 24-bit CRC.
+	// startOfSatelliteData is the number of bits of the FRAME consumed so far.
+	bitsLeftInFrame := len(bitStream)*8 - int(startOfSatelliteData)
+	bitsLeftInMessage := bitsLeftInFrame - utils.CRCLengthBits
+	bitsNeededForCells := len(Satellites) * (lenWholeMillis + lenFractionalMillis)
 
-	if (((len(bitStream)) * 8) - int(startOfSatelliteData)) <= minBits {
+	if bitsLeftInMessage < bitsNeededForCells {
 		message := fmt.Sprintf("overrun - not enough data for %d MSM4 satellite cells - need %d bits, got %d",
-			len(Satellites), minBits, bitsLeft)
+			len(Satellites), bitsNeededForCells, bitsLeftInMessage)
 		return nil, errors.New(message)
 	}
 

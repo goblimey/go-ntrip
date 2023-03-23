@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm"
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 	"github.com/goblimey/go-tools/dailylogger"
 )
 
@@ -28,11 +29,10 @@ func main() {
 	var channels []chan []byte
 	channels = append(channels, outputLogChan)
 
-	locationUTC, err := time.LoadLocation("UTC")
 	if err != nil {
 		log.Fatal(err)
 	}
-	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
 	rtcmHandler := rtcm.New(startTime, systemLog)
 	rtcm.HandleMessages(rtcmHandler, os.Stdin, channels)
 }

@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
+
+	"github.com/goblimey/go-crc24q/crc24q"
+
 	"github.com/kylelemons/godebug/diff"
 )
 
@@ -92,26 +95,32 @@ func TestGetMSMType(t *testing.T) {
 
 	const errorForMaxMessageType = "message type 4095 is not an MSM4 or an MSM7"
 
+	// The position in the bit stream after the message type has been read.
+	// The message frame contains the leader, the embedded message and the CRC.
+	// The message type is the first field of the message.
+	//
+	const posAfterMessageType = lenMessageType + utils.LeaderLengthBits
+
 	var testData = []struct {
 		MessageType       int
 		WantError         string // "" means the error is nil
 		WantPosition      int
 		WantConstellation string
 	}{
-		{1074, "", lenMessageType, "GPS"},
-		{1084, "", lenMessageType, "GLONASS"},
-		{1094, "", lenMessageType, "Galileo"},
-		{1104, "", lenMessageType, "SBAS"},
-		{1114, "", lenMessageType, "QZSS"},
-		{1124, "", lenMessageType, "BeiDou"},
-		{1134, "", lenMessageType, "NavIC/IRNSS"},
-		{1077, "", lenMessageType, "GPS"},
-		{1087, "", lenMessageType, "GLONASS"},
-		{1097, "", lenMessageType, "Galileo"},
-		{1107, "", lenMessageType, "SBAS"},
-		{1117, "", lenMessageType, "QZSS"},
-		{1127, "", lenMessageType, "BeiDou"},
-		{1137, "", lenMessageType, "NavIC/IRNSS"},
+		{1074, "", posAfterMessageType, "GPS"},
+		{1084, "", posAfterMessageType, "GLONASS"},
+		{1094, "", posAfterMessageType, "Galileo"},
+		{1104, "", posAfterMessageType, "SBAS"},
+		{1114, "", posAfterMessageType, "QZSS"},
+		{1124, "", posAfterMessageType, "BeiDou"},
+		{1134, "", posAfterMessageType, "NavIC/IRNSS"},
+		{1077, "", posAfterMessageType, "GPS"},
+		{1087, "", posAfterMessageType, "GLONASS"},
+		{1097, "", posAfterMessageType, "Galileo"},
+		{1107, "", posAfterMessageType, "SBAS"},
+		{1117, "", posAfterMessageType, "QZSS"},
+		{1127, "", posAfterMessageType, "BeiDou"},
+		{1137, "", posAfterMessageType, "NavIC/IRNSS"},
 
 		// These message numbers are not for MSM messages
 		{0, "message type 0 is not an MSM4 or an MSM7", 0, ""},
@@ -135,12 +144,18 @@ func TestGetMSMType(t *testing.T) {
 
 		// bitStream contains some stuff and a header starting at byte 5 (bit 40).
 		bitStream := []byte{
+			0xd3, 0, 22,
 			byte(tp >> 8), byte(tp & 0xff),
 			0, 0, 0, 0, 0,
 			0, 0, 0, 0, 0,
 			0, 0, 0, 0, 0,
 			0, 0, 0, 0, 0,
 		}
+
+		crc := crc24q.Hash(bitStream)
+		bitStream = append(bitStream, crc24q.HiByte(crc))
+		bitStream = append(bitStream, crc24q.MiByte(crc))
+		bitStream = append(bitStream, crc24q.LoByte(crc))
 
 		gotMSMType, gotPosition, err := getMSMType(bitStream)
 
@@ -186,7 +201,9 @@ func TestGetMSMType(t *testing.T) {
 // correct error message when given a bit stream which is too short.
 func TestGetMSMTypeWithShortBitStream(t *testing.T) {
 	const wantError = "bit stream is 8 bits long, too short for a message type"
-	bitStream := []byte{0xff}
+
+	// The bit stream is a 3-byte header, the embedded message and the CRC.
+	bitStream := []byte{0xd3, 0, 0, 0xff, 0, 0, 0}
 
 	_, _, gotError := getMSMType(bitStream)
 
@@ -285,6 +302,7 @@ func TestGetMSMHeader(t *testing.T) {
 	// The cell mask is 4X3 bits - 111, 110, 000, 001.
 
 	bitStream := []byte{
+		0xd3, 0, 32,
 		0x43, 0x50, 0x01, 0x00, 0x00,
 		0x00, 0x0a, 0xc2, 0x4f, 0x80,
 		0x00, 0x00, 0x00, 0x00, 0x00,
@@ -294,13 +312,18 @@ func TestGetMSMHeader(t *testing.T) {
 		0x00, 0x00,
 	}
 
+	crc := crc24q.Hash(bitStream)
+	bitStream = append(bitStream, crc24q.HiByte(crc))
+	bitStream = append(bitStream, crc24q.MiByte(crc))
+	bitStream = append(bitStream, crc24q.LoByte(crc))
+
 	// The length of the fixed-size fields of the cell mask.
 	const lenHeaderWithoutCellMask = 169
 	// The length of the cell mask (4 satellites, 3 signals).
 	const lenCellMask = 12
 
 	// Expect to be at this position in the bit stream after reading the header.
-	const wantPosition = lenHeaderWithoutCellMask + lenCellMask
+	const wantPosition = utils.LeaderLengthBits + lenHeaderWithoutCellMask + lenCellMask
 
 	// The expected satellite IDs
 	wantSatellites := []uint{60, 61, 62, 64}
@@ -469,12 +492,19 @@ func TestGetMSMHeaderWithShortBitStream(t *testing.T) {
 	// be at least 169 bits in toatl.  This bit stream is 21 bytes, 168 bits,
 	// so just too short.
 	bitStream := []byte{
-		0x43, 0x50, 0x01, 0x00, 0x00,
+		0xd3, 0, 21, // leader
+		0x43, 0x50, 0x01, 0x00, 0x00, // 21-byte embedded message
 		0x00, 0x0a, 0xc2, 0x4f, 0x80,
 		0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x0e, 0x80, 0x00, 0x00,
 		0x15,
 	}
+
+	// Add the CRC to the message frame.
+	crc := crc24q.Hash(bitStream)
+	bitStream = append(bitStream, crc24q.HiByte(crc))
+	bitStream = append(bitStream, crc24q.MiByte(crc))
+	bitStream = append(bitStream, crc24q.LoByte(crc))
 
 	const wantError = "bitstream is too short for an MSM header - got 168 bits, expected at least 169"
 	const wantPos = 0
@@ -520,16 +550,23 @@ func TestGetMSMHeaderWithShortCellMask(t *testing.T) {
 	//               cell Mask:       padding:
 	// 0001 0101   0|111 1100  0000 1|000
 
-	// This one has lost the last byte:
+	// In this version the last byte is missing:
 	bitStream := []byte{
-		0x43, 0x50, 0x01, 0x00, 0x00,
+		0xd3, 0, 22, // Leader
+		0x43, 0x50, 0x01, 0x00, 0x00, // 22 byte message
 		0x00, 0x0a, 0xc2, 0x4f, 0x80,
 		0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x0e, 0x80, 0x00, 0x00,
 		0x15, 0x7c,
 	}
 
-	const wantError = "bitstream is too short for an MSM header with 12 cell mask bits - got 176 bits, expected at least 181"
+	// Add the CRC to the message frame.
+	crc := crc24q.Hash(bitStream)
+	bitStream = append(bitStream, crc24q.HiByte(crc))
+	bitStream = append(bitStream, crc24q.MiByte(crc))
+	bitStream = append(bitStream, crc24q.LoByte(crc))
+
+	const wantError = "bitstream is too short for an MSM header with 12 cell mask bits - got 224 bits, expected at least 229"
 	const wantPos = 0
 
 	gotHeader, gotPos, gotError := GetMSMHeader(bitStream)
@@ -569,6 +606,7 @@ func TestGetMSMHeaderWithWrongMessageType(t *testing.T) {
 
 	// bitStream contains some stuff and a header starting at byte 5 (bit 40).
 	bitStream := []byte{
+		0xd3, 0, 41,
 		byte(tp >> 8), byte(tp & 0xff), 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -576,6 +614,12 @@ func TestGetMSMHeaderWithWrongMessageType(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0,
 	}
+
+	// Add the CRC to the message frame.
+	crc := crc24q.Hash(bitStream)
+	bitStream = append(bitStream, crc24q.HiByte(crc))
+	bitStream = append(bitStream, crc24q.MiByte(crc))
+	bitStream = append(bitStream, crc24q.LoByte(crc))
 
 	const wantError = "message type 1073 is not an MSM4 or an MSM7"
 
@@ -614,6 +658,7 @@ func TestGetMSMHeaderWithCellMaskTooLong(t *testing.T) {
 	// 0000 1|000 .......
 
 	bitStream := []byte{
+		0xd3, 0, 32,
 		0x43, 0x50, 0x01, 0x00, 0x00,
 		0x00, 0x0a,
 		0xc2, 0x4f, 0xbf, 0xf0, 0x00,
@@ -623,11 +668,11 @@ func TestGetMSMHeaderWithCellMaskTooLong(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x00,
 	}
 
-	_ = []byte{
-		0x43, 0x50, 0x01, 0x00, 0x00,
-		0x00, 0x0a, 0xc2, 0x4f, 0x80,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	}
+	// Add the CRC to the message frame.
+	crc := crc24q.Hash(bitStream)
+	bitStream = append(bitStream, crc24q.HiByte(crc))
+	bitStream = append(bitStream, crc24q.MiByte(crc))
+	bitStream = append(bitStream, crc24q.LoByte(crc))
 
 	wantError := "GetMSMHeader: cellMask is 112 bits - expected <= 64"
 

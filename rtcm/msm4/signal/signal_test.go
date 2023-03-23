@@ -99,7 +99,7 @@ func TestGetSignalCells(t *testing.T) {
 			RangeWholeMillis: rangeWhole1, RangeFractionalMillis: rangeFractional1},
 	}
 
-	// The bit stream starts at bit 8 and contains three signal cells - three
+	// The signal cells start at bit 8 and contains three
 	// 15-bit signed range delta (8193, -1, 0), followed by three 22-bit signed
 	// phase range delta (-1, 0, 1), three 4-bit unsigned phase lock time
 	// indicators (0xf, 0, 1), three single bit half-cycle ambiguity indicators
@@ -108,10 +108,12 @@ func TestGetSignalCells(t *testing.T) {
 	// 0100 0000   0000 001|1  1111 1111   1111 11|00   0000 0000   0000 0|111
 	// 1111 1111   1111 1111   111|00000   0000 0000    0000 0000   0|000 0000
 	// 0000 0000   0000 001|1  111|0000|0   001|1|0|1|100001|0000   00|10 0000|
+	// The 24-bit CRC follows.
 	bitStream := []byte{
 		0x00, 0x40, 0x03, 0xff, 0xfc, 0x00, 0x07, 0xff,
 		0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x03, 0xe0,
 		0x36, 0x10, 0x20,
+		0, 0, 0,
 	}
 	const startPosition = 8
 
@@ -206,10 +208,12 @@ func TestGetMS4SignalCellsWithShortBitStream(t *testing.T) {
 	// 0100 0000  0000 0011  1111 1111  1111 1100  0000 0000  0000 0111
 	// 1111 1111  1111 1111  1110 0000  0000 0000  0000 0000  0000 0000
 	// 0000 0000  0000 0011  1110 0000  0011 0110  0001 0000  0010 0000
+	// The 24-bit CRC follows.
 	bitStream := []byte{
 		0x40, 0x03, 0xff, 0xfc, 0x00, 0x07,
 		0xff, 0xff, 0xe0, 0x00, 0x00, 0x00,
 		0x00, 0x03, 0xe0, 0x36, 0x10, 0x20,
+		0, 0, 0,
 	}
 
 	// The test calls provide only part of the bitstream, to provoke an overrun error.
@@ -224,7 +228,7 @@ func TestGetMS4SignalCellsWithShortBitStream(t *testing.T) {
 			"overrun - want 3 MSM4 signals, got 2",
 		},
 		{
-			"multiple", &headerForMultiMessage, bitStream[:5],
+			"multiple", &headerForMultiMessage, bitStream[:8],
 			"overrun - want at least one 48-bit signal cell when multiple message flag is set, got only 40 bits left",
 		},
 	}

@@ -3,14 +3,15 @@ package rtcm
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"log"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/goblimey/go-crc24q/crc24q"
 	"github.com/goblimey/go-ntrip/rtcm/header"
+	message1005 "github.com/goblimey/go-ntrip/rtcm/message1005"
 	msm4message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
 	msm7message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
@@ -74,18 +75,6 @@ func TestReadNextRTCM3MessageFrameWithValidMessage(t *testing.T) {
 		t.Error(messageFetchError)
 	}
 
-	if !message.Complete {
-		t.Error("not complete")
-	}
-
-	if !message.CRCValid {
-		t.Error("CRC check fails")
-	}
-
-	if !message.Valid {
-		t.Error("invalid")
-	}
-
 	gotType := message.MessageType
 	if wantType != gotType {
 		t.Errorf("expected type %d got %d", wantType, gotType)
@@ -125,53 +114,6 @@ func TestReadNextRTCM3MessageFrameWithShortBitStream(t *testing.T) {
 	if frame[0] != 0xd3 {
 		t.Errorf("want a message frame starting 0xd3, got first byte of 0x%02x", frame[0])
 	}
-}
-
-// TestGetMessageLengthAndType checks GetMessageLengthAndType
-func TestGetMessageLengthAndType(t *testing.T) {
-
-	messageFrameWithIncorrectStart := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	messageFrameWithLengthTooBig := []byte{0xd3, 0xff, 0xff, 0xff, 0xff, 0xff}
-	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44, 0x90, 0x00}
-
-	var testData = []struct {
-		description       string
-		bitStream         []byte
-		wantMessageType   int
-		wantMessageLength uint
-		wantError         string
-	}{
-		{"valid", validMessageFrame, 1097, 170, ""},
-		{"invalid", validMessageFrame[:4], utils.NonRTCMMessage, 0,
-			"the message is too short to get the header and the length"},
-		{"invalid", messageFrameWithIncorrectStart, utils.NonRTCMMessage, 0,
-			"message starts with 0xff not 0xd3"},
-		{"invalid", messageFrameWithLengthZero, 1097, 0,
-			"zero length message type 1097"},
-		{"invalid", messageFrameWithLengthTooBig, utils.NonRTCMMessage, 0,
-			"bits 8-13 of header are 63, must be 0"},
-	}
-	for _, td := range testData {
-		handler := New(time.Now(), logger)
-		gotMessageLength, gotMessageType, gotError := handler.getMessageLengthAndType(td.bitStream)
-		if td.wantError != "" {
-			if td.wantError != gotError.Error() {
-				t.Errorf("%s: want %s, got %s", td.description, td.wantError, gotError.Error())
-			}
-		}
-		if td.wantMessageLength != gotMessageLength {
-			t.Errorf("%s: want %d, got %v", td.description, td.wantMessageLength, gotMessageLength)
-		}
-
-		if td.wantMessageType != gotMessageType {
-			t.Errorf("%s: want %d, got %d", td.description, td.wantMessageType, gotMessageType)
-		}
-	}
-
-}
-
-func TestGetMessageLengthAndTypeWithShortBitstream(t *testing.T) {
-	// The message bit stream is less than 5 bytes long.
 }
 
 // TestHandleMessages tests the handleMessages method.
@@ -220,30 +162,6 @@ func TestHandleMessages(t *testing.T) {
 		t.Errorf("want %d message, got %d messages", wantNumMessages, len(messages))
 	}
 
-	if !messages[0].Complete {
-		t.Error("not complete")
-	}
-
-	if !messages[0].CRCValid {
-		t.Error("CRC check fails")
-	}
-
-	if !messages[0].Valid {
-		t.Error("invalid")
-	}
-
-	if messages[1].Complete {
-		t.Error("should be incomplete")
-	}
-
-	if messages[1].CRCValid {
-		t.Error("CRC check should fail")
-	}
-
-	if messages[1].Valid {
-		t.Error("should be invalid")
-	}
-
 	r0 := bytes.NewReader(messages[0].RawData)
 	resultReader0 := bufio.NewReader(r0)
 	message0, err0 := rtcmHandler.ReadNextRTCM3Message(resultReader0)
@@ -276,18 +194,6 @@ func TestHandleMessages(t *testing.T) {
 
 	if !bytes.Equal(wantContents0, gotContents0) {
 		t.Error("contents of message 0 is not correct")
-	}
-
-	if !message0.Complete {
-		t.Error("not complete")
-	}
-
-	if !message0.CRCValid {
-		t.Error("CRC check fails")
-	}
-
-	if !message0.Valid {
-		t.Error("invalid")
 	}
 
 	r1 := bytes.NewReader(messages[1].RawData)
@@ -323,18 +229,6 @@ func TestHandleMessages(t *testing.T) {
 	if !bytes.Equal(wantContents1, gotContents1) {
 		t.Error("contents of message 1 is not correct")
 	}
-
-	if message1.Complete {
-		t.Error("should be incomplete")
-	}
-
-	if message1.CRCValid {
-		t.Error("CRC check should fail")
-	}
-
-	if message1.Valid {
-		t.Error("should be invalid")
-	}
 }
 
 // TestReadIncompleteMessage tests that an incomplete RTCM message is processed
@@ -367,14 +261,6 @@ func TestReadIncompleteMessage(t *testing.T) {
 	if message.MessageType != utils.NonRTCMMessage {
 		t.Errorf("expected message type %d, got %d",
 			utils.NonRTCMMessage, message.MessageType)
-	}
-
-	if message.Valid {
-		t.Error("expected an invalid message")
-	}
-
-	if message.Complete {
-		t.Error("expected an incomplete message")
 	}
 
 	got := string(message.RawData)
@@ -549,6 +435,80 @@ func TestReadOnlyJunk(t *testing.T) {
 	}
 }
 
+// TestGetMessageLengthAndType checks GetMessageLengthAndType
+func TestGetMessageLengthAndType(t *testing.T) {
+
+	messageFrameWithIncorrectStart := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	messageFrameWithLengthTooBig := []byte{0xd3, 0xff, 0xff, 0xff, 0xff, 0xff}
+	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44, 0x90, 0x00}
+
+	var testData = []struct {
+		description       string
+		bitStream         []byte
+		wantMessageType   int
+		wantMessageLength uint
+		wantError         string
+	}{
+		{"valid", validMessageFrame, 1097, 170, ""},
+		{"invalid", validMessageFrame[:4], utils.NonRTCMMessage, 0,
+			"the message is too short to get the header and the length"},
+		{"invalid", messageFrameWithIncorrectStart, utils.NonRTCMMessage, 0,
+			"message starts with 0xff not 0xd3"},
+		{"invalid", messageFrameWithLengthZero, 1097, 0,
+			"zero length message type 1097"},
+		{"invalid", messageFrameWithLengthTooBig, utils.NonRTCMMessage, 0,
+			"bits 8-13 of header are 63, must be 0"},
+	}
+	for _, td := range testData {
+		handler := New(time.Now(), logger)
+		gotMessageLength, gotMessageType, gotError := handler.getMessageLengthAndType(td.bitStream)
+		if td.wantError != "" {
+			if td.wantError != gotError.Error() {
+				t.Errorf("%s: want %s, got %s", td.description, td.wantError, gotError.Error())
+			}
+		}
+		if td.wantMessageLength != gotMessageLength {
+			t.Errorf("%s: want %d, got %v", td.description, td.wantMessageLength, gotMessageLength)
+		}
+
+		if td.wantMessageType != gotMessageType {
+			t.Errorf("%s: want %d, got %d", td.description, td.wantMessageType, gotMessageType)
+		}
+	}
+
+}
+
+// TestGetMessage checks GetMessage with valid messages.
+func TestGetMessage(t *testing.T) {
+	var testData = []struct {
+		description string
+		bitStream   []byte
+		want        int
+	}{
+		// {"1230", testdata.Fake1230, utils.MessageTypeGCPB},
+		{"junk", testdata.AllJunk, utils.NonRTCMMessage},
+		{"1074", testdata.MessageBatch, utils.MessageTypeMSM4GPS},
+		{"1005", testdata.MessageFrameType1005, utils.MessageType1005},
+	}
+	for _, td := range testData {
+		startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, utils.LocationUTC)
+		handler := New(startTime, logger)
+		handler.StopOnEOF = true
+
+		got, messageFetchError := handler.GetMessage(td.bitStream)
+		if messageFetchError != nil {
+			t.Errorf("%s: error getting message - %v", td.description, messageFetchError)
+			return
+		}
+
+		if td.want != got.MessageType {
+			t.Errorf("%s: expected message type %d, got %d",
+				td.description, td.want, got.MessageType)
+			return
+		}
+	}
+}
+
 //TestGetMessageWithRealData checks that GetMessage correctly handles an MSM4 message extracted from
 // real data.
 func TestGetMessageWithRealData(t *testing.T) {
@@ -696,6 +656,8 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 		0xd3, 0x00, 0x8a,
 		0x43, 0x20, 0x00, 0x8a, 0x0e, 0x1a, 0x26, 0x00, 0x00, 0x2f, 0x40, 0x00,
 		0x4a, 0x0a, 0x0b,
+		// CRC
+		0, 0, 0,
 	}
 
 	// frameWithIllegalGlonassDay contains message type 1084 (MSM4 Glonass) but the
@@ -708,9 +670,11 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x42, 0xf2, 0x8f,
+		// CRC
+		0, 0, 0,
 	}
 
-	// messageFramewithLengthZero is a valid message frame but the length of the
+	// messageFrameWithLengthZero is a valid message frame but the length of the
 	// contained message is zero.
 	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44}
 
@@ -720,6 +684,10 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 		wantError   string
 		wantWarning string
 	}{
+
+		{"illegal", messageFrameWithIllegalGlonassDay,
+			"invalid day", "invalid day"},
+
 		// GetMessage should return a nil message and an error.
 		{"very short", messageFrame1077NoTimestamp,
 			"incomplete message frame", ""},
@@ -742,23 +710,23 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 
 		if len(td.wantError) > 0 {
 			if gotError == nil {
-				t.Error("want an error got nil")
+				t.Errorf("%s: want an error got nil", td.description)
 				return
 			}
 
 			if td.wantError != gotError.Error() {
-				t.Errorf("want error - %s, got %s", td.wantError, gotError.Error())
+				t.Errorf("%s: want error - %s, got %s", td.description, td.wantError, gotError.Error())
 			}
 		}
 
 		if len(td.wantWarning) > 0 {
 			if gotMessage == nil {
-				t.Error("want a message got nil")
+				t.Errorf("%s: want a message got nil", td.description)
 				return
 			}
 
 			if gotMessage.RawData == nil {
-				t.Error("want some raw data, got nil")
+				t.Errorf("%s: want some raw data, got nil", td.description)
 				return
 			}
 
@@ -767,72 +735,6 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 			}
 		}
 	}
-	// now := time.Now()
-	// handler := New(now, logger)
-	// handler.StopOnEOF = true
-
-	// const wantWarning = "the message is too short to get the header and the length"
-
-	// GetMessage calls GetMessageLengthAndType.  That returns an error because the
-	// bit stream is too short.  GetMessage should
-	// should eat the error message and return a byte slice containing the five
-	// bytes that it consumed.
-	// message, err := handler.GetMessage(messageFrameWithLengthZero)
-
-	// if err == nil {
-	// 	t.Error("want an error")
-	// 	return
-	// }
-
-	// if err.Error() != wantWarning {
-	// 	t.Errorf("want error - %s, got %v", wantWarning, err)
-	// }
-
-	// if message == nil {
-	// 	t.Error("want a message, got nil")
-	// 	return
-	// }
-
-	// if message.RawData == nil {
-	// 	t.Error("want some raw data, got nil")
-	// 	return
-	// }
-
-	// if len(message.RawData) != 4 {
-	// 	message, err := handler.GetMessage(messageFrameWithLengthZero)
-
-	// 	if err == nil {
-	// 		t.Error("want an error")
-	// 		return
-	// 	}
-
-	// 	if err.Error() != wantWarning {
-	// 		t.Errorf("want error - %s, got %v", wantWarning, err)
-	// 	}
-
-	// 	if message == nil {
-	// 		t.Error("want a message, got nil")
-	// 		return
-	// 	}
-
-	// 	if message.RawData == nil {
-	// 		t.Error("want some raw data, got nil")
-	// 		return
-	// 	}
-
-	// 	if len(message.RawData) != 4 {
-	// 		t.Errorf("want a message frame of length 4, got length %d", len(message.RawData))
-	// 	}
-
-	// 	if message.Warning != wantWarning {
-	// 		t.Errorf("want warning - %s, got %s", wantWarning, message.Warning)
-	// 	}
-	// 	t.Errorf("want a message frame of length 4, got length %d", len(message.RawData))
-	// }
-
-	// if message.Warning != wantWarning {
-	// 	t.Errorf("want warning - %s, got %s", wantWarning, message.Warning)
-	// }
 }
 
 // TestGetMessageWithNonRTCMMessage checks that GetMessage handles a bit stream
@@ -923,8 +825,9 @@ func TestReadNextMessageFrame(t *testing.T) {
 	}
 }
 
-// TestWithRealData reads the first message from the real data and checks it in detail.
-func TestWithRealData(t *testing.T) {
+// TestPrepareForDisplayWithRealData reads the first message from the real data,
+// prepares it for display and checks the result in detail.
+func TestPrepareForDisplayWithRealData(t *testing.T) {
 
 	const wantRangeWholeMilliSecs = 81
 	const wantRangeFractionalMilliSecs = 435
@@ -1015,26 +918,6 @@ func TestWithRealData(t *testing.T) {
 
 	if !utils.EqualWithin(3, wantRange, rangeMetres) {
 		t.Errorf("expected range %f metres, got %3.6f", wantRange, rangeMetres)
-		return
-	}
-}
-
-// TestGetMessage checks GetMessage with a valid message.
-func TestGetMessage(t *testing.T) {
-	const expectedLength = 0x8a + 6
-	startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, utils.LocationUTC)
-	rtcm := New(startTime, logger)
-	rtcm.StopOnEOF = true
-
-	message, messageFetchError := rtcm.GetMessage(testdata.MessageBatch)
-	if messageFetchError != nil {
-		t.Errorf("error getting message - %v", messageFetchError)
-		return
-	}
-
-	if expectedLength != len(message.RawData) {
-		t.Errorf("expected message length %d, got %d",
-			expectedLength, len(message.RawData))
 		return
 	}
 }
@@ -1219,13 +1102,16 @@ func TestGlonassEpochTimes(t *testing.T) {
 	}
 }
 
-// TestPrepareForDisplayWithInvalidMessage checks that PrepareforDisplay
-// handles an invalid message correctly.
-func TestPrepareForDisplayWithInvalidMessage(t *testing.T) {
+// TestPrepareForDisplayWithErrorMessage checks that PrepareforDisplay
+// handles an error message correctly.
+func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 	// PrepareForDisplay checks that the message hasn't already been
-	// analysed.  If not, it calls Analyse.  If that returns an error,
-	// it marks the message as invalid.  Force Analyse to fail using
+	// analysed.  If not, it calls Analyse.  If that returns an error
+	// message it displays that.  Force Analyse to fail using
 	// an incomplete bit stream.
+
+	const wantType = 1077
+	const wantErrorMessage = "bitstream is too short for an MSM header - got 80 bits, expected at least 169"
 
 	shortBitStream := testdata.MessageBatchWithJunk[:16]
 	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
@@ -1233,18 +1119,26 @@ func TestPrepareForDisplayWithInvalidMessage(t *testing.T) {
 	rtcm.StopOnEOF = true
 
 	message := rtcm3.New(utils.MessageTypeMSM7GPS, "", shortBitStream)
-	message.Valid = true
 
 	PrepareForDisplay(message)
 
-	if message.Valid {
-		t.Error("want the message to be marked as invalid")
+	if message.MessageType != wantType {
+		t.Errorf("expected a type %d got %d", wantType, message.MessageType)
+	}
+
+	if len(message.ErrorMessage) == 0 {
+		t.Error("expected an error message")
+	}
+
+	if message.ErrorMessage != wantErrorMessage {
+		t.Errorf("expected error message %s got %s",
+			wantErrorMessage, message.ErrorMessage)
 	}
 }
 
 // TestSetDisplayWriter checks SetDisplayWriter
 func TestSetDisplayWriter(t *testing.T) {
-	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
+	startTime := time.Now()
 	handler := New(startTime, logger)
 	handler.SetDisplayWriter(logger.Writer())
 
@@ -1253,26 +1147,106 @@ func TestSetDisplayWriter(t *testing.T) {
 	}
 }
 
+// TestAnalyseWithMSM4 checks that Analyse correctly handles an MSM4.
+func TestAnalyseWithMSM4(t *testing.T) {
+
+	message := rtcm3.New(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
+
+	Analyse(message)
+
+	if message.Readable == nil {
+		t.Error("Readable is nil")
+		return
+	}
+
+	m, ok := message.Readable.(*msm4message.Message)
+
+	if !ok {
+		t.Error("expecting Readable to contain an MSM4")
+	}
+
+	if !(utils.MSM4(m.Header.MessageType)) {
+		t.Errorf("expecting an MSM4, got %d", m.Header.MessageType)
+	}
+}
+
+// TestAnalyseWithMSM7 checks that Analyse correctly handles an MSM7.
+func TestAnalyseWithMSM7(t *testing.T) {
+
+	message := rtcm3.New(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
+
+	Analyse(message)
+
+	if message.Readable == nil {
+		t.Error("Readable is nil")
+		return
+	}
+
+	m, ok := message.Readable.(*msm7message.Message)
+
+	if !ok {
+		t.Error("expecting Readable to contain an MSM7")
+	}
+
+	if !(utils.MSM7(m.Header.MessageType)) {
+		t.Errorf("expecting an MSM7, got %d", m.Header.MessageType)
+	}
+}
+
+// TestAnalyseWith1005 checks that Analyse correctly handles an MSM7.
+func TestAnalyseWith1005(t *testing.T) {
+
+	message := rtcm3.New(utils.MessageType1005, "", testdata.MessageFrameType1005)
+
+	Analyse(message)
+
+	if message.Readable == nil {
+		t.Error("Readable is nil")
+		return
+	}
+
+	_, ok := message.Readable.(*message1005.Message)
+
+	if !ok {
+		t.Error("expecting Readable to contain an MSM7")
+	}
+}
+
+// TestAnalyseWith1230 checks that Analyse correctly handles a message of type 1230
+// (the correct behaviour being to set the Readable field to a string).
+func TestAnalyseWith1230(t *testing.T) {
+
+	message := rtcm3.New(utils.MessageTypeGCPB, "", testdata.Fake1230)
+
+	Analyse(message)
+
+	_, ok := message.Readable.(string)
+
+	if !ok {
+		t.Error("expecting Readable to contain a string")
+	}
+}
+
 // TestDisplayMessage checks DisplayMessage.
 func TestDisplayMessage(t *testing.T) {
 
-	const resultForNotRTCM = `message type -1, frame length 4 valid
+	const resultForNotRTCM = `message type -1, frame length 4
 00000000  6a 75 6e 6b                                       |junk|
 
 `
 
-	const resultForIncomplete = `message type 1127, frame length 6 valid
+	const resultForIncomplete = `message type 1127, frame length 6
 00000000  d3 00 aa 46 70 00                                 |...Fp.|
 
 bitstream is too short for an MSM header - got 0 bits, expected at least 169
 `
 
 	// The hex dump includes a ` so we have to create this string by glueing parts together.
-	const resultForMSM4 = `message type 1074, frame length 42 valid
+	const resultForMSM4 = `message type 1074, frame length 42
 00000000  d3 00 24 43 20 01 00 00  00 04 00 00 08 00 00 00  |..$C ...........|
 ` +
 		"00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...`(.@....|" + `
-00000020  00 40 00 00 68 8e 80 4a  b3 5c                    |.@..h..J.\|
+00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
 type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
 stationID 1, timestamp 1, single message, sequence number 0
@@ -1288,7 +1262,7 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
  4 16 {374777.168, 1534500.000, 4, true, 16}
 `
 
-	const resultForMSM7 = `message type 1077, frame length 841 valid
+	const resultForMSM7 = `message type 1077, frame length 841
 00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1348,7 +1322,7 @@ stationID 0, timestamp 432023000, multiple message, sequence number 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 8 satellites, 2 signal types, 16 signals
-Satellite ID {range m, extended info, phase range rate}:
+Satellite ID {approx range m, extended info, phase range rate}:
  4 {24410542.339, 0, -135}
  9 {25264833.738, 0, 182}
 16 {22915678.774, 0, 597}
@@ -1357,7 +1331,7 @@ Satellite ID {range m, extended info, phase range rate}:
 26 {20661965.550, 0, 292}
 29 {21135953.821, 0, -383}
 31 {21670837.435, 0, -442}
-Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
+Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
  4  2 {24410527.355, 128282115.527, 513, false, 80, -136.207}
  4 16 {24410523.313, 99955313.523, 320, false, 82, -134.869}
  9 16 {25264751.952, 103451227.387, 606, false, 78, 182.267}
@@ -1374,15 +1348,15 @@ Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity,
 31 16 {21670767.783, 88736342.592, 779, false, 876, -441.969}
 `
 
-	const resultForUnhandledMessageType = `message type 1024, frame length 14 valid
+	const resultForUnhandledMessageType = `message type 1024, frame length 14
 00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
 
 message type 1024 currently cannot be displayed
 `
 
-	const resultFor1005 = `message type 1005, frame length 25 valid
-00000000  d3 03 ed 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
-00000010  47 80 00 05 46 4e c5 55  ff                       |G...FN.U.|
+	const resultFor1005 = `message type 1005, frame length 25
+00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
+00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
 message type 1005 - Base Station Information
 stationID 2, ITRF realisation year 3, ignored 0xf,
@@ -1397,7 +1371,7 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 		want        string
 	}{
 		{"not RTCM", testdata.AllJunk, utils.NonRTCMMessage, resultForNotRTCM},
-		{"short", testdata.IncompleteMessage, 1127, resultForIncomplete},
+		{"incomplete", testdata.IncompleteMessage, 1127, resultForIncomplete},
 		{"1005", testdata.MessageFrameType1005, 1005, resultFor1005},
 		{"msm4", testdata.MessageFrameType1074, 1074, resultForMSM4},
 		{"msm7", testdata.MessageBatchWithJunk, 1077, resultForMSM7},
@@ -1405,9 +1379,6 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 	}
 	for _, td := range testData {
 		message := rtcm3.New(td.messageType, "", td.bitStream)
-		message.Valid = true
-		message.Complete = true
-		message.CRCValid = true
 		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
 		handler := New(startTime, logger)
 		handler.StopOnEOF = true
@@ -1427,20 +1398,19 @@ func TestDisplayMessageWithErrors(t *testing.T) {
 	// RTCM3 messages that will produce an error when DisplayMessage is called.
 	// In most cases the problem is that the type value in the message doesn't match
 	// the value in the raw data.
-	messageWithWarning := rtcm3.New(utils.MessageType1005, "a warning message", testdata.UnhandledMessageType1024)
+	messageWithErrorMessage := rtcm3.New(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
 	fake1005 := rtcm3.New(utils.MessageType1005, "", testdata.MessageFrame1077)
 	fakeMSM4 := rtcm3.New(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
 	fakeMSM7 := rtcm3.New(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
-	// justInvalid is an otherwise sensible message but its valid flag is not set.
-	justInvalid := rtcm3.New(utils.MessageType1005, "", testdata.MessageFrameType1005)
 	// Expected results.
-	resultForMessageWithWarning := `message type 1005, frame length 14 incomplete CRC check failed
-00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
+	resultForMessageWithWarning := `message type 1005, frame length 25
+00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
+00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
-a warning message
+an error message
 `
 
-	resultForFake1005 := `message type 1005, frame length 226 incomplete CRC check failed
+	resultForFake1005 := `message type 1005, frame length 226
 00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1460,7 +1430,7 @@ a warning message
 expected message type 1005 got 1077
 `
 
-	const resultForFakeMSM4 = `message type 1124, frame length 226 incomplete CRC check failed
+	const resultForFakeMSM4 = `message type 1124, frame length 226
 00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1480,30 +1450,23 @@ expected message type 1005 got 1077
 message type 1077 is not an MSM4
 `
 
-	const resultForFakeMSM7 = `message type 1087, frame length 42 incomplete CRC check failed
+	const resultForFakeMSM7 = `message type 1087, frame length 42
 00000000  d3 00 24 43 20 01 00 00  00 04 00 00 08 00 00 00  |..$C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
-00000020  00 40 00 00 68 8e 80 4a  b3 5c                    |.@..h..J.\|
+00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
 message type 1074 is not an MSM7
 `
 
-	const resultForJustInvalid = `message type 1005, frame length 25 incomplete CRC check failed
-00000000  d3 03 ed 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
-00000010  47 80 00 05 46 4e c5 55  ff                       |G...FN.U.|
-
-invalid message
-`
 	var testData = []struct {
 		description string
 		message     *rtcm3.Message
 		want        string
 	}{
-		{"message with warning", messageWithWarning, resultForMessageWithWarning},
+		{"error message", messageWithErrorMessage, resultForMessageWithWarning},
 		{"1005", fake1005, resultForFake1005},
 		{"msm4", fakeMSM4, resultForFakeMSM4},
 		{"msm7", fakeMSM7, resultForFakeMSM7},
-		{"valid flag not set", justInvalid, resultForJustInvalid},
 	}
 	for _, td := range testData {
 		startTime := time.Now()
@@ -1566,6 +1529,60 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 		}
 
 	}
+}
+
+// TestGetTimeFromTimeStampWithError checks that getTimeFromTimeStampWithError when
+// it's given an illegal Glonass timestamp.  (Glonass is the only constellation that
+// can have an illegal timestamp).
+func TestGetTimeFromTimeStampWithError(t *testing.T) {
+
+	// The timestamp in the header is 30 bits.  For Glonass the top three bits hold the day
+	// number and bits 0-26 hold the millis from midnight on that day.  Day values 0-6 are
+	// legal, 7 is illegal and produces an error.
+	//
+	// For all constellations any timestamp longer than 30 bits is illegal.
+
+	var testData = []struct {
+		description string
+		hdr         *header.Header
+		wantError   string
+	}{
+		{"4 0", createHeader(utils.MessageTypeMSM4Glonass, (7 << 27)), "invalid day"},
+		{"7 1", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | 1)), "invalid day"},
+		{"7 max", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | (1 << 25))), "invalid day"},
+		// This timestamp is an int, which is 32 bits on some machines, 64 on others.  For safety, only
+		// set the timestamp to the max value of an int32.
+		{"max int32", createHeader(utils.MessageTypeMSM4Glonass, math.MaxInt32), "out of range"},
+		// Try all of the other constellations with a value bigger than 30 bits.
+		{"GPS MSM4", createHeader(utils.MessageTypeMSM4GPS, maxTimestamp+1), "out of range"},
+		{"GPS MSM7", createHeader(utils.MessageTypeMSM7GPS, math.MaxInt32), "out of range"},
+		{"Galileo MSM4", createHeader(utils.MessageTypeMSM4Galileo, maxTimestamp+1), "out of range"},
+		{"Galileo MSM7", createHeader(utils.MessageTypeMSM7Galileo, math.MaxInt32/2+1), "out of range"},
+		{"Beidou MSM4", createHeader(utils.MessageTypeMSM4Beidou, maxTimestamp+2), "out of range"},
+		{"Beidou MSM7", createHeader(utils.MessageTypeMSM7Beidou, 0x40000000), "out of range"},
+		{"SBAS MSM7", createHeader(utils.MessageTypeMSM7SBAS, 0x40000000), "unknown message type"},
+	}
+
+	for _, td := range testData {
+		// The start time is irrelevant so any will do.
+		startTime := time.Now()
+		handler := New(startTime, logger)
+		var zeroTime time.Time // zeroTime is the default time value.
+
+		gotTime, gotError := handler.getTimeFromTimeStamp(td.hdr.MessageType, td.hdr.Timestamp)
+
+		if !gotTime.Equal(zeroTime) {
+			t.Errorf("%s: got time %v", td.description, gotTime)
+		}
+
+		if gotError == nil {
+			t.Errorf("%s: expected an error", td.description)
+			continue
+		}
+		if td.wantError != gotError.Error() {
+			t.Errorf("%s: want error %s, got %s", td.description, td.wantError, gotError.Error())
+		}
+	}
 
 }
 
@@ -1585,7 +1602,11 @@ func TestGetUTCFromGPSTime(t *testing.T) {
 
 	expectedTime1 := startOfThisEpoch.AddDate(0, 0, 2)
 
-	timeUTC1 := rtcm.getUTCFromGPSTime(millis)
+	timeUTC1, err := rtcm.getUTCFromGPSTime(millis)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if timeUTC1.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", timeUTC1.Location().String())
@@ -1603,7 +1624,11 @@ func TestGetUTCFromGPSTime(t *testing.T) {
 	expectedTime2 :=
 		time.Date(2020, time.August, 16, 0, 59, 59, 999000000, utils.LocationLondon).Add(gpsTimeOffset)
 
-	timeUTC2 := rtcm.getUTCFromGPSTime(maxMillis)
+	timeUTC2, err := rtcm.getUTCFromGPSTime(maxMillis)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if timeUTC2.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", timeUTC2.Location().String())
@@ -1622,7 +1647,11 @@ func TestGetUTCFromGPSTime(t *testing.T) {
 		time.Date(2020, time.August, 16, 2, 0, 0, 500000000, utils.LocationParis).Add(gpsTimeOffset)
 
 	var gpsMillis3 uint = 500
-	timeUTC3 := rtcm.getUTCFromGPSTime(gpsMillis3)
+	timeUTC3, err := rtcm.getUTCFromGPSTime(gpsMillis3)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if timeUTC3.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", timeUTC3.Location().String())
@@ -1639,7 +1668,11 @@ func TestGetUTCFromGPSTime(t *testing.T) {
 	expectedTime5 :=
 		time.Date(2020, time.August, 16, 2, 0, 20, 0, utils.LocationParis).Add(gpsTimeOffset)
 
-	timeUTC5 := rtcm.getUTCFromGPSTime(gpsMillis5)
+	timeUTC5, err := rtcm.getUTCFromGPSTime(gpsMillis5)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if timeUTC5.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", timeUTC5.Location().String())
@@ -1655,7 +1688,11 @@ func TestGetUTCFromGPSTime(t *testing.T) {
 	expectedTime6 :=
 		time.Date(2020, time.August, 17, 16, 0, 0, 500000000, utils.LocationParis).Add(gpsTimeOffset)
 
-	timeUTC6 := rtcm.getUTCFromGPSTime(gpsMillis6)
+	timeUTC6, err := rtcm.getUTCFromGPSTime(gpsMillis6)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if timeUTC6.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", timeUTC6.Location().String())
@@ -1776,9 +1813,17 @@ func TestGetUTCFromGalileoTime(t *testing.T) {
 	expectedTime :=
 		time.Date(2020, time.August, 10, 6, 0, 0, 300000000, utils.LocationParis).Add(gpsTimeOffset)
 
-	gpsTime := rtcm.getUTCFromGPSTime(millis1)
+	gpsTime, err := rtcm.getUTCFromGPSTime(millis1)
 
-	dateUTC := rtcm.getUTCFromGalileoTime(millis1)
+	if err != nil {
+		t.Error(err)
+	}
+
+	dateUTC, err := rtcm.getUTCFromGalileoTime(millis1)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if dateUTC.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", dateUTC.Location().String())
@@ -1804,7 +1849,11 @@ func TestGetUTCFromBeidouTime(t *testing.T) {
 	expectedTime1 :=
 		time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset)
 
-	dateUTC1 := rtcm1.getUTCFromBeidouTime(0)
+	dateUTC1, err := rtcm1.getUTCFromBeidouTime(0)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	if dateUTC1.Location().String() != utils.LocationUTC.String() {
 		t.Errorf("expected location to be UTC, got %s", dateUTC1.Location().String())
@@ -1814,7 +1863,12 @@ func TestGetUTCFromBeidouTime(t *testing.T) {
 			expectedTime1.Format(utils.DateLayout), dateUTC1.Format(utils.DateLayout))
 	}
 
-	dateUTC2 := rtcm1.getUTCFromBeidouTime(maxEpochTime)
+	dateUTC2, err := rtcm1.getUTCFromBeidouTime(maxEpochTime)
+
+	if err != nil {
+		t.Error(err)
+	}
+
 	expectedTime2 :=
 		time.Date(2020, time.August, 16, 1, 59, 59, 999000000, utils.LocationParis).Add(beidouTimeOffset)
 
@@ -1837,7 +1891,11 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	const expectedMillis1 = 0
 	const epochTime1 = 0
 
-	day1, millis1 := ParseGlonassTimeStamp(uint(epochTime1))
+	day1, millis1, err1 := ParseGlonassTimeStamp(uint(epochTime1))
+
+	if err1 != nil {
+		t.Error(err1)
+	}
 
 	if expectedDay1 != day1 {
 		t.Errorf("expected day %d result %d", expectedDay1, day1)
@@ -1850,7 +1908,11 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	const expectedDay2 uint = 0
 	const epochTime2 = maxMillis
 
-	day2, millis2 := ParseGlonassTimeStamp(uint(epochTime2))
+	day2, millis2, err2 := ParseGlonassTimeStamp(uint(epochTime2))
+
+	if err2 != nil {
+		t.Error(err2)
+	}
 
 	if expectedDay2 != day2 {
 		t.Errorf("expected day %d result %d", expectedDay2, day2)
@@ -1865,7 +1927,11 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	const expectedMillis3 uint = 0
 	const epochTime3 = 6 << 27
 
-	day3, millis3 := ParseGlonassTimeStamp(uint(epochTime3))
+	day3, millis3, err3 := ParseGlonassTimeStamp(uint(epochTime3))
+
+	if err3 != nil {
+		t.Error(err3)
+	}
 
 	if expectedDay3 != day3 {
 		t.Errorf("expected day %d result %d", expectedDay3, day3)
@@ -1879,7 +1945,11 @@ func TestParseGlonassEpochTime(t *testing.T) {
 
 	const epochTime4 = 6<<27 | uint(maxMillis)
 
-	day4, millis4 := ParseGlonassTimeStamp(uint(epochTime4))
+	day4, millis4, err4 := ParseGlonassTimeStamp(uint(epochTime4))
+
+	if err4 != nil {
+		t.Error(err4)
+	}
 
 	if expectedDay4 != day4 {
 		t.Errorf("expected day %d result %d", expectedDay4, day4)
@@ -1896,7 +1966,11 @@ func TestParseGlonassEpochTime(t *testing.T) {
 
 	const epochTime5 uint = 0x3fffffff // 11 1111 1111 ... (30 bits).
 
-	day5, millis5 := ParseGlonassTimeStamp(uint(epochTime5))
+	day5, millis5, err5 := ParseGlonassTimeStamp(uint(epochTime5))
+
+	if err5 != nil {
+		t.Error(err5)
+	}
 
 	if expectedDay5 != day5 {
 		t.Errorf("expected day %d result %d", expectedDay5, day5)
@@ -1938,20 +2012,70 @@ func TestCheckCRC(t *testing.T) {
 	}
 }
 
-// short1077NoTimestamp is a message frame with a valid CRC but the 1077 message
-// that it contains is too short to contain a complete timestamp.
-var short1077NoTimestamp = []byte{
-	0xd3, 0x00, 0x8a,
-	0x43, 0x20, 0x00, 0x8a, 0x0e, 0x1a, 0x26, 0x00, 0x00, 0x2f, 0x40, 0x00,
-	0x4a, 0x0a, 0x0b,
-}
-
-// This "test" can be used to calculate the CRC when hand-crafting a bit stream.
+// This "test" is used to calculate the CRC when hand-crafting a bit stream.
+// Run te test in a debugger and examine the value of crc.
 func Test(t *testing.T) {
 
-	// crc := crc24q.Hash(testdata.MessageFrameType1005)
-	crc := crc24q.Hash(FrameWithIllegalGlonassDay)
-	message := fmt.Sprintf("0x%x", crc)
+	var bitStream = []byte{
+		0xd3, 0, 206,
+		//
+		// RTCM message type 1077 - signals from GPS satellites:
+		//         |-- multiple message flag
+		//         | |-- sequence number
+		//         v v
+		// 0110 00|1|0 00|00 0000
+		//
+		// The header is 185 bits long, with 16 cell mask bits.
+		//
+		/* 0 */ 0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00,
+		//                   64 bit satellite mask
+		// 0|00|0 0|0|00   0|000 1000   0100 0000   1010 0000
+		/* 8 */ 0x00, 0x08, 0x40, 0xa0,
+		// 0110 0101   0000 0000   0000 0000   0000 0000
+		/* 12 */ 0x65, 0x00, 0x00, 0x00,
+		//               32 bit signal mask
+		// 0000 0000   0|010 0000   0000 0000    1000 0000
+		/* 16 */ 0x00, 0x20, 0x00, 0x80,
+		//
+		//               64 bit cell mask                 Satellite cells
+		// 0000 0000   0|11|0 1|10|1   1|11|1  1|11|1   1|010   1000
+		/* 20 */ 0x00, 0x6d, 0xff, 0xa8,
+		// 1|010 1010   0|010 0110   0|010 0011   1|010 0110
+		/* 24 */ 0xaa, 0x26, 0x23, 0xa6,
+		// 1|010 0010   0|010 0011   0|010 0100   0|000 0|000
+		/* 28 */ 0xa2, 0x23, 0x24, 0x00,
+		// 0|000 0|000   0|000 0|000   0|000 0|000   0|011 0110
+		/* 32 */ 0x00, 0x00, 0x00, 0x36,
+		// 011|0 1000
+		/* 36 */ 0x68, 0xcb, 0x83, 0x7a, // 36
+		/* 40 */ 0x6f, 0x9d, 0x7c, 0x04, 0x92, 0xfe, 0xf2, 0x05,
+		/* 48 */ 0xb0, 0x4a, 0xa0, 0xec, 0x7b, 0x0e, 0x09, 0x27,
+		//                   Signal cells
+		/* 56 */ 0xd0, 0x3f, 0x23, 0x7c, 0xb9, 0x6f, 0xbd, 0x73,
+		/* 64 */ 0xee, 0x1f, 0x01, 0x64, 0x96, 0xf5, 0x7b, 0x27,
+		/* 72 */ 0x46, 0xf1, 0xf2, 0x1a, 0xbf, 0x19, 0xfa, 0x08,
+		/* 80 */ 0x41, 0x08, 0x7b, 0xb1, 0x1b, 0x67, 0xe1, 0xa6,
+		0x70, 0x71, 0xd9, 0xdf, 0x0c, 0x61, 0x7f, 0x19, // 88
+		0x9c, 0x7e, 0x66, 0x66, 0xfb, 0x86, 0xc0, 0x04, // 96
+		0xe9, 0xc7, 0x7d, 0x85, 0x83, 0x7d, 0xac, 0xad, // 104
+		0xfc, 0xbe, 0x2b, 0xfc, 0x3c, 0x84, 0x02, 0x1d, // 112
+		0xeb, 0x81, 0xa6, 0x9c, 0x87, 0x17, 0x5d, 0x86, // 120
+		0xf5, 0x60, 0xfb, 0x66, 0x72, 0x7b, 0xfa, 0x2f, // 128
+		0x48, 0xd2, 0x29, 0x67, 0x08, 0xc8, 0x72, 0x15, // 136
+		0x0d, 0x37, 0xca, 0x92, 0xa4, 0xe9, 0x3a, 0x4e, // 144
+		0x13, 0x80, 0x00, 0x14, 0x04, 0xc0, 0xe8, 0x50, // 152
+		0x16, 0x04, 0xc1, 0x40, 0x46, 0x17, 0x05, 0x41, // 160
+		0x70, 0x52, 0x17, 0x05, 0x01, 0xef, 0x4b, 0xde, // 168
+		0x70, 0x4c, 0xb1, 0xaf, 0x84, 0x37, 0x08, 0x2a, // 176
+		0x77, 0x95, 0xf1, 0x6e, 0x75, 0xe8, 0xea, 0x36, // 184
+		0x1b, 0xdc, 0x3d, 0x7a, 0xbc, 0x75, 0x42, 0x80, // 192
+		// Padding bytes.
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 196
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00,
+	}
 
-	_ = message
+	crc := crc24q.Hash(bitStream)
+
+	_ = crc
 }

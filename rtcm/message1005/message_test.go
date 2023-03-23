@@ -56,8 +56,10 @@ func TestGetMessage(t *testing.T) {
 		wantError   string
 		wantMessage *Message
 	}{
-		{"complete", testdata.MessageFrameType1005[3:], "", New(1005, 2, 3, 0xf, 123456, 1, 234567, 2, 345678)},
-		{"short", testdata.MessageFrameType1005[:18], "overrun - expected 152 bits in a message type 1005, got 144", nil},
+		{"complete", testdata.MessageFrameType1005, "", New(1005, 2, 3, 0xf, 123456, 1, 234567, 2, 345678)},
+		// This frame contains a 3 byte leader, 19 bytes of embedded message and a 3 byte CRC,
+		// 25 bytes in all.
+		{"short", testdata.MessageFrameType1005[:24], "overrun - expected 152 bits in a message type 1005, got 144", nil},
 	}
 
 	for _, td := range testData {

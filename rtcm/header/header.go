@@ -276,6 +276,9 @@ func (header *Header) getTitle() string {
 //
 func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 
+	// The bit stream contains a 3-byte leader, a Multiple Signal Message and a
+	// 3-byte CRC.  The MSM starts with an MSMHeader.
+	//
 	// The MSMHeader contains:
 	//    a 12-bit unsigned message type (1074, 1084 ... MSM4. 1077 ... MSM7.)
 	//    a 12-bit unsigned station ID
@@ -323,12 +326,14 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 	// the 3-byte message leader.
 	lenBitStreamInBits := len(bitStream) * 8
 
+	lenMessageInBits := (len(bitStream) - utils.LeaderLengthBytes - utils.CRCLengthBytes) * 8
+
 	// We don't know the length of the header yet, but we have a minimum.
 	// Check that.
-	if lenBitStreamInBits < minBitsInHeader {
+	if lenMessageInBits < minBitsInHeader {
 		// Error - not enough data.
 		em := fmt.Sprintf("bitstream is too short for an MSM header - got %d bits, expected at least %d",
-			lenBitStreamInBits, minBitsInHeader)
+			lenMessageInBits, minBitsInHeader)
 		return nil, 0, errors.New(em)
 	}
 
@@ -419,7 +424,8 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 	bitStreamLength := uint(len(bitStream) * 8)
 
 	// lengthRequired is the required minimum length of the bitstream.
-	lengthRequired := minBitsInHeader + lenCellMaskBits
+	lengthRequired := utils.LeaderLengthBits + utils.CRCLengthBits +
+		minBitsInHeader + lenCellMaskBits
 
 	// Check that the bitstream is long enough.
 	if bitStreamLength < lengthRequired {
@@ -457,13 +463,15 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 //
 func getMSMType(bitStream []byte) (int, uint, error) {
 
-	lenBitStream := len(bitStream) * 8
+	// The bit stream contains a 3-byte leader, an embedded message and a 3-byte CRC.
+	// Here we are only concerned with the embedded message.
+	lenBitStream := (len(bitStream) - utils.LeaderLengthBytes - utils.CRCLengthBytes) * 8
 	if lenBitStream < lenMessageType {
 		em := fmt.Sprintf("bit stream is %d bits long, too short for a message type", lenBitStream)
 		return 0, 0, errors.New(em)
 	}
 
-	var pos uint = 0
+	var pos uint = utils.LeaderLengthBits // Jump over the leader.
 	messageType := int(utils.GetBitsAsUint64(bitStream, pos, lenMessageType))
 	pos += lenMessageType
 

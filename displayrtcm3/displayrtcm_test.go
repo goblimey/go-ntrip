@@ -3,16 +3,15 @@ package main
 import (
 	"testing"
 	"time"
-	// "github.com/goblimey/go-ntrip/rtcm"
+	
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
 // TestGetTime tests getTime
 func TestGetTime(t *testing.T) {
 	const dateTimeLayout = "2006-01-02 15:04:05.000000000 MST"
-	locationUTC, _ := time.LoadLocation("UTC")
-	locationParis, _ := time.LoadLocation("Europe/Paris")
 
-	expectedTime1 := time.Date(2020, time.November, 13, 0, 0, 0, 0, locationUTC)
+	expectedTime1 := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
 	time1, err1 := getTime("2020-11-13")
 	if err1 != nil {
 		t.Error(err1)
@@ -23,7 +22,7 @@ func TestGetTime(t *testing.T) {
 			time1.Format(dateTimeLayout))
 	}
 
-	expectedTime2 := time.Date(2020, time.November, 13, 9, 10, 11, 0, locationUTC)
+	expectedTime2 := time.Date(2020, time.November, 13, 9, 10, 11, 0, utils.LocationUTC)
 	time2, err2 := getTime("2020-11-13T09:10:11Z")
 	if err2 != nil {
 		t.Error(err2)
@@ -34,7 +33,7 @@ func TestGetTime(t *testing.T) {
 			time2.Format(dateTimeLayout))
 	}
 
-	expectedTime3 := time.Date(2020, time.November, 13, 9, 10, 11, 0, locationParis)
+	expectedTime3 := time.Date(2020, time.November, 13, 9, 10, 11, 0, utils.LocationParis)
 	time3, err3 := getTime("2020-11-13T09:10:11+01:00")
 	if err3 != nil {
 		t.Error(err3)
@@ -45,7 +44,7 @@ func TestGetTime(t *testing.T) {
 			time3.Format(dateTimeLayout))
 	}
 
-	expectedTime4 := time.Date(2020, time.November, 13, 9, 10, 11, 0, locationUTC)
+	expectedTime4 := time.Date(2020, time.November, 13, 9, 10, 11, 0, utils.LocationUTC)
 	time4, err4 := getTime("2020-11-13T09:10:11Z")
 	if err4 != nil {
 		t.Error(err4)

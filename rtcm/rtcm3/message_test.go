@@ -58,9 +58,6 @@ func createMSM4() *msm4message.Message {
 // setting the time to utcTime.  The Readable doesn't match the RawData.
 func createRTCMWithMSM4(msm4 *msm4message.Message, utcTime time.Time) *Message {
 	message := New(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
-	message.Valid = true
-	message.CRCValid = true
-	message.Complete = true
 	message.Readable = msm4
 	message.UTCTime = &utcTime
 
@@ -98,18 +95,6 @@ func TestNew(t *testing.T) {
 
 	// Check the fields that should never be set by New
 
-	if wantValid != message.Valid {
-		t.Errorf("want %v got %v", wantValid, message.Valid)
-	}
-
-	if wantComplete != message.Complete {
-		t.Errorf("want %v got %v", wantComplete, message.Complete)
-	}
-
-	if wantCRCValid != message.CRCValid {
-		t.Errorf("want %v got %v", wantCRCValid, message.CRCValid)
-	}
-
 	if wantUTCTime != message.UTCTime {
 		t.Errorf("want %v got %v", wantUTCTime, message.UTCTime)
 	}
@@ -141,7 +126,7 @@ func TestNewNonRTCM(t *testing.T) {
 		t.Errorf("want %s got %s", wantWarning, message.ErrorMessage)
 	}
 
-	// Can't compare the bitstreams so convert them to strings.
+	// Can't compare the bit streams so convert them to strings.
 	want := string(wantBitstream)
 	got := string(message.RawData)
 	if want != got {
@@ -149,18 +134,6 @@ func TestNewNonRTCM(t *testing.T) {
 	}
 
 	// Check the fields that should never be set by NewNonRTCM
-
-	if wantValid != message.Valid {
-		t.Errorf("want %v got %v", wantValid, message.Valid)
-	}
-
-	if wantComplete != message.Complete {
-		t.Errorf("want %v got %v", wantComplete, message.Complete)
-	}
-
-	if wantCRCValid != message.CRCValid {
-		t.Errorf("want %v got %v", wantCRCValid, message.CRCValid)
-	}
 
 	if wantUTCTime != message.UTCTime {
 		t.Errorf("want %v got %v", wantUTCTime, message.UTCTime)
@@ -175,7 +148,7 @@ func TestNewNonRTCM(t *testing.T) {
 func TestString(t *testing.T) {
 
 	const resultTemplateMSM4Complete = `2023-02-14 01:02:03.004 +0000 UTC
-message type 1074, frame length 36 valid
+message type 1074, frame length 36
 00000000  43 20 01 00 00 00 04 00  00 08 00 00 00 00 00 00  |C ..............|
 00000010  00 20 00 80 00 60 28 00  40 01 00 02 00 00 40 00  |. ...` + "`" + `(.@.....@.|
 00000020  00 68 8e 80                                       |.h..|
@@ -193,7 +166,7 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
  8 11 {%.3f, %.3f, 14, true, 15}
 `
 
-	const wantIncompleteMSM4 = `message type 1074, frame length 36 valid
+	const wantIncompleteMSM4 = `message type 1074, frame length 36
 00000000  43 20 01 00 00 00 04 00  00 08 00 00 00 00 00 00  |C ..............|
 00000010  00 20 00 80 00 60 28 00  40 01 00 02 00 00 40 00  |. ...` + "`" + `(.@.....@.|
 00000020  00 68 8e 80                                       |.h..|
@@ -209,7 +182,7 @@ No Signals
 
 	// This result is copied from rtcm_test.go.
 	const wantMSM7 = `2023-02-14 01:02:03.004 +0000 UTC
-message type 1077, frame length 838 valid
+message type 1077, frame length 838
 00000000  43 50 00 67 00 97 62 00  00 08 40 a0 65 00 00 00  |CP.g..b...@.e...|
 00000010  00 20 00 80 00 6d ff a8  aa 26 23 a6 a2 23 24 00  |. ...m...&#..#$.|
 00000020  00 00 00 36 68 cb 83 7a  6f 9d 7c 04 92 fe f2 05  |...6h..zo.|.....|
@@ -269,7 +242,7 @@ stationID 0, timestamp 432023000, multiple message, sequence number 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 8 satellites, 2 signal types, 16 signals
-Satellite ID {range m, extended info, phase range rate}:
+Satellite ID {approx range m, extended info, phase range rate}:
  4 {24410542.339, 0, -135}
  9 {25264833.738, 0, 182}
 16 {22915678.774, 0, 597}
@@ -278,7 +251,7 @@ Satellite ID {range m, extended info, phase range rate}:
 26 {20661965.550, 0, 292}
 29 {21135953.821, 0, -383}
 31 {21670837.435, 0, -442}
-Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
+Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
  4  2 {24410527.355, 128282115.527, 513, false, 80, -136.207}
  4 16 {24410523.313, 99955313.523, 320, false, 82, -134.869}
  9 16 {25264751.952, 103451227.387, 606, false, 78, 182.267}
@@ -328,21 +301,15 @@ Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity,
 	incompleteMSM4.Signals = nil
 
 	incompleteMessage := New(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
-	incompleteMessage.Valid = true
-	incompleteMessage.CRCValid = true
-	incompleteMessage.Complete = true
 	incompleteMessage.Readable = incompleteMSM4
 
 	// testdata.MessageBatchWithJunk starts with a message type 1077 (a GPS MSM7)
-	msm7, createError := msm7message.GetMessage(testdata.MessageBatchWithJunk[3:])
+	msm7, createError := msm7message.GetMessage(testdata.MessageBatchWithJunk)
 	if createError != nil {
 		t.Error(createError)
 	}
 
 	completeMSM7Message := New(msm7.Header.MessageType, "", testdata.MessageBatchWithJunk[3:841])
-	completeMSM7Message.Valid = true
-	completeMSM7Message.Complete = true
-	completeMSM7Message.CRCValid = true
 	completeMSM7Message.Readable = msm7
 	completeMSM7Message.UTCTime = &utcTime
 
@@ -398,87 +365,12 @@ func TestCopy(t *testing.T) {
 
 	// Check the fields that should never be set by Copy
 
-	if wantValid != message.Valid {
-		t.Errorf("want %v got %v", wantValid, message.Valid)
-	}
-
-	if wantComplete != message.Complete {
-		t.Errorf("want %v got %v", wantComplete, message.Complete)
-	}
-
-	if wantCRCValid != message.CRCValid {
-		t.Errorf("want %v got %v", wantCRCValid, message.CRCValid)
-	}
-
 	if wantUTCTime != message.UTCTime {
 		t.Errorf("want %v got %v", wantUTCTime, message.UTCTime)
 	}
 
 	if wantReadable != message.Readable {
 		t.Errorf("want %v got %v", wantReadable, message.Readable)
-	}
-}
-
-// TestStatus checks that Status returns the correct status string.
-func TestStatus(t *testing.T) {
-
-	// The value of the status depends on three booleans.  Some of the combinations
-	// should never happen, but we test them all.
-
-	messageFFF := New(1, "", nil)
-
-	messageFFT := messageFFF.Copy()
-	messageFFT.CRCValid = true
-
-	messageFTF := messageFFF.Copy()
-	messageFTF.Complete = true
-
-	messageFTT := messageFFF.Copy()
-	messageFTT.CRCValid = true
-	messageFTT.Complete = true
-
-	messageTFF := messageFFF.Copy()
-	messageTFF.Valid = true
-	messageTFF.Complete = true
-
-	messageTFT := messageFFF.Copy()
-	messageTFT.Valid = true
-	messageTFT.CRCValid = true
-
-	messageTTF := messageFFF.Copy()
-	messageTTF.Valid = true
-	messageTTF.Complete = true
-
-	messageTTT := messageFFF.Copy()
-	messageTTT.Valid = true
-	messageTTT.Complete = true
-	messageTTT.CRCValid = true
-
-	messageComplete := messageFFF.Copy()
-	messageComplete.Complete = true
-
-	messageCRCValid := messageFFF.Copy()
-	messageCRCValid.CRCValid = true
-
-	var testData = []struct {
-		description string
-		message     *Message
-		want        string
-	}{
-		{"fff", messageFFF, "incomplete CRC check failed"},
-		{"fft", &messageFFT, "incomplete CRC check passed"},
-		{"ftf", &messageFTF, "complete CRC check failed"},
-		{"ftt", &messageFTT, "complete CRC check passed"}, // Should never happen.
-		{"tff", &messageTFF, "valid"},                     // Should never happen.
-		{"tft", &messageTFT, "valid"},                     // Should never happen.
-		{"ttf", &messageTTF, "valid"},                     // Should never happen.
-		{"ttt", &messageTTT, "valid"},
-	}
-	for _, td := range testData {
-		got := td.message.Status()
-		if td.want != got {
-			t.Errorf("%s: want %s got %s", td.description, td.want, got)
-		}
 	}
 }
 

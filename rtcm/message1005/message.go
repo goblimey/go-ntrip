@@ -21,6 +21,11 @@ const lenAntennaRefY = 38
 const lenIgnoredBits3 = 2
 const lenAntennaRefZ = 38
 
+const lengthOfMessageInBits = lenMessageType + lenStationID +
+	lenITRFRealisationYear + lenIgnoredBits1 +
+	lenAntennaRefX + lenIgnoredBits2 + lenAntennaRefY +
+	lenIgnoredBits3 + lenAntennaRefZ
+
 // Message contains a message of type 1005 - antenna position.
 type Message struct {
 	// Some bits in the message are ignored by the RTKLIB decoder so
@@ -97,21 +102,21 @@ func (message *Message) String() string {
 // GetMessage1005 returns a text version of a message type 1005
 func GetMessage(bitStream []byte) (*Message, error) {
 
-	const bitsExpected = lenMessageType + lenStationID + lenITRFRealisationYear +
-		lenIgnoredBits1 + lenAntennaRefX + lenIgnoredBits2 + lenAntennaRefY +
-		lenIgnoredBits3 + lenAntennaRefZ
-
-	gotBits := len(bitStream) * 8
+	// The bit stream contains a 3-byte leader, an embedded message and a 3-byte CRC.
+	// Here we are only concerned with the embedded message.
+	lenBitStream := len(bitStream) * 8
+	lenMessageInBits := lenBitStream - utils.LeaderLengthBits - utils.CRCLengthBits
 
 	// Check that the bit stream is long enough.
-	if gotBits < bitsExpected {
+	if lenMessageInBits < lengthOfMessageInBits {
 		errorMessage := fmt.Sprintf("overrun - expected %d bits in a message type 1005, got %d",
-			bitsExpected, gotBits)
+			lengthOfMessageInBits, lenMessageInBits)
 		return nil, errors.New(errorMessage)
 	}
 
 	// Pos is the position within the bitstream.
-	var pos uint = 0
+	// Jump over the leader.
+	var pos uint = utils.LeaderLengthBits
 
 	messageType := uint(utils.GetBitsAsUint64(bitStream, pos, lenMessageType))
 	pos += lenMessageType

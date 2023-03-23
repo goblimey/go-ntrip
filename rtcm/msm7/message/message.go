@@ -52,7 +52,7 @@ func (message *Message) DisplaySatelliteCells() string {
 
 	heading := ""
 
-	heading = "Satellite ID {range m, extended info, phase range rate}:\n"
+	heading = "Satellite ID {approx range m, extended info, phase range rate}:\n"
 
 	body := ""
 	for i := range message.Satellites {
@@ -70,7 +70,7 @@ func (message *Message) DisplaySignalCells() string {
 		return "No signals\n"
 	}
 
-	heading := "Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:\n"
+	heading := "Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:\n"
 
 	body := ""
 

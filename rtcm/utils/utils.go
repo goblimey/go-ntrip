@@ -19,7 +19,8 @@ const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
 const NonRTCMMessage = -1
 
 // Message types.
-const MessageType1005 = 1005 // message type 1005 - base position.
+const MessageType1005 = 1005 // Base position.
+const MessageTypeGCPB = 1230 // Glonass code/phase bias.
 const MessageTypeMSM4GPS = 1074
 const MessageTypeMSM7GPS = 1077
 const MessageTypeMSM4Glonass = 1084
@@ -242,7 +243,7 @@ func GetPhaseRangeMilliseconds(scaledRange uint64) float64 {
 func GetScaledPhaseRange(wholeMillis, fractionalMillis uint, delta int) uint64 {
 	// This is similar to getScaledRange, but the amounts shifted are different. The
 	// phase range is made up from the range values (8 bits whole milliseconds,
-	// 10s bit fractional milliseconds) plus a 24-bit signed delta which is in units
+	// 10 bit fractional milliseconds) plus a 24-bit signed delta which is in units
 	// of (2 to the power -31) so the delta value can be
 	// plus or minus (2 to the power -8) to (2 to the power -31).  The result is a
 	// 39-bit scaled integer, 8 bits whole, 31 bits fractional.

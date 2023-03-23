@@ -140,10 +140,13 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 	const bitsPerCell = lenRangeDelta + lenPhaseRangeDelta +
 		lenLockTimeIndicator + lenHalfCycleAmbiguity + lenCNR
 
-	// Pos is the position within the message bitstream.
+	// The frame contain the 24-bit leader, the embedded message and the 24-bit CRC.
+	// startOfSignalCells is the number of bits of the FRAME consumed so far.
+	bitsLeftInFrame := uint(len(bitStream)*8 - int(startOfSignalCells))
+	bitsLeftInMessage := bitsLeftInFrame - utils.CRCLengthBits
+
+	// Pos is the position within the bitstream.
 	pos := startOfSignalCells
-	bitsInStream := uint(len(bitStream) * 8)
-	bitsLeft := bitsInStream - pos
 
 	// Find the number of signal cells, ignoring any padding.
 
@@ -152,9 +155,9 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 	if header.MultipleMessage {
 		// The message doesn't contain all the signal cells but there should be
 		// at least one.
-		if bitsLeft < bitsPerCell {
+		if bitsLeftInMessage < bitsPerCell {
 			message := fmt.Sprintf("overrun - want at least one %d-bit signal cell when multiple message flag is set, got only %d bits left",
-				bitsPerCell, bitsLeft)
+				bitsPerCell, bitsLeftInMessage)
 			return nil, errors.New(message)
 		}
 	} else {
@@ -220,8 +223,6 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 	//
 	// Figuring this out is a bit messy, because the order information
 	// is distributed over the satellite, signal and cell masks.
-
-	
 
 	// c is the index into the slices of signal fields captured above.
 	c := 0

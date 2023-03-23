@@ -47,7 +47,9 @@ func TestGetSatelliteCells(t *testing.T) {
 	// The bit stream starts at bit 16 and contains two satellite cells - two
 	// 8-bit whole millis followed by two 10-bit fractional millis set like so:
 	// 1000 0001|  0000 0001|  0000 0000  00|11 1111  1111|0000
-	bitstream := []byte{0xff, 0xff, 0x81, 0x01, 0x00, 0x3f, 0xf0}
+	bitstream := []byte{0xff, 0xff, 0x81, 0x01, 0x00, 0x3f, 0xf0,
+		// CRC
+		0, 0, 0}
 	const startPosition = 16
 
 	want := []Cell{
@@ -87,7 +89,9 @@ func TestGetSatelliteCellsShortMessage(t *testing.T) {
 	// The bit stream is as in the previous test, but we call
 	// GetSatelliteCell with an offset, which makes the bit stream
 	// too short and causes an error.
-	bitstream := []byte{0x81, 0x01, 0x00, 0x3f, 0xf0}
+	bitstream := []byte{0x81, 0x01, 0x00, 0x3f, 0xf0,
+		// CRC
+		0, 0, 0}
 
 	got, gotError := GetSatelliteCells(bitstream, 8, satellites)
 
@@ -113,7 +117,11 @@ func TestString(t *testing.T) {
 	// This value (10 0000 0110) represents 0.5.
 	const fracMillis = 0x200
 
-	const wantDisplay = " 1 {2.500}"
+	const satRange = 2.5 * utils.OneLightMillisecond
+
+	const displayTemplate = " 1 {%.3f}"
+
+	wantDisplay := fmt.Sprintf(displayTemplate, satRange)
 
 	satellite := New(1, 2, fracMillis)
 
@@ -122,25 +130,6 @@ func TestString(t *testing.T) {
 	if wantDisplay != display {
 		t.Errorf("want \"%s\" got \"%s\"", wantDisplay, display)
 	}
-}
-
-// TestStringWithRounding checks the string method when the result is rounded up.
-func TestStringWithRounding(t *testing.T) {
-	// The fractional millis value is ten bits (1/1024).
-	// This value represents .5005859375, big enough to provoke rounding up
-	// when displayed to three decimal places.
-	const fracMillis = 0x206 // 10 0000 0110
-
-	const wantDisplay = " 1 {2.506}"
-
-	satellite := New(1, 2, fracMillis)
-
-	display := satellite.String()
-
-	if wantDisplay != display {
-		t.Errorf("want \"%s\" got \"%s\"", wantDisplay, display)
-	}
-
 }
 
 // TestStringWithInvalidRange checks the string method.
@@ -159,5 +148,4 @@ func TestStringWithInvalidRange(t *testing.T) {
 	if wantDisplay != display {
 		t.Errorf("want \"%s\" got \"%s\"", wantDisplay, display)
 	}
-
 }

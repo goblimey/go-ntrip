@@ -18,20 +18,9 @@ type Message struct {
 	// MessageType is the type of the RTCM message (the message number).
 	// RTCM messages all have a positive message number.  Type NonRTCMMessage
 	// is negative and indicates a stream of bytes that doesn't contain a
-	// valid RTCM message, for example an NMEA message or a corrupt RTCM.
+	// valid RTCM message, for example an NMEA message, an incomplete RTCM or
+	// a corrupt RTCM.
 	MessageType int
-
-	// Valid is true if the message is valid - complete (all bytes implied by the
-	// message length are present), CRC check passes and there are no errors found
-	// while decoding the message.
-	Valid bool
-
-	// Complete is true if the message is complete.  The last bytes in a
-	// log of messages may not be complete.
-	Complete bool
-
-	// CRCValid is true if the Cyclic Redundancy Check bits are valid.
-	CRCValid bool
 
 	// ErrorMessage contains any error message encountered while fetching
 	// the message.
@@ -41,31 +30,25 @@ type Message struct {
 	//including the header and the CRC.
 	RawData []byte
 
-	// If the message is an MSM, UTCTime contains the time in UTC from the epochTime.
+	// If the message is an MSM, UTCTime points to a Time value containing
+	// the time in UTC from the message timestamp.
 	// If the message is not an MSM, the value is nil.
 	UTCTime *time.Time
+
 	// Readable is a broken out version of the RTCM message.  It's accessed
-	// via the Readable method and the message is only decoded on the
-	// first call.  (Lazy evaluation.)
+	// via the Readable method.
 	Readable interface{}
 }
 
-// New creates a new message.  If the warning is an empty string, that field is left as nil.
-func New(messageType int, warning string, bitStream []byte) *Message {
-
-	if len(warning) > 0 {
-		message := Message{
-			MessageType:  messageType,
-			RawData:      bitStream,
-			ErrorMessage: warning,
-		}
-		return &message
-	}
+// New creates a new message.
+func New(messageType int, errorMessage string, bitStream []byte) *Message {
 
 	message := Message{
-		MessageType: messageType,
-		RawData:     bitStream,
+		MessageType:  messageType,
+		RawData:      bitStream,
+		ErrorMessage: errorMessage,
 	}
+
 	return &message
 }
 
@@ -88,9 +71,6 @@ func (message *Message) Copy() Message {
 	var newMessage = Message{
 		MessageType:  message.MessageType,
 		RawData:      rawData,
-		Valid:        message.Valid,
-		Complete:     message.Complete,
-		CRCValid:     message.CRCValid,
 		ErrorMessage: message.ErrorMessage,
 	}
 	return newMessage
@@ -109,8 +89,13 @@ func (message *Message) String() string {
 		display += message.UTCTime.Format(utils.DateLayout) + "\n"
 	}
 
-	display += fmt.Sprintf("message type %d, frame length %d %s\n",
-		message.MessageType, len(message.RawData), message.Status())
+	if len(message.ErrorMessage) > 0 {
+		display += fmt.Sprintf("message type %d, frame length %d %s\n",
+			message.MessageType, len(message.RawData), message.ErrorMessage)
+	} else {
+		display += fmt.Sprintf("message type %d, frame length %d\n",
+			message.MessageType, len(message.RawData))
+	}
 
 	display += hex.Dump(message.RawData) + "\n"
 
@@ -133,14 +118,9 @@ func (message *Message) String() string {
 			return display
 		}
 
-		// prepareFoDisplay may have found an error and unset the valid flag.
-		if !message.Valid {
-			if len(message.ErrorMessage) > 0 {
-				display += message.ErrorMessage + "\n"
-			} else {
-				display += "invalid message\n"
-			}
-			return display
+		// prepareFoDisplay may have found an error.
+		if len(message.ErrorMessage) > 0 {
+			display += message.ErrorMessage + "\n"
 		}
 
 		// The message is a set of broken out fields.  Create a readable version.  If that reveals
@@ -213,33 +193,4 @@ func (message *Message) displayable() bool {
 	}
 
 	return false
-}
-
-// Status returns the status of the message - valid, CRC checked failed and so on.
-func (message *Message) Status() string {
-	status := ""
-	if message.Valid {
-		status = "valid"
-	} else {
-		if message.Complete {
-			status = "complete"
-		} else {
-			status = "incomplete"
-		}
-		if message.CRCValid {
-			if len(status) > 0 {
-				// We want "complete CRC check passed", not "completeCRC check passed"
-				status += " "
-			}
-			status += "CRC check passed"
-		} else {
-			if len(status) > 0 {
-				// We want "complete CRC check failed", not "completeCRC check failed"
-				status += " "
-			}
-			status += "CRC check failed"
-		}
-	}
-
-	return status
 }

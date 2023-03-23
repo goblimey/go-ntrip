@@ -418,20 +418,20 @@ func TestGetMessageWithErrors(t *testing.T) {
 	// GetMessage responds with an error message at various points.
 
 	var testData = []struct {
-		Description string
-		BitStream   []byte
+		description string
+		bitStream   []byte
 		Want        string
 	}{
 		{
-			"header too short", testdata.MessageType1074[:21],
-			"bitstream is too short for an MSM header - got 168 bits, expected at least 169",
+			"header too short", testdata.MessageType1074[:26],
+			"bitstream is too short for an MSM header - got 160 bits, expected at least 169",
 		},
 		{
-			"satellite cells too short", testdata.MessageType1074[:23],
+			"satellite cells too short", testdata.MessageType1074[:29],
 			"overrun - not enough data for 1 MSM4 satellite cells - need 18 bits, got 13",
 		},
 		{
-			"Signal cells too short", testdata.MessageType1074[:30],
+			"Signal cells too short", testdata.MessageType1074[:34],
 			"overrun - want 2 MSM4 signals, got 1",
 		},
 		{
@@ -440,15 +440,15 @@ func TestGetMessageWithErrors(t *testing.T) {
 		},
 	}
 	for _, td := range testData {
-		gotMessage, gotError := GetMessage(td.BitStream)
+		gotMessage, gotError := GetMessage(td.bitStream)
 		if gotMessage != nil {
-			t.Error("On error, the message should be nil")
+			t.Errorf("%s: On error, the message should be nil", td.description)
 		}
 		if gotError == nil {
 			t.Error("expected an error")
 		} else {
 			if gotError.Error() != td.Want {
-				t.Errorf("%s:\nwant %s\n got %s", td.Description, td.Want, gotError.Error())
+				t.Errorf("%s:\nwant %s\n got %s", td.description, td.Want, gotError.Error())
 			}
 		}
 	}

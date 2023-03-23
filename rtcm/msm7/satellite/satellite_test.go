@@ -140,7 +140,11 @@ func TestString(t *testing.T) {
 	const extendedInfo = 3
 	const phaseRangeRate = 4
 
-	const wantDisplay = " 1 {2.500, 3, 4}"
+	const satRange = 2.5 * utils.OneLightMillisecond
+
+	const displayTemplate = " 1 {%.3f, 3, 4}"
+
+	wantDisplay := fmt.Sprintf(displayTemplate, satRange)
 
 	satellite := New(1, wholeMillis, fracMillis, extendedInfo, phaseRangeRate)
 
@@ -149,28 +153,6 @@ func TestString(t *testing.T) {
 	if wantDisplay != display {
 		t.Errorf("want \"%s\" got \"%s\"", wantDisplay, display)
 	}
-}
-
-// TestStringWithRounding checks the string method when the result is rounded up.
-func TestStringWithRounding(t *testing.T) {
-	// The fractional millis value is ten bits (1/1024).
-	// This value represents .5005859375, big enough to provoke rounding up
-	// when displayed to three decimal places.
-	const rangeWhole = 2
-	const rangeFrac = 0x206 // 10 0000 0110
-	const extendedInfo = 3
-	const phaseRangeRate = 4
-
-	const wantDisplay = " 1 {2.506, 3, 4}"
-
-	satellite := New(1, rangeWhole, rangeFrac, extendedInfo, phaseRangeRate)
-
-	display := satellite.String()
-
-	if wantDisplay != display {
-		t.Errorf("want \"%s\" got \"%s\"", wantDisplay, display)
-	}
-
 }
 
 // TestStringWithInvalidRange checks the string method.
@@ -197,16 +179,19 @@ func TestStringWithInvalidRange(t *testing.T) {
 // TestStringWithInvalidPhaseRangeRate checks that the string method displays
 // the phase range rate correctly.
 func TestStringWithInvalidPhaseRangeRate(t *testing.T) {
-	// When the whole millis value is marked as invalid,
-	// both range values are ignored.
+	// The approximate phase range rate value is marked as invalid.
 	const rangeWhole = 2
-	const rangeFrac = 0x206 // 10 0000 0110
+	const rangeFrac = 0x001 // 00 0000 0001
 	const extendedInfo = 3
 
 	invalidRangeBits := []byte{0x20, 0, 0} // 0010 0000 0000 0000
 	phaseRangeRate := int(utils.GetBitsAsInt64(invalidRangeBits, 2, 14))
 
-	const wantDisplay = " 1 {2.506, 3, invalid}"
+	const satRange = (2 + (float64(rangeFrac) * 1.0 / 1024)) * utils.OneLightMillisecond
+
+	const displayTemplate = " 1 {%.3f, 3, invalid}"
+
+	wantDisplay := fmt.Sprintf(displayTemplate, satRange)
 
 	satellite := New(1, rangeWhole, rangeFrac, extendedInfo, phaseRangeRate)
 

@@ -24,6 +24,14 @@ var UnhandledMessageType1024 = []byte{0xd3, 0, 0x08,
 	0xa8, 0xf7, 0x2a,
 }
 
+// Fake1230 is a fake message with type 1230 (Glonass code/phase bias).
+// The contents is junk - it does not match the 1230 structure.
+// 1230 is 0x4ce.
+var Fake1230 = []byte{0xd3, 0x04, 0xce,
+	0x4c, 0xe0, 00, 0x8a, 0, 0, 0, 0,
+	0xf7, 0x3c, 0xf2,
+}
+
 var CRCFailure = []byte{0xd3, 0, 0x08,
 	0x4c, 0xe0, 0x00,
 	0x8a, 0, 0, 0, 0,
@@ -33,7 +41,7 @@ var CRCFailure = []byte{0xd3, 0, 0x08,
 
 var MessageFrameType1005 = []byte{
 	// leader:
-	0xd3, 0x03, 0xed,
+	0xd3, 0, 19,
 	// messageType1005 contains a message type 1005.
 	// message type:    Station ID:        ITRF year
 	//                                             ign:   x:
@@ -48,17 +56,20 @@ var MessageFrameType1005 = []byte{
 	0x00, 0x03, 0x94, 0x47, 0x80,
 	0x00, 0x05, 0x46, 0x4e,
 	// CRC
-	0xc5, 0x55, 0xff,
+	0x5b, 0x90, 0x5f,
 }
 
 var Message1077 = []byte{
 
-	// A real RTCM message captured from a UBlox GPS device.  The leader
-	// and CRC have been stripped off.  This is a message type 1077 (a
-	// GPS MSM7), padded with null bytes at the end. Bytes 6 and 7 (0x62, 0x00)
-	// contain the multiple message flag (true), and the sequence number (zero),
-	// so this is the first of a sequence of messages covering the same scan and
-	// it only contains some of the signal cells.
+	// A real RTCM message frame captured from a UBlox GPS device.  This contains a message 
+	// type 1077 (a GPS MSM7), padded with null bytes at the end. Bytes 6 and 7 (0x62, 0x00)
+	// of the embedded message contain the multiple message flag (true), and the sequence
+	// number (zero), so this is the first of a sequence of messages covering the same scan
+	// and it only contains some of the signal cells.
+	//
+	// Leader:
+	0xd3, 0, 206,
+	//
 	// RTCM message type 1077 - signals from GPS satellites:
 	//         |-- multiple message flag
 	//         | |-- sequence number
@@ -142,7 +153,8 @@ var BatchWith1077Frame = []byte{
 }
 
 var MessageType1074 = []byte{
-	// A hand-crafted message type 1074 - MSM 4 GPS.
+	// A hand-crafted message type 1074 - MSM 4 GPS with leader and CRC.
+	0xd3, 0x04, 0x32, // leader
 	// The header is 185 bits long, with 2 cell mask bits.
 	// Type is 1074, Station ID is 1:
 	// 0: 1000 0110 010|0000 0000 0001
@@ -165,6 +177,8 @@ var MessageType1074 = []byte{
 	0x00, 0x00, 0x40, 0x00,
 	// 276: 0000 000|0   011|0 100|0|  1|000 111|0  1000 0|000
 	0x00, 0x68, 0x8e, 0x80,
+	// CRC
+	0x6e, 0x75, 0x44,
 }
 
 // MessageBatch contain a batch of RTCM3 messages.  In each message byte 0
@@ -461,5 +475,5 @@ var MessageFrameType1074 = []byte{
 	// 276: 0000 000|0   011|0 100|0|  1|000 111|0  1000 0|000
 	0x00, 0x68, 0x8e, 0x80,
 	// 3-byte CRC.
-	0x4a, 0xb3, 0x5c,
+	0x6e, 0x75, 0x44,
 }

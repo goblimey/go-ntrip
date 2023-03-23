@@ -56,12 +56,6 @@ import (
 // reverse-engineered by looking at existing software such as the RTKLIB
 // library, which is written in the C programming language.
 //
-// I tested the software using UBlox equipment.  For accurate positioning
-// a UBlox rover requires message type 1005 and the MSM messages.  It also
-// requires type 1230 (GLONASS code/phase biases) and type 4072, which is
-// in a proprietary unpublished UBlox format.  I cannot currently decipher
-// either of these messages.
-//
 // For an example of usage, see the rtcmdisplay tool in this repository.
 // The filter reads a stream of message data from a base station and
 // emits a readable version of the messages.  That's useful when you are
@@ -86,17 +80,18 @@ const oneLightMillisecond float64 = 299792.458
 // defaultWaitTimeOnEOF is the default value for RTCM.WaitTimeOnEOF.
 const defaultWaitTimeOnEOF = 100 * time.Microsecond
 
-// maxTimeStamp is the maximum value of a 30-bit timestamp.
-const maxTimeStamp = 0x3fffffff // maximum 30-bit value
-
 // glonssInvalidDay is the invalid value for the day part of the day value.
 const glonassInvalidDay = 7
+
+// maxTimestamp is the maximum timestamp value.  The timestamp is 30 bits
+// giving milliseconds since the start of the day.
+const maxTimestamp = 0x3fffffff // 0011 1111 1111 1111 1111 1111 1111 1111
 
 // glonassDayBitMask is used to extract the Glonass day from the timestamp
 // in an MSM7 message.  The 30 bit time value is a 3 bit day (0 is Sunday)
 // followed by a 27 bit value giving milliseconds since the start of the
 // day.
-const glonassDayBitMask = 0x38000000 // 0011 1000 0000 0000
+const glonassDayBitMask = 0x38000000 // 0011 1000 0000 0000 0000 0000 0000 0000
 
 // gpsLeapSeconds is the duration that GPS time is ahead of UTC
 // in seconds, correct from the start of 2017/01/01.  An extra leap
@@ -274,7 +269,7 @@ func (handler *RTCM) getMessageLengthAndType(bitStream []byte) (uint, int, error
 		return 0, utils.NonRTCMMessage, errors.New(errorMessage)
 	}
 
-	// The bottom ten bits of the header is the message length.
+	// The bottom ten bits of the leader is the message length.
 	length := uint(utils.GetBitsAsUint64(bitStream, 14, 10))
 
 	// The 12-bit message type follows the header.
@@ -653,9 +648,6 @@ func (handler *RTCM) GetMessage(bitStream []byte) (*rtcm3.Message, error) {
 
 	// The message is complete and the CRC check passes, so it's valid.
 	message := rtcm3.New(messageType, "", bitStream[:expectedFrameLength])
-	message.Valid = true
-	message.CRCValid = true
-	message.Complete = true
 
 	// If the message is an MSM7, get the time (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
@@ -691,29 +683,19 @@ func (handler *RTCM) GetMessage(bitStream []byte) (*rtcm3.Message, error) {
 func Analyse(message *rtcm3.Message) {
 	var readable interface{}
 
-	// The raw data contains the whole message frame: the leader, the MSM message
-	// and the CRC.  Reduce it to just the MSM message.
-	low := leaderLengthBytes
-	high := len(message.RawData) - crcLengthBytes
-	messageBitStream := message.RawData[low:high]
-
 	switch {
 
 	case utils.MSM4(message.MessageType):
-		analyseMSM4(messageBitStream, message)
+		analyseMSM4(message.RawData, message)
 
 	case utils.MSM7(message.MessageType):
-		analyseMSM7(messageBitStream, message)
+		analyseMSM7(message.RawData, message)
 
 	case message.MessageType == 1005:
-		analyse1005(messageBitStream, message)
+		analyse1005(message.RawData, message)
 
 	case message.MessageType == 1230:
 		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this)"
-		message.Readable = readable
-
-	case message.MessageType == 4072:
-		readable = "(Message type 4072 is in an unpublished format defined by U-Blox.)"
 		message.Readable = readable
 
 	default:
@@ -726,7 +708,6 @@ func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
 	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
-		message.Valid = false
 		return
 	}
 
@@ -737,7 +718,6 @@ func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
 	msm7Message, msm7Error := msm7Message.GetMessage(messageBitStream)
 	if msm7Error != nil {
 		message.ErrorMessage = msm7Error.Error()
-		message.Valid = false
 		return
 	}
 
@@ -752,7 +732,6 @@ func analyse1005(messageBitStream []byte, message *rtcm3.Message) {
 	}
 
 	message.Readable = message1005
-	message.Valid = true
 }
 
 // getTimeFromTimeStamp converts the 30-bit timestamp in the MSM header to a time value
@@ -760,10 +739,6 @@ func analyse1005(messageBitStream []byte, message *rtcm3.Message) {
 func (handler *RTCM) getTimeFromTimeStamp(messageType int, timestamp uint) (time.Time, error) {
 
 	var zeroTimeValue time.Time
-	if timestamp > maxTimeStamp {
-		e := errors.New("out of range")
-		return zeroTimeValue, e
-	}
 
 	// Convert the EpochTime to UTC.  This requires keeping a notion of time
 	// over many messages, potentially for many days, so it must be done by
@@ -772,42 +747,41 @@ func (handler *RTCM) getTimeFromTimeStamp(messageType int, timestamp uint) (time
 	// The Glonass timestamp has an invalid value, so the Glonass converter can
 	// return an error.
 
-	var utcTime time.Time
 	switch messageType {
 	case utils.MessageTypeMSM4GPS:
-		utcTime = handler.getUTCFromGPSTime(timestamp)
+		utcTime, err := handler.getUTCFromGPSTime(timestamp)
+		return utcTime, err
 	case utils.MessageTypeMSM7GPS:
-		utcTime = handler.getUTCFromGPSTime(timestamp)
+		utcTime, err := handler.getUTCFromGPSTime(timestamp)
+		return utcTime, err
 	case utils.MessageTypeMSM4Glonass:
 		utcTime, err := handler.getUTCFromGlonassTime(timestamp)
-		if err != nil {
-			return utcTime, err
-		}
+		return utcTime, err
 	case utils.MessageTypeMSM7Glonass:
 		utcTime, err := handler.getUTCFromGlonassTime(timestamp)
-		if err != nil {
-			return utcTime, err
-		}
+		return utcTime, err
 	case utils.MessageTypeMSM4Galileo:
-		utcTime = handler.getUTCFromGalileoTime(timestamp)
+		utcTime, err := handler.getUTCFromGalileoTime(timestamp)
+		return utcTime, err
 	case utils.MessageTypeMSM7Galileo:
-		utcTime = handler.getUTCFromGalileoTime(timestamp)
+		utcTime, err := handler.getUTCFromGalileoTime(timestamp)
+		return utcTime, err
 	case utils.MessageTypeMSM4Beidou:
-		utcTime = handler.getUTCFromBeidouTime(timestamp)
+		utcTime, err := handler.getUTCFromBeidouTime(timestamp)
+		return utcTime, err
 	case utils.MessageTypeMSM7Beidou:
-		utcTime = handler.getUTCFromBeidouTime(timestamp)
+		utcTime, err := handler.getUTCFromBeidouTime(timestamp)
+		return utcTime, err
 	default:
 		// This MSM is one that we don't know how to decode.
 		return zeroTimeValue, errors.New("unknown message type")
 	}
-
-	return utcTime, nil
 }
 
 // GetUTCFromGPSTime converts a GPS time to UTC, using the start time
 // to find the correct epoch.
 //
-func (rtcm *RTCM) getUTCFromGPSTime(gpsTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromGPSTime(timestamp uint) (time.Time, error) {
 	// The GPS week starts at midnight at the start of Sunday
 	// but GPS time is ahead of UTC by a few leap seconds, so in
 	// UTC terms the week starts on Saturday a few seconds before
@@ -818,15 +792,20 @@ func (rtcm *RTCM) getUTCFromGPSTime(gpsTime uint) time.Time {
 	// week.  We also have to keep track of the last GPS timestamp
 	// and watch for it rolling over into the next week.
 
-	if rtcm.previousGPSTimestamp > gpsTime {
+	if timestamp > maxTimestamp {
+		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
+		return zeroTimeValue, errors.New("out of range")
+	}
+
+	if rtcm.previousGPSTimestamp > timestamp {
 		// The GPS Week has rolled over
 		rtcm.startOfThisGPSWeek = rtcm.startOfNextGPSWeek
 		rtcm.startOfNextGPSWeek = rtcm.startOfNextGPSWeek.AddDate(0, 0, 7)
 	}
-	rtcm.previousGPSTimestamp = gpsTime
+	rtcm.previousGPSTimestamp = timestamp
 
-	durationSinceStart := time.Duration(gpsTime) * time.Millisecond
-	return rtcm.startOfThisGPSWeek.Add(durationSinceStart)
+	durationSinceStart := time.Duration(timestamp) * time.Millisecond
+	return rtcm.startOfThisGPSWeek.Add(durationSinceStart), nil
 }
 
 // GetUTCFromGlonassTime converts a Glonass epoch time to UTC using
@@ -851,12 +830,16 @@ func (rtcm *RTCM) getUTCFromGlonassTime(timestamp uint) (time.Time, error) {
 	// will be producing RTCM3 messages something like once per second, so
 	// this assumption is safe.)
 
-	var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
+	day, millis, err := ParseGlonassTimeStamp(timestamp)
 
-	day, millis := ParseGlonassTimeStamp(timestamp)
+	if err != nil {
+		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
+		return zeroTimeValue, errors.New("out of range")
+	}
 
 	if day == glonassInvalidDay {
 		// The day value indicates an invalid time stamp.
+		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
 		return zeroTimeValue, errors.New("invalid day")
 	}
 
@@ -877,27 +860,40 @@ func (rtcm *RTCM) getUTCFromGlonassTime(timestamp uint) (time.Time, error) {
 // GetUTCFromGalileoTime converts a Galileo time to UTC, using the same epoch
 // as the start time.
 //
-func (rtcm *RTCM) getUTCFromGalileoTime(galileoTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromGalileoTime(timestamp uint) (time.Time, error) {
+
+	if timestamp > maxTimestamp {
+		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
+		return zeroTimeValue, errors.New("out of range")
+	}
+
 	// Galileo time is currently (Jan 2020) the same as GPS time.
-	return rtcm.getUTCFromGPSTime(galileoTime)
+	t, err := rtcm.getUTCFromGPSTime(timestamp)
+	return t, err
 }
 
 // GetUTCFromBeidouTime converts a Baidou time to UTC, using the Beidou
 // epoch given by the start time.
 //
-func (rtcm *RTCM) getUTCFromBeidouTime(epochTime uint) time.Time {
+func (rtcm *RTCM) getUTCFromBeidouTime(timestamp uint) (time.Time, error) {
+
+	if timestamp > maxTimestamp {
+		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
+		return zeroTimeValue, errors.New("out of range")
+	}
+
 	// BeiDou - the first few seconds of UTC Sunday are in one week,
 	// then the epoch time rolls over and all subsequent times are
 	// in the next week.
-	if epochTime < rtcm.previousBeidouTimestamp {
+	if timestamp < rtcm.previousBeidouTimestamp {
 		rtcm.startOfThisBeidouWeek = rtcm.startOfNextBeidouWeek
 		rtcm.startOfNextBeidouWeek =
 			rtcm.startOfNextBeidouWeek.AddDate(0, 0, 1)
 	}
-	rtcm.previousBeidouTimestamp = epochTime
+	rtcm.previousBeidouTimestamp = timestamp
 
-	durationSinceStart := time.Duration(epochTime) * time.Millisecond
-	return rtcm.startOfThisBeidouWeek.Add(durationSinceStart)
+	durationSinceStart := time.Duration(timestamp) * time.Millisecond
+	return rtcm.startOfThisBeidouWeek.Add(durationSinceStart), nil
 }
 
 // GetStartOfLastSundayUTC gets midnight at the start of the
@@ -923,16 +919,13 @@ func GetStartOfLastSundayUTC(now time.Time) time.Time {
 //
 func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 
-	display := fmt.Sprintf("message type %d, frame length %d %s\n",
-		message.MessageType, len(message.RawData), message.Status())
+	display := fmt.Sprintf("message type %d, frame length %d\n",
+		message.MessageType, len(message.RawData))
 
 	display += hex.Dump(message.RawData) + "\n"
 
 	if len(message.ErrorMessage) > 0 {
 		display += message.ErrorMessage + "\n"
-	}
-
-	if !message.Valid {
 		return display
 	}
 
@@ -949,12 +942,8 @@ func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 		return display
 	}
 
-	if !message.Valid {
-		if len(message.ErrorMessage) > 0 {
-			display += message.ErrorMessage + "\n"
-		} else {
-			display += "invalid message\n"
-		}
+	if len(message.ErrorMessage) > 0 {
+		display += message.ErrorMessage + "\n"
 		return display
 	}
 
@@ -1051,13 +1040,18 @@ func CheckCRC(frame []byte) bool {
 }
 
 // ParseGlonassTimeStamp separates out the two parts of a Glonass
-// epoch time value -3/27 day/milliseconds from start of day.
+// timestamp -3/27 day/milliseconds from start of day.
 //
-func ParseGlonassTimeStamp(epochTime uint) (uint, uint) {
-	// fmt.Printf("ParseGlonassEpochTime %x\n", epochTime)
-	day := (epochTime & glonassDayBitMask) >> 27
-	millis := epochTime &^ glonassDayBitMask
-	return day, millis
+func ParseGlonassTimeStamp(timestamp uint) (uint, uint, error) {
+
+	// The timestamp must fit into 30 bits.
+	if timestamp > maxTimestamp {
+		return 0, 0, errors.New("out of range")
+	}
+
+	day := timestamp >> 27
+	millis := timestamp &^ glonassDayBitMask
+	return day, millis, nil
 }
 
 // pause sleeps for the time defined in the RTCM.

@@ -19,29 +19,30 @@ func TestString(t *testing.T) {
 	const rangeWhole uint = 0x80       // 1000 0000 (128 millis)
 	const rangeFractional uint = 0x200 // 10 bits 1000 ... (0.5 millis)
 	const rangeDelta = int(0x40000)    // 20 bits 0100 ...
-	const rangeMS = 128.5
-	const twoToPower11 = 0x800 //                        1000 0000 0000
-	const twoToPowerMinus11 = float64(1) / twoToPower11
+	const approxRange = 128.5
+	const twoToPower11 = 0x800 // 1000 0000 0000
+	const twoToPowerMinus11 = 1 / float64(twoToPower11)
 	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
 	const twoToPowerMinus31 = 1 / float64(twoToPower31)
-	const rangeMilliseconds = 128.5 + float64(twoToPowerMinus31)
+	const rangeMilliseconds = approxRange + float64(twoToPowerMinus11)
+	const wantApproxRangeInMetres = approxRange * utils.OneLightMillisecond
+	const wantRangeInMetres = rangeMilliseconds * utils.OneLightMillisecond
 	const wavelength = utils.SpeedOfLightMS / utils.Freq2
+	const phaseRangeDelta = 1
+	wantPhaseRange := (approxRange + (phaseRangeDelta * twoToPowerMinus31)) * utils.OneLightMillisecond / wavelength
+
 	const signalID1 uint = 16
 	const signalID2 uint = 5
 	const extendedInfo = 5
-	const phaseRangeDelta int = 1
+
 	const wholePhaseRangeRate = 6
 	const phaseRangeRateDelta = 7000
 	const phaseRangeRate = 6.7
 	const lockTimeIndicator = 4
 	const halfCycleAmbiguity = true
-	const wantRange float64 = (128.5 + twoToPowerMinus11) * utils.OneLightMillisecond // 11 1111 1111
 
 	invalidPhaseRangeRateBytes := []byte{0x80, 00} // 14 bits plus filler: 1000 0000 0000 00 filler 00
 	invalidPhaseRangeRate := int(utils.GetBitsAsInt64(invalidPhaseRangeRateBytes, 0, 14))
-
-	rangeLM := rangeMilliseconds * utils.OneLightMillisecond
-	wantPhaseRange := rangeLM / wavelength
 
 	// Satellite mask with bits set for satellites 1 and 2.
 	const satMask uint64 = 0xc00000000000000
@@ -73,16 +74,17 @@ stationID 2, timestamp 3, single message, sequence number 1
 session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
 2 satellites, 2 signal types, 4 signals
-Satellite ID {range m, extended info, phase range rate}:
+Satellite ID {approx range m, extended info, phase range rate}:
  1 {%.3f, 5, 6}
  2 {invalid, 5, invalid}
-Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
+Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
  1 16 {%.3f, %.3f, %d, true, 5, %.3f}
  2  5 {invalid, invalid, 4, true, 6, invalid}
  2  5 {invalid, invalid, 7, false, 8, invalid}
 `
 	want := fmt.Sprintf(resultTemplate,
-		rangeMS, wantRange, wantPhaseRange, lockTimeIndicator, phaseRangeRate)
+		wantApproxRangeInMetres, wantRangeInMetres, wantPhaseRange,
+		lockTimeIndicator, phaseRangeRate)
 
 	header :=
 		header.New(1077, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask)
@@ -96,10 +98,24 @@ Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity,
 	}
 }
 
+// TestGetMessage checks GetMessage.
+func TestGetMessage(t *testing.T) {
+
+	gotMessage, gotError := GetMessage(testdata.MessageFrame1077)
+	if gotError != nil {
+		t.Errorf(gotError.Error())
+	}
+
+	if gotMessage.Header.MessageType != 1077 {
+		t.Errorf("want %d got %d", 1077, gotMessage.Header.MessageType)
+	}
+
+}
+
 // TestGetMessageWithErrors checks that GetMessage handles errors correctly.
 func TestGetMessageWithErrors(t *testing.T) {
 	// GetMessage responds with an error message at various points if the
-	// bitstream is too short.
+	// bit stream is too short.
 
 	var testData = []struct {
 		Description string
@@ -107,15 +123,15 @@ func TestGetMessageWithErrors(t *testing.T) {
 		Want        string
 	}{
 		{
-			"header too short", testdata.Message1077[:21],
+			"header too short", testdata.Message1077[:27],
 			"bitstream is too short for an MSM header - got 168 bits, expected at least 169",
 		},
 		{
-			"satellite cells too short", testdata.Message1077[:57],
+			"satellite cells too short", testdata.Message1077[:60],
 			"overrun - not enough data for 8 MSM7 satellite cells - need 288 bits, got 271",
 		},
 		{
-			"Signal cells too short", testdata.Message1077[:69],
+			"Signal cells too short", testdata.Message1077[:72],
 			"overrun - want at least one 80-bit signal cell when multiple message flag is set, got only 79 bits left",
 		},
 		{
@@ -198,16 +214,16 @@ stationID 0, timestamp 432023000, multiple message, sequence number 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 8 satellites, 2 signal types, 16 signals
-Satellite ID {range m, extended info, phase range rate}:
- 4 {81.425, 0, -135}
- 9 {84.274, 0, 182}
-16 {76.438, 0, 597}
-18 {71.738, 0, 472}
-25 {77.871, 0, -633}
-26 {68.921, 0, 292}
-29 {70.502, 0, -383}
-31 {72.286, 0, -442}
-Signals: sat ID sig ID {range, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
+Satellite ID {approx range m, extended info, phase range rate}:
+ 4 {24410542.339, 0, -135}
+ 9 {25264833.738, 0, 182}
+16 {22915678.774, 0, 597}
+18 {21506595.669, 0, 472}
+25 {23345166.602, 0, -633}
+26 {20661965.550, 0, 292}
+29 {21135953.821, 0, -383}
+31 {21670837.435, 0, -442}
+Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
  4  2 {24410527.355, 128278179.264, 582, false, 640, -135.107}
  4 16 {24410523.313, 99956970.352, 581, false, 608, -135.107}
  9 16 {25264751.952, 103454935.508, 179, false, 464, 182.123}

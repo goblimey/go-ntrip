@@ -214,7 +214,8 @@ func TestGetPhaseRangeMilliseconds(t *testing.T) {
 func TestGetPhaseRangeLightMilliseconds(t *testing.T) {
 	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
 	const twoToPowerMinus31 = 1 / float64(twoToPower31)
-	const rangeMilliseconds = 128.5 + float64(twoToPowerMinus31)
+	const delta float64 = 1
+	const rangeMilliseconds = 128.5 + (delta * float64(twoToPowerMinus31))
 	const want = rangeMilliseconds * OneLightMillisecond
 
 	got := GetPhaseRangeLightMilliseconds(rangeMilliseconds)

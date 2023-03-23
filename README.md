@@ -241,12 +241,44 @@ the RTKLIB software doesn't have functionality to decode one of those.
 Apart from MSM material, a rover also needs type 1005 messages,
 which give the position of the base station.
 
-UBlox also advises that base stations using their techology
-should also be configured to send type 4072 messages.
-These are in a proprietary unpublished format defined by UBlox.
-My guess is that they are useful to the configuration software that UBlox supplies.
+The UBlox ZED-F9P Integration Manual (2022-02 edition) 
+section 3.1.5.5.3 'Base station: RTCM output conﬁguration'
+recommends that the base station sends these messages:
 
-So a working base station might be configured to send out messages of type 1005, 1074, 1084, 1094, 1124, 1230 and 4072.  Alternatively it could use high resolution MSMs, so 1005, 1077, 1087, 1097, 1127, 1230 and 4072.
+* RTCM 1005 Stationary RTK reference station ARP (base position)
+* RTCM 1074 GPS MSM4
+* RTCM 1084 GLONASS MSM4
+* RTCM 1094 Galileo MSM4
+* RTCM 1124 BeiDou MSM4
+* RTCM 1230 GLONASS code-phase biases
+
+The RTKLIB software decodes all of these except for type 1230,
+so I can reverse-engineer the first five types.
+
+Types 1074, 1084, 1094 and 1134 are Type 4 Multiple Signal Messages (MSM4).
+Type 7 (MSM7) messages can be used instead - 1077, 1087, 1097 and 1127.
+Type 7 messages contain the same information as type 4 but some fields
+are of higher
+resolution.
+(The resolution of MSM4 is sufficient for 2cm accuracy.)
+
+The Integration Manual also mentions two 
+u-blox proprietary message types:
+
+* 4072.0 Reference station PVT and
+* 4072.1 Additional reference station information,
+
+It appears that these are only required to handle
+a moving base station,
+and 4072.1 is only used by old firmware.
+Type 4072.0 appears to give the base position
+(possibly because message type 1005 is intended to describe
+the position of a fixed base station and
+the values are not expected to change).
+The format of those two message types is not published
+so they are not handled by this software.
+
+So a working base station might be configured to send out messages of type 1005, 1074, 1084, 1094, 1124 and 1230.  Alternatively it could use high resolution MSMs, so 1005, 1077, 1087, 1097, 1127 and 1230.
 
 Ideally the base should send most of those messages once per second.
 Type 1005 can be sent out less often.
@@ -258,10 +290,6 @@ so when a rover subscribes to an endpoint on a caster
 it will receive a type 1005 within a few seconds.
 It takes a while for it to download the information it needs from the satellites,
 so a short wait for a base position message is OK.
-
-The rtcm package in this repo contains the logic to decode and display
-those message types,
-except for 1230 and 4072, the formats of which are opaque to me. 
 
 The RTKLIB source code has functionality to decode most RTCM messages,
 so if you need to understand other message types, go there.
