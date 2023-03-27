@@ -906,3 +906,49 @@ func TestMSM(t *testing.T) {
 		}
 	}
 }
+
+// TestGetConstellation checks the getConstellation helper function, which should
+// return an error if the message type is not an MSM.
+func TestGetConstellation(t *testing.T) {
+	// getConstellation is a helper function for GetMSMHeader.  The task of figuring
+	// out the constellation value is messy and needs careful testing.
+
+	var testData = []struct {
+		MessageType       int
+		WantConstellation string
+	}{
+		{1074, "GPS"},
+		{1084, "Glonass"},
+		{1094, "Galileo"},
+		{1104, "SBAS"},
+		{1114, "QZSS"},
+		{1124, "Beidou"},
+		{1134, "NavIC/IRNSS"},
+		{1077, "GPS"},
+		{1087, "Glonass"},
+		{1097, "Galileo"},
+		{1107, "SBAS"},
+		{1117, "QZSS"},
+		{1127, "Beidou"},
+		{1137, "NavIC/IRNSS"},
+
+		// These message numbers are not for MSM messages and provoke an error response.
+		{0, "unknown constellation"},
+		{1, "unknown constellation"},
+		{1023, "unknown constellation"},
+		{1138, "unknown constellation"},
+		{1073, "unknown constellation"},
+		{1075, "unknown constellation"},
+		{1076, "unknown constellation"},
+
+		{MaxMessageType, "unknown constellation"},
+	}
+
+	for _, td := range testData {
+		constellation := GetConstellation(td.MessageType)
+		if td.WantConstellation != constellation {
+			t.Errorf("%d: want %s, got %s",
+				td.MessageType, td.WantConstellation, constellation)
+		}
+	}
+}

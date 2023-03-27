@@ -168,7 +168,7 @@ func New(
 	cellMask uint64,
 ) *Header {
 
-	constellation := getConstellation(messageType)
+	constellation := utils.GetConstellation(messageType)
 
 	satellites := getSatellites(satelliteMask)
 
@@ -232,7 +232,7 @@ func (header *Header) getTitle() string {
 	const titleMSM4 = " Full Pseudoranges and PhaseRanges plus CNR"
 	const titleMSM7 = " Full Pseudoranges and PhaseRanges plus CNR (high resolution)"
 
-	constellation := getConstellation(header.MessageType)
+	constellation := utils.GetConstellation(header.MessageType)
 
 	switch header.MessageType {
 	case utils.MessageTypeMSM4GPS:
@@ -511,49 +511,6 @@ func getMSMType(bitStream []byte) (int, uint, error) {
 	}
 
 	return messageType, pos, nil
-}
-
-// getConstellation is a helper function for New and NewWithMessageType.  Given
-// a message type it returns the constellation.
-func getConstellation(messageType int) string {
-
-	var constellation string
-
-	switch messageType {
-	case utils.MessageTypeMSM4GPS:
-		constellation = "GPS"
-	case utils.MessageTypeMSM4Glonass:
-		constellation = "Glonass"
-	case utils.MessageTypeMSM4Galileo:
-		constellation = "Galileo"
-	case utils.MessageTypeMSM4SBAS:
-		constellation = "SBAS"
-	case utils.MessageTypeMSM4QZSS:
-		constellation = "QZSS"
-	case utils.MessageTypeMSM4Beidou:
-		constellation = "BeiDou"
-	case utils.MessageTypeMSM4NavicIrnss:
-		constellation = "NavIC/IRNSS"
-	case utils.MessageTypeMSM7GPS:
-		constellation = "GPS"
-	case utils.MessageTypeMSM7Glonass:
-		constellation = "Glonass"
-	case utils.MessageTypeMSM7Galileo:
-		constellation = "Galileo"
-	case utils.MessageTypeMSM7SBAS:
-		constellation = "SBAS"
-	case utils.MessageTypeMSM7QZSS:
-		constellation = "QZSS"
-	case utils.MessageTypeMSM7Beidou:
-		constellation = "BeiDou"
-	case utils.MessageTypeMSM7NavicIrnss:
-		constellation = "NavIC/IRNSS"
-
-	default:
-		constellation = "unknown constellation"
-	}
-
-	return constellation
 }
 
 // getSatellites gets a satellite list from the given bit mask.

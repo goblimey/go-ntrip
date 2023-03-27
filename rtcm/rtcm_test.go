@@ -40,8 +40,8 @@ var validMessageFrame = []byte{
 
 var lenValidMessageInBits = len(validMessageFrame) * 8
 
-// maxEpochTime is the value of a GPS and Beidou epoch time
-// just before it rolls over.
+// maxEpochTime is the value of a GPS, Galileo and Beidou
+// timestamp at the end of the week, just before it rolls over.
 const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
 
 var logger *log.Logger
@@ -928,42 +928,34 @@ func TestGPSEpochTimes(t *testing.T) {
 
 	expectedEpochStart :=
 		time.Date(2020, time.August, 1, 23, 59, 60-gpsLeapSeconds, 0, utils.LocationUTC)
-	expectedNextEpochStart :=
-		time.Date(2020, time.August, 8, 23, 59, 60-gpsLeapSeconds, 0, utils.LocationUTC)
 
 	// Sunday 2020/08/02 BST, just after the start of the GPS epoch
 	dateTime1 := time.Date(2020, time.August, 2, 1, 0, 0, (60 - gpsLeapSeconds), utils.LocationLondon)
 	rtcm1 := New(dateTime1, logger)
-	if expectedEpochStart != rtcm1.startOfThisGPSWeek {
+	if expectedEpochStart != rtcm1.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(utils.DateLayout),
-			rtcm1.startOfThisGPSWeek.Format(utils.DateLayout))
-		return
-	}
-	if expectedNextEpochStart != rtcm1.startOfNextGPSWeek {
-		t.Errorf("expected %s result %s\n",
-			expectedEpochStart.Format(utils.DateLayout),
-			rtcm1.startOfThisGPSWeek.Format(utils.DateLayout))
+			rtcm1.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
 
 	// Wednesday 2020/08/05
 	dateTime2 := time.Date(2020, time.August, 5, 12, 0, 0, 0, utils.LocationLondon)
 	rtcm2 := New(dateTime2, logger)
-	if expectedEpochStart != rtcm2.startOfThisGPSWeek {
+	if expectedEpochStart != rtcm2.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(utils.DateLayout),
-			rtcm2.startOfThisGPSWeek.Format(utils.DateLayout))
+			rtcm2.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
 
 	// Sunday 2020/08/02 BST, just before the end of the GPS epoch
 	dateTime3 := time.Date(2020, time.August, 9, 00, 59, 60-gpsLeapSeconds-1, 999999999, utils.LocationLondon)
 	rtcm3 := New(dateTime3, logger)
-	if expectedEpochStart != rtcm3.startOfThisGPSWeek {
+	if expectedEpochStart != rtcm3.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(utils.DateLayout),
-			rtcm3.startOfThisGPSWeek.Format(utils.DateLayout))
+			rtcm3.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
 
@@ -972,10 +964,10 @@ func TestGPSEpochTimes(t *testing.T) {
 	startOfNext := time.Date(2020, time.August, 8, 23, 59, 60-gpsLeapSeconds, 0, utils.LocationUTC)
 
 	rtcm4 := New(dateTime4, logger)
-	if startOfNext != rtcm4.startOfThisGPSWeek {
+	if startOfNext != rtcm4.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			startOfNext.Format(utils.DateLayout),
-			rtcm4.startOfThisGPSWeek.Format(utils.DateLayout))
+			rtcm4.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
 }
@@ -998,27 +990,27 @@ func TestBeidouEpochTimes(t *testing.T) {
 	startTime1 := time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC)
 	rtcm1 := New(startTime1, logger)
 
-	if !expectedStartOfPreviousWeek.Equal(rtcm1.startOfThisBeidouWeek) {
+	if !expectedStartOfPreviousWeek.Equal(rtcm1.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfPreviousWeek.Format(utils.DateLayout), rtcm1.startOfThisBeidouWeek.Format(utils.DateLayout))
+			expectedStartOfPreviousWeek.Format(utils.DateLayout), rtcm1.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// ... and so should this.
 	startTime2 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds-1, 999999999, utils.LocationUTC)
 	rtcm2 := New(startTime2, logger)
 
-	if !expectedStartOfPreviousWeek.Equal(rtcm2.startOfThisBeidouWeek) {
+	if !expectedStartOfPreviousWeek.Equal(rtcm2.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfPreviousWeek.Format(utils.DateLayout), rtcm2.startOfThisBeidouWeek.Format(utils.DateLayout))
+			expectedStartOfPreviousWeek.Format(utils.DateLayout), rtcm2.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// This start time should be in this week.
 	startTime3 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
 	rtcm3 := New(startTime3, logger)
 
-	if !expectedStartOfThisWeek.Equal(rtcm3.startOfThisBeidouWeek) {
+	if !expectedStartOfThisWeek.Equal(rtcm3.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfThisWeek.Format(utils.DateLayout), rtcm3.startOfThisBeidouWeek.Format(utils.DateLayout))
+			expectedStartOfThisWeek.Format(utils.DateLayout), rtcm3.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// This start time should be just at the end of this Beidou week.
@@ -1026,9 +1018,9 @@ func TestBeidouEpochTimes(t *testing.T) {
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds-1, 999999999, utils.LocationUTC)
 	rtcm4 := New(startTime4, logger)
 
-	if !expectedStartOfThisWeek.Equal(rtcm4.startOfThisBeidouWeek) {
+	if !expectedStartOfThisWeek.Equal(rtcm4.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfThisWeek.Format(utils.DateLayout), rtcm4.startOfThisBeidouWeek.Format(utils.DateLayout))
+			expectedStartOfThisWeek.Format(utils.DateLayout), rtcm4.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// This start time should be just at the start of the next Beidou week.
@@ -1036,9 +1028,9 @@ func TestBeidouEpochTimes(t *testing.T) {
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
 	rtcm5 := New(startTime5, logger)
 
-	if !expectedStartOfNextWeek.Equal(rtcm5.startOfThisBeidouWeek) {
+	if !expectedStartOfNextWeek.Equal(rtcm5.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfNextWeek.Format(utils.DateLayout), rtcm5.startOfThisBeidouWeek.Format(utils.DateLayout))
+			expectedStartOfNextWeek.Format(utils.DateLayout), rtcm5.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 }
 
@@ -1049,36 +1041,29 @@ func TestGlonassEpochTimes(t *testing.T) {
 	// expect 9pm Saturday 1st August - midnight Sunday 2nd August in Russia - Glonass day 0.
 	expectedEpochStart1 :=
 		time.Date(2020, time.August, 1, 21, 0, 0, 0, utils.LocationUTC)
-	// expect 9pm Sunday 2nd August - midnight Monday 3rd August - Glonass day 1
-	expectedNextEpochStart1 :=
-		time.Date(2020, time.August, 2, 21, 0, 0, 0, utils.LocationUTC)
+
 		// expect Glonass day 0.
 	expectedGlonassDay1 := uint(0)
 
 	startTime1 :=
 		time.Date(2020, time.August, 2, 5, 0, 0, 0, utils.LocationUTC)
 	rtcm1 := New(startTime1, logger)
-	if expectedEpochStart1 != rtcm1.startOfThisGlonassDay {
+	if expectedEpochStart1 != rtcm1.startOfGlonassDay {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart1.Format(utils.DateLayout),
-			rtcm1.startOfThisGlonassDay.Format(utils.DateLayout))
+			rtcm1.startOfGlonassDay.Format(utils.DateLayout))
 	}
-	if expectedNextEpochStart1 != rtcm1.startOfNextGlonassDay {
-		t.Errorf("expected %s result %s\n",
-			expectedEpochStart1.Format(utils.DateLayout),
-			rtcm1.startOfThisGlonassDay.Format(utils.DateLayout))
-	}
-	if expectedGlonassDay1 != rtcm1.previousGlonassDay {
+
+	if expectedGlonassDay1 != rtcm1.glonassDayFromPreviousMessage {
 		t.Errorf("expected %d result %d\n",
-			expectedGlonassDay1, rtcm1.previousGlonassDay)
+			expectedGlonassDay1, rtcm1.glonassDayFromPreviousMessage)
 	}
 
 	// 21:00 on Monday 3rd August - 00:00 on Tuesday in Moscow - Glonass day 2.
 	expectedEpochStart2 :=
 		time.Date(2020, time.August, 3, 21, 0, 0, 0, utils.LocationUTC)
 	// 21:00 on Tuesday 4th August - 00:00 on Wednesday in Moscow - Glonass day 3
-	expectedNextEpochStart2 :=
-		time.Date(2020, time.August, 4, 21, 0, 0, 0, utils.LocationUTC)
+
 	expectedGlonassDay2 := uint(2)
 
 	// Start just before 9pm on Tuesday 3rd August - just before the end of
@@ -1086,19 +1071,14 @@ func TestGlonassEpochTimes(t *testing.T) {
 	startTime2 :=
 		time.Date(2020, time.August, 3, 22, 59, 59, 999999999, utils.LocationUTC)
 	rtcm2 := New(startTime2, logger)
-	if expectedEpochStart2 != rtcm2.startOfThisGlonassDay {
+	if expectedEpochStart2 != rtcm2.startOfGlonassDay {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart2.Format(utils.DateLayout),
-			rtcm1.startOfThisGlonassDay.Format(utils.DateLayout))
+			rtcm1.startOfGlonassDay.Format(utils.DateLayout))
 	}
-	if expectedNextEpochStart2 != rtcm2.startOfNextGlonassDay {
-		t.Errorf("expected %s result %s\n",
-			expectedEpochStart2.Format(utils.DateLayout),
-			rtcm1.startOfThisGlonassDay.Format(utils.DateLayout))
-	}
-	if expectedGlonassDay2 != rtcm2.previousGlonassDay {
+	if expectedGlonassDay2 != rtcm2.glonassDayFromPreviousMessage {
 		t.Errorf("expected %d result %d\n",
-			expectedGlonassDay2, rtcm2.previousGlonassDay)
+			expectedGlonassDay2, rtcm2.glonassDayFromPreviousMessage)
 	}
 }
 
@@ -1483,52 +1463,184 @@ func createHeader(messageType int, epochTime uint) *header.Header {
 	return header.New(messageType, 0, epochTime, false, 0, 0, 0, 0, false, 0, 0, 0, 0)
 }
 
-// TestConversionOfTimeToUTC checks the time conversion functions.
+// TestConversionOfTimeToUTC checks that the converting a timestamp to
+// a time works when the timestamp rolls over
 func TestConversionOfTimeToUTC(t *testing.T) {
 
-	// Use Monday August 10th BST as the start date
-	startTime := time.Date(2020, time.August, 10, 2, 0, 0, 0, utils.LocationLondon)
-
-	// Tha should give an epoch start just before midnight on Saturday 8th August.
-	startOfThisEpoch :=
-		time.Date(2020, time.August, 9, 1, 0, 0, 0, utils.LocationLondon).Add(gpsTimeOffset)
+	// The timestamp is an offset in milliseconds from the start of the week.  The week
+	// starts at a different time for each constellation.  The handler keeps track of the
+	// current start of week and remembers the last timestamp.  If the given timestamp is
+	// smaller than the last one, the handler rolls over into a new week, updating its
+	// start of week value.
+	//
+	// The test uses three timestamps 1, 2 and 3.  2 is bigger than 1, so there should be
+	// no rollover.  3 is bigger than 2 so that should provoke a rollover to the next
+	// week.
 
 	var testData = []struct {
-		hdr  *header.Header
-		want time.Time
+		description            string
+		startTime              time.Time // The start of the week for this constellation.
+		messageType            int       // The message type (which gives the constellation).
+		wantStartOfWeek1       time.Time // start of week before rollover.
+		timestamp1             uint      // First timestamp - before the rollover.
+		wantTimeFromTimestamp1 time.Time // The time from timestamp1.
+		timestamp2             uint      // second timestamp, bigger than 1 so still no rollover.
+		wantTimeFromTimestamp2 time.Time // The time from timestamp2.
+		timestamp3             uint      // Third timestamp, smaller than 2 to provoke rollover.
+		wantStartOfWeek2       time.Time // The start of week after the rollover.
+		wantTimeFromTimestamp  time.Time // The time from timestamp3.
 	}{
-		// GPS is 18 seconds ahead of UTC
-		// This epoch time us two days after the start of the week.
-		{createHeader(utils.MessageTypeMSM4GPS, (48 * 3600 * 1000)),
-			startOfThisEpoch.AddDate(0, 0, 2).In(utils.LocationUTC)},
-		{createHeader(utils.MessageTypeMSM7GPS, (48 * 3600 * 1000)),
-			startOfThisEpoch.AddDate(0, 0, 2).In(utils.LocationUTC)},
-		// The GPS clock counts milliseconds until (23:59:59.999 GMT less the leap
-		// seconds() on the next Saturday (15th August).  In August that's (00:59:59.999 BST
-		// less the leap seconds) on the next Sunday (16th August).
-		{createHeader(utils.MessageTypeMSM4GPS, (7*24*3600*1000)-1),
-			time.Date(2020, time.August, 16, 0, 59, 59, 999000000, utils.LocationLondon).Add(gpsTimeOffset).In(utils.LocationUTC)},
-		{createHeader(utils.MessageTypeMSM7GPS, (7*24*3600*1000)-1),
-			time.Date(2020, time.August, 16, 0, 59, 59, 999000000, utils.LocationLondon).Add(gpsTimeOffset).In(utils.LocationUTC)},
-	}
+		{
+			"GPS",
+			// Monday 10th August BST.  2am is 1am UTC.
+			time.Date(2020, time.August, 10, 2, 0, 0, 0, utils.LocationLondon),
+			utils.MessageTypeMSM4GPS,
+			// The GPS week of 10th August starts at GPS midnight 9th August,
+			// in UTC, just before midnight at the end of the 8th.
+			time.Date(2020, time.August, 8, 23, 59, 42, 0, utils.LocationUTC),
+			47 * 3600 * 1000, // 1 day 23 hours into the week.
+			time.Date(2020, time.August, 10, 22, 59, 42, 0, utils.LocationUTC),
+			(7 * 24 * 3600 * 1000) - 1, // just before end of week.
+			time.Date(2020, time.August, 15, 23, 59, 41, 0, utils.LocationUTC),
+			500, // rolled over
+			time.Date(2020, time.August, 15, 23, 59, 42, 0, utils.LocationUTC),
+			// A timestamp value of 500 milliseconds should give 15th (02:00:00.500 less the leap seconds)
+			// CET on Sunday 16th August.
+			time.Date(2020, time.August, 15, 23, 59, 42, 500000000, utils.LocationUTC),
+		},
+		{
+			"Beidou",
+			// Sunday 9th August.
+			time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC),
+			utils.MessageTypeMSM7Beidou,
+			time.Date(2020, time.August, 9, 00, 00, 14, 0, utils.LocationUTC),
+			0, // Start of the week.
+			time.Date(2020, time.August, 9, 00, 00, 14, 0, utils.LocationUTC),
+			maxEpochTime, // just before end of week.
+			time.Date(2020, time.August, 15, 00, 00, 13, 999, utils.LocationUTC),
+			500, // rolled over
+			time.Date(2020, time.August, 16, 00, 00, 14, 0, utils.LocationUTC),
+			time.Date(2020, time.August, 16, 00, 00, 14, 500000000, utils.LocationUTC),
+		},
+		{
+			"Glonass",
+			// 23:00:00 on Monday 10th August Paris is midnight on the Tuesday
+			// 11th in Russia - start of Glonass day 2.
+			time.Date(2020, time.August, 10, 23, 0, 0, 0, utils.LocationParis),
+			utils.MessageTypeMSM7Glonass,
+			time.Date(2020, time.August, 11, 0, 0, 0, 0, utils.LocationMoscow),
+			// Day = 2, glonassTime = (4*3600*1000), which is 2 am on Russian Tuesday,
+			// which is 11pm on Monday 10th UTC.
+			2<<27 | (2 * 3600 * 1000),
+			time.Date(2020, time.August, 12, 23, 0, 0, 0, utils.LocationUTC),
+			2<<27 | (5 * 3600 * 1000), // later that day in Moscow, 2am the next day in UTC.
+			time.Date(2020, time.August, 13, 2, 0, 0, 0, utils.LocationUTC),
+			3<<27 | (18 * 3600 * 1000), // rolled over to the next day
+			// 3pm Tuesday 11th August Paris - 4pm in Russia.
+			time.Date(2020, time.August, 11, 0, 0, 0, 0, utils.LocationMoscow).AddDate(0, 0, 1),
+			// Day = 3, glonassTime = (18*3600*1000), which is 6pm on Russian Wednesday,
+			// which is 3pm on Wednesday 12th UTC, 5pm CET.
+			time.Date(2020, time.August, 12, 17, 0, 0, 0, utils.LocationParis),
+		},
+		{
+			"Galileo",
+			// Monday 10th Aug.  Paris is two hours ahead of UTC.
+			time.Date(2020, time.August, 10, 23, 0, 0, 0, utils.LocationParis),
+			utils.MessageTypeMSM7Galileo,
+			time.Date(2020, time.August, 8, 23, 59, 42, 0, utils.LocationUTC),
+			(((52*3600)+1800)*1000 + 300), // 2 days, 4.5 hours  plus 300 ms in ms.
+			time.Date(2020, time.August, 10, 04, 29, 42, int(300*time.Millisecond), utils.LocationUTC).
+				Add(gpsTimeOffset),
+			(((74*3600)+30)*1000 + 700), // 3 days 2 hours 30 secondsand 400 ms.
+			time.Date(2020, time.August, 12, 23, 59, 30, int(700*time.Millisecond), utils.LocationUTC),
+			((2 * 3600 * 1000) + 4), // rolled over to the next day
+			// 2020-08-08 23:59:42.
 
+			time.Date(2020, time.August, 16, 00, 00, 00, 0, utils.LocationUTC).
+				Add(gpsTimeOffset),
+			time.Date(2020, time.August, 16, 1, 59, 42, int(4*time.Millisecond), utils.LocationUTC),
+		},
+	}
 	for _, td := range testData {
-		handler := New(startTime, logger)
-		got, err := handler.getTimeFromTimeStamp(td.hdr.MessageType, td.hdr.Timestamp)
-		if err != nil {
-			t.Error(err)
+
+		handler := New(td.startTime, logger)
+
+		_, err1 := handler.getTimeFromTimeStamp(td.messageType, td.timestamp1)
+
+		if err1 != nil {
+			t.Errorf("%s: %v", td.description, err1)
 		}
 
-		if got.Location() != utils.LocationUTC {
-			t.Errorf("expected location to be UTC, got %s", got.Location().String())
+		// Get the start of the week for this message, or the
+		// start of day if Glonass.
+		startOfPeriod1 := getStartOfPeriod(td.messageType, handler)
+
+		if !td.wantStartOfWeek1.Equal(startOfPeriod1) {
+			t.Errorf("%s: want %s got %s",
+				td.description, td.wantStartOfWeek1.Format(utils.DateLayout),
+				startOfPeriod1.Format(utils.DateLayout))
 		}
 
-		if td.want != got {
-			t.Errorf("want %s, got %s",
-				td.want.Format(utils.DateLayout), got.Format(utils.DateLayout))
+		_, err2 := handler.getTimeFromTimeStamp(td.messageType, td.timestamp2)
+
+		if err2 != nil {
+			t.Errorf("%s: %v", td.description, err2)
 		}
 
+		// Should be no rollover.
+		if !td.wantStartOfWeek1.Equal(startOfPeriod1) {
+			t.Errorf("%s: want %s got %s",
+				td.description, td.wantStartOfWeek1.Format(utils.DateLayout),
+				startOfPeriod1.Format(utils.DateLayout))
+		}
+
+		t3, err3 := handler.getTimeFromTimeStamp(td.messageType, td.timestamp3)
+
+		if err3 != nil {
+			t.Errorf("%s: %v", td.description, err3)
+		}
+
+		// That should have provoked a rollover ...
+
+		// ...so we should be in a new period ...
+
+		// Get the start of the week for this message, or the
+		// start of day if Glonass.
+		startOfPeriod2 := getStartOfPeriod(td.messageType, handler)
+
+		if !td.wantStartOfWeek2.Equal(startOfPeriod2) {
+			t.Errorf("%s: want %s got %s",
+				td.description, td.wantStartOfWeek2.Format(utils.DateLayout),
+				startOfPeriod2.Format(utils.DateLayout))
+		}
+
+		// ... and so we should get this time from the timestamp.
+		if !td.wantTimeFromTimestamp.Equal(t3) {
+			t.Errorf("%s: want %s got %s",
+				td.description, td.wantTimeFromTimestamp.Format(utils.DateLayout), t3.Format(utils.DateLayout))
+		}
 	}
+}
+
+// getStartOfPeriod is a helper function for TestConversionOfTimeToUTCWithRollover.
+// It gets the start of the constellation's current period (week or, for Glonass,  day)
+func getStartOfPeriod(messageType int, handler *RTCM) time.Time {
+	// Get the start of the week for this message, or the
+	// start of day if Glonass.
+	constellation := utils.GetConstellation(messageType)
+	var startOfPeriod time.Time
+	switch constellation {
+	case "GPS":
+		startOfPeriod = handler.startOfGPSWeek
+	case "Galileo":
+		startOfPeriod = handler.startOfGalileoWeek
+	case "Glonass":
+		startOfPeriod = handler.startOfGlonassDay
+	case "Beidou":
+		startOfPeriod = handler.startOfBeidouWeek
+	}
+
+	return startOfPeriod
 }
 
 // TestGetTimeFromTimeStampWithError checks that getTimeFromTimeStampWithError when
@@ -1586,178 +1698,6 @@ func TestGetTimeFromTimeStampWithError(t *testing.T) {
 
 }
 
-// TestGetUTCFromGPSTime tests GetUTCFromGPSTime
-func TestGetUTCFromGPSTime(t *testing.T) {
-
-	// Use Monday August 10th BST as the start date
-	startTime := time.Date(2020, time.August, 10, 2, 0, 0, 0, utils.LocationLondon)
-	rtcm := New(startTime, logger)
-
-	// Tha should give an epoch start just before midnight on Saturday 8th August.
-	startOfThisEpoch :=
-		time.Date(2020, time.August, 9, 1, 0, 0, 0, utils.LocationLondon).Add(gpsTimeOffset)
-
-	// This epoch time us two days after the start of the week.
-	millis := uint(48 * 3600 * 1000)
-
-	expectedTime1 := startOfThisEpoch.AddDate(0, 0, 2)
-
-	timeUTC1, err := rtcm.getUTCFromGPSTime(millis)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if timeUTC1.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", timeUTC1.Location().String())
-	}
-	if !expectedTime1.Equal(timeUTC1) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime1.Format(utils.DateLayout), timeUTC1.Format(utils.DateLayout))
-	}
-
-	// The GPS clock counts milliseconds until (23:59:59.999 GMT less the leap
-	// seconds() on the next Saturday (15th August).  In August that's (00:59:59.999 BST
-	// less the leap seconds) on the next Sunday (16th August).
-	const maxMillis uint = (7 * 24 * 3600 * 1000) - 1
-
-	expectedTime2 :=
-		time.Date(2020, time.August, 16, 0, 59, 59, 999000000, utils.LocationLondon).Add(gpsTimeOffset)
-
-	timeUTC2, err := rtcm.getUTCFromGPSTime(maxMillis)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if timeUTC2.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", timeUTC2.Location().String())
-	}
-	if !expectedTime2.Equal(timeUTC2) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime2.Format(utils.DateLayout), timeUTC2.Format(utils.DateLayout))
-	}
-
-	// The previous call of GetUTCTimeFromGPS was just before the rollover, so the
-	// next call will roll the clock over, putting us into the next week.  A time
-	// value of 500 milliseconds should give (02:00:00.500 less the leap seconds)
-	// CET on Sunday 16th August.
-
-	expectedTime3 :=
-		time.Date(2020, time.August, 16, 2, 0, 0, 500000000, utils.LocationParis).Add(gpsTimeOffset)
-
-	var gpsMillis3 uint = 500
-	timeUTC3, err := rtcm.getUTCFromGPSTime(gpsMillis3)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if timeUTC3.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", timeUTC3.Location().String())
-	}
-	if !expectedTime3.Equal(timeUTC3) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime3.Format(utils.DateLayout), timeUTC3.Format(utils.DateLayout))
-	}
-
-	// GPS time 20,000 with the week starting 16th August means Sunday
-	// 2020/08/16 02:00:20 CET less GPS leap seconds, which is 00:00:20 BST less
-	// GPS leap seconds.
-	var gpsMillis5 uint = 20000
-	expectedTime5 :=
-		time.Date(2020, time.August, 16, 2, 0, 20, 0, utils.LocationParis).Add(gpsTimeOffset)
-
-	timeUTC5, err := rtcm.getUTCFromGPSTime(gpsMillis5)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if timeUTC5.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", timeUTC5.Location().String())
-	}
-	if !expectedTime5.Equal(timeUTC5) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime5.Format(utils.DateLayout), timeUTC5.Format(utils.DateLayout))
-	}
-
-	// GPS time for Monday 2020/08/17 14:00:00 + 500 ms CET
-	// (12:00:00 + 500 ms UTC).
-	gpsMillis6 := uint((38 * 3600 * 1000) + 500)
-	expectedTime6 :=
-		time.Date(2020, time.August, 17, 16, 0, 0, 500000000, utils.LocationParis).Add(gpsTimeOffset)
-
-	timeUTC6, err := rtcm.getUTCFromGPSTime(gpsMillis6)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if timeUTC6.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", timeUTC6.Location().String())
-	}
-	if !expectedTime6.Equal(timeUTC6) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime6.Format(utils.DateLayout), timeUTC6.Format(utils.DateLayout))
-	}
-}
-
-// TestGetUTCFromGlonassTime tests GetUTCFromGlonassTime
-func TestGetUTCFromGlonassTime(t *testing.T) {
-
-	// Expect 3pm Tuesday 11th August Paris - 4pm in Russia.
-	expectedTime1 := time.Date(2020, time.August, 11, 3, 0, 0, 0, utils.LocationParis)
-	const expectedGlonassDay1 uint = 2
-	// Start at 23:00:00 on Monday 10th August Paris, midnight on the Tuesday
-	// 11th in Russia - start of Glonass day 2.
-	startTime1 := time.Date(2020, time.August, 10, 23, 0, 0, 0, utils.LocationParis)
-	rtcm := New(startTime1, logger)
-
-	if expectedGlonassDay1 != rtcm.previousGlonassDay {
-		t.Errorf("expected %d result %d", expectedGlonassDay1, rtcm.previousGlonassDay)
-	}
-
-	// Day = 2, glonassTime = (4*3600*1000), which is 4 am on Russian Tuesday,
-	// which in UTC is 1 am on Tuesday 10th, in CEST, 3 am.
-	day1 := uint(2)
-	millis1 := uint(4 * 3600 * 1000)
-	epochTime1 := day1<<27 | millis1
-
-	dateUTC1, epochError := rtcm.getUTCFromGlonassTime(epochTime1)
-
-	if epochError != nil {
-		t.Error(epochError)
-	}
-
-	if dateUTC1.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", dateUTC1.Location().String())
-	}
-	if !expectedTime1.Equal(dateUTC1) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime1.Format(utils.DateLayout), dateUTC1.Format(utils.DateLayout))
-	}
-
-	// Day = 3, glonassTime = (18*3600*1000), which is 6pm on Russian Wednesday,
-	// which in UTC is 3pm on Wednesday 12th, in CEST, 5pm.
-	// Day was 2 in the last call, 3 in this one, which causes the day to roll
-	// over.
-	expectedTime2 := time.Date(2020, time.August, 12, 17, 0, 0, 0, utils.LocationParis)
-	day2 := uint(3)
-	millis2 := uint(18 * 3600 * 1000)
-	epochTime2 := day2<<27 | millis2
-
-	dateUTC2, timeError := rtcm.getUTCFromGlonassTime(epochTime2)
-
-	if timeError != nil {
-		t.Error(timeError)
-	}
-	if !expectedTime2.Equal(dateUTC2) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime2.Format(utils.DateLayout), dateUTC2.Format(utils.DateLayout))
-	}
-}
-
 // TestGetUTCFromGlonassTimeWithIllegalDay tests GetUTCFromGlonassTime
 // when the day value is 7 (which is the illegal value)
 func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
@@ -1795,89 +1735,6 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 		if want != err.Error() {
 			t.Errorf("want error %s got %s", want, err.Error())
 		}
-	}
-}
-
-// TestGetUTCFromGalileoTime tests GetUTCFromGalileoTime
-func TestGetUTCFromGalileoTime(t *testing.T) {
-
-	// Galileo time follows GPS time.
-
-	startTime := time.Date(2020, time.August, 9, 23, 0, 0, 0, utils.LocationParis)
-	rtcm := New(startTime, logger)
-
-	// 6 am plus 300 ms Paris on Monday is 4am plus 300 ms GMT on Monday.
-	// GPS time is a few seconds earlier.
-	millis1 := uint(28*3600*1000 + 300) // 4 hours  plus 300 ms in ms.
-
-	expectedTime :=
-		time.Date(2020, time.August, 10, 6, 0, 0, 300000000, utils.LocationParis).Add(gpsTimeOffset)
-
-	gpsTime, err := rtcm.getUTCFromGPSTime(millis1)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	dateUTC, err := rtcm.getUTCFromGalileoTime(millis1)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if dateUTC.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", dateUTC.Location().String())
-	}
-	if !expectedTime.Equal(dateUTC) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime.Format(utils.DateLayout), dateUTC.Format(utils.DateLayout))
-	}
-	if !gpsTime.Equal(dateUTC) {
-		t.Errorf("expected %s result %s\n",
-			gpsTime.Format(utils.DateLayout), dateUTC.Format(utils.DateLayout))
-	}
-}
-
-// TestTestGetUTCFromBeidouTime tests TestGetUTCFromBeidouTime
-func TestGetUTCFromBeidouTime(t *testing.T) {
-
-	// Set the start time to the start of a Beidou epoch.
-	startTime1 :=
-		time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
-	rtcm1 := New(startTime1, logger)
-
-	expectedTime1 :=
-		time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset)
-
-	dateUTC1, err := rtcm1.getUTCFromBeidouTime(0)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	if dateUTC1.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", dateUTC1.Location().String())
-	}
-	if !expectedTime1.Equal(dateUTC1) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime1.Format(utils.DateLayout), dateUTC1.Format(utils.DateLayout))
-	}
-
-	dateUTC2, err := rtcm1.getUTCFromBeidouTime(maxEpochTime)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	expectedTime2 :=
-		time.Date(2020, time.August, 16, 1, 59, 59, 999000000, utils.LocationParis).Add(beidouTimeOffset)
-
-	if dateUTC2.Location().String() != utils.LocationUTC.String() {
-		t.Errorf("expected location to be UTC, got %s", dateUTC2.Location().String())
-	}
-	if !expectedTime2.Equal(dateUTC2) {
-		t.Errorf("expected %s result %s\n",
-			expectedTime2.Format(utils.DateLayout), dateUTC2.Format(utils.DateLayout))
 	}
 }
 

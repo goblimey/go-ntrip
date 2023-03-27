@@ -11,6 +11,9 @@ import (
 //
 const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
 
+// The message type is 12 bits unsigned.
+const MaxMessageType = 4095
+
 // NonRTCMMessage indicates a Message that does contain RTCM data.  Typically
 // the incoming data stream will contains RTCM3 messages interspersed with data
 // in other formats (NMEA, UBX etc).  Any non-RTCM messages in between two
@@ -360,6 +363,48 @@ func GetNumberOfSignalCells(bitStream []byte, startPosition, bitsPerCell uint) i
 	}
 
 	return len(cells)
+}
+
+// GetConstellation returns the constellation given a message type.
+func GetConstellation(messageType int) string {
+
+	var constellation string
+
+	switch messageType {
+	case MessageTypeMSM4GPS:
+		constellation = "GPS"
+	case MessageTypeMSM4Glonass:
+		constellation = "Glonass"
+	case MessageTypeMSM4Galileo:
+		constellation = "Galileo"
+	case MessageTypeMSM4SBAS:
+		constellation = "SBAS"
+	case MessageTypeMSM4QZSS:
+		constellation = "QZSS"
+	case MessageTypeMSM4Beidou:
+		constellation = "Beidou"
+	case MessageTypeMSM4NavicIrnss:
+		constellation = "NavIC/IRNSS"
+	case MessageTypeMSM7GPS:
+		constellation = "GPS"
+	case MessageTypeMSM7Glonass:
+		constellation = "Glonass"
+	case MessageTypeMSM7Galileo:
+		constellation = "Galileo"
+	case MessageTypeMSM7SBAS:
+		constellation = "SBAS"
+	case MessageTypeMSM7QZSS:
+		constellation = "QZSS"
+	case MessageTypeMSM7Beidou:
+		constellation = "Beidou"
+	case MessageTypeMSM7NavicIrnss:
+		constellation = "NavIC/IRNSS"
+
+	default:
+		constellation = "unknown constellation"
+	}
+
+	return constellation
 }
 
 // getSignalFrequencyGPS returns the frequency of each GPS signal, 0 if

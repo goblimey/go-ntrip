@@ -11,8 +11,6 @@ import (
 	"github.com/kylelemons/godebug/diff"
 )
 
-const maxMessageType = 4095 // the message type is a 12-bit unsigned quantity.
-
 // TestNew checks that New creates a header correctly.
 func TestNew(t *testing.T) {
 
@@ -112,14 +110,14 @@ func TestGetMSMType(t *testing.T) {
 		{1094, "", posAfterMessageType, "Galileo"},
 		{1104, "", posAfterMessageType, "SBAS"},
 		{1114, "", posAfterMessageType, "QZSS"},
-		{1124, "", posAfterMessageType, "BeiDou"},
+		{1124, "", posAfterMessageType, "Beidou"},
 		{1134, "", posAfterMessageType, "NavIC/IRNSS"},
 		{1077, "", posAfterMessageType, "GPS"},
 		{1087, "", posAfterMessageType, "GLONASS"},
 		{1097, "", posAfterMessageType, "Galileo"},
 		{1107, "", posAfterMessageType, "SBAS"},
 		{1117, "", posAfterMessageType, "QZSS"},
-		{1127, "", posAfterMessageType, "BeiDou"},
+		{1127, "", posAfterMessageType, "Beidou"},
 		{1137, "", posAfterMessageType, "NavIC/IRNSS"},
 
 		// These message numbers are not for MSM messages
@@ -130,7 +128,7 @@ func TestGetMSMType(t *testing.T) {
 		{1076, "message type 1076 is not an MSM4 or an MSM7", 0, ""},
 		{1138, "message type 1138 is not an MSM4 or an MSM7", 0, ""},
 		{1023, "message type 1023 is not an MSM4 or an MSM7", 0, ""},
-		{maxMessageType, errorForMaxMessageType, 40, ""},
+		{utils.MaxMessageType, errorForMaxMessageType, 40, ""},
 	}
 	for _, td := range testData {
 
@@ -216,52 +214,6 @@ func TestGetMSMTypeWithShortBitStream(t *testing.T) {
 		em := fmt.Sprintf("want \"%s\", got \"%s\"", wantError, gotError)
 		t.Error(em)
 		return
-	}
-}
-
-// TestGetConstellation checks the getConstellation helper function, which should
-// return an error if the message type is not an MSM.
-func TestGetConstellation(t *testing.T) {
-	// getConstellation is a helper function for GetMSMHeader.  The task of figuring
-	// out the constellation value is messy and needs careful testing.
-
-	var testData = []struct {
-		MessageType       int
-		WantConstellation string
-	}{
-		{1074, "GPS"},
-		{1084, "Glonass"},
-		{1094, "Galileo"},
-		{1104, "SBAS"},
-		{1114, "QZSS"},
-		{1124, "BeiDou"},
-		{1134, "NavIC/IRNSS"},
-		{1077, "GPS"},
-		{1087, "Glonass"},
-		{1097, "Galileo"},
-		{1107, "SBAS"},
-		{1117, "QZSS"},
-		{1127, "BeiDou"},
-		{1137, "NavIC/IRNSS"},
-
-		// These message numbers are not for MSM messages and provoke an error response.
-		{0, "unknown constellation"},
-		{1, "unknown constellation"},
-		{1023, "unknown constellation"},
-		{1138, "unknown constellation"},
-		{1073, "unknown constellation"},
-		{1075, "unknown constellation"},
-		{1076, "unknown constellation"},
-
-		{maxMessageType, "unknown constellation"},
-	}
-
-	for _, td := range testData {
-		constellation := getConstellation(td.MessageType)
-		if td.WantConstellation != constellation {
-			t.Errorf("%d: want %s, got %s",
-				td.MessageType, td.WantConstellation, constellation)
-		}
 	}
 }
 
@@ -724,7 +676,7 @@ func TestGetTitle(t *testing.T) {
 		{1076, titleError},
 		{1138, titleError},
 		{1023, titleError},
-		{maxMessageType, titleError},
+		{utils.MaxMessageType, titleError},
 	}
 	for _, td := range testData {
 
