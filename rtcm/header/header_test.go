@@ -658,14 +658,14 @@ func TestGetTitle(t *testing.T) {
 		{1094, "Galileo Full Pseudoranges and PhaseRanges plus CNR"},
 		{1104, "SBAS Full Pseudoranges and PhaseRanges plus CNR"},
 		{1114, "QZSS Full Pseudoranges and PhaseRanges plus CNR"},
-		{1124, "BeiDou Full Pseudoranges and PhaseRanges plus CNR"},
+		{1124, "Beidou Full Pseudoranges and PhaseRanges plus CNR"},
 		{1134, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR"},
 		{1077, "GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 		{1087, "Glonass Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 		{1097, "Galileo Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 		{1107, "SBAS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 		{1117, "QZSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1127, "BeiDou Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1127, "Beidou Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 		{1137, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
 
 		// These message numbers are not for MSM messages

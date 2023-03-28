@@ -22,7 +22,7 @@ import (
 // messages produced by GNSS devices.  See the README for this repository
 // for a description of the RTCM version 3 protocol.
 //
-//     handler := rtcm.New(time.Now(), logger)
+//     handler := handler.New(time.Now(), logger)
 //
 // creates an RTCM handler connected to a logger.  RTCM messages
 // contain a timestamp that rolls over each week.  To make sense of the
@@ -172,7 +172,7 @@ type RTCM struct {
 // HandleMessages reads from the input stream until it's exhausted, extracting any
 // valid RTCM messages and copying them to those output channels which are not nil.
 //
-func (rtcm *RTCM) HandleMessages(reader io.Reader, channels []chan rtcm3.Message) {
+func (handler *RTCM) HandleMessages(reader io.Reader, channels []chan rtcm3.Message) {
 	// HandleMessages is the core of a number of applications including the NTRIP
 	// server.  It reads from the input stream until it's exhausted, extracting any
 	// valid RTCM messages and copying them to those output channels which are not nil.
@@ -198,20 +198,20 @@ func (rtcm *RTCM) HandleMessages(reader io.Reader, channels []chan rtcm3.Message
 		// non-RTCM3 material.  Return on any error.  (The channels should also
 		// be closed to avoid a leak.  The caller created them so it's assumed
 		// that it will close them.)
-		message, messageFetchError := rtcm.ReadNextRTCM3Message(bufferedReader)
+		message, messageFetchError := handler.ReadNextRTCM3Message(bufferedReader)
 		if messageFetchError != nil {
 			if message == nil {
 				return
 			} else {
 				logEntry := fmt.Sprintf("HandleMessages ignoring error %v", messageFetchError)
-				rtcm.makeLogEntry(logEntry)
+				handler.makeLogEntry(logEntry)
 			}
 		}
 
 		if message == nil {
 			// There is no message yet.  Pause and try again.
-			rtcm.makeLogEntry("HandleMessages: nil message - pausing")
-			rtcm.pause()
+			handler.makeLogEntry("HandleMessages: nil message - pausing")
+			handler.pause()
 			continue
 		}
 
@@ -475,9 +475,9 @@ func (handler *RTCM) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, er
 // ReadNextRTCM3Message gets the next message frame from a reader, extracts
 // and returns the message.  It returns any read error that it encounters,
 // such as EOF.
-func (rtcm *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*rtcm3.Message, error) {
+func (handler *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*rtcm3.Message, error) {
 
-	frame, err1 := rtcm.ReadNextRTCM3MessageFrame(reader)
+	frame, err1 := handler.ReadNextRTCM3MessageFrame(reader)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -487,7 +487,7 @@ func (rtcm *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*rtcm3.Message, er
 	}
 
 	// Return the chunk as a Message.
-	message, messageFetchError := rtcm.GetMessage(frame)
+	message, messageFetchError := handler.GetMessage(frame)
 	return message, messageFetchError
 }
 
@@ -495,7 +495,7 @@ func (rtcm *RTCM) ReadNextRTCM3Message(reader *bufio.Reader) (*rtcm3.Message, er
 // identify which week the times in the messages refer to.
 func New(startTime time.Time, logger *log.Logger) *RTCM {
 
-	rtcm := RTCM{logger: logger, WaitTimeOnEOF: defaultWaitTimeOnEOF}
+	handler := RTCM{logger: logger, WaitTimeOnEOF: defaultWaitTimeOnEOF}
 
 	// Convert the start date to UTC.
 	startTime = startTime.In(utils.LocationUTC)
@@ -518,45 +518,45 @@ func New(startTime time.Time, logger *log.Logger) *RTCM {
 		gpsWeekStart := midnightNextSunday.Add(gpsTimeOffset)
 		if startTime.Equal(gpsWeekStart) || startTime.After(gpsWeekStart) {
 			// It's Saturday in the first few seconds of a new GPS week
-			rtcm.startOfGPSWeek = gpsWeekStart
+			handler.startOfGPSWeek = gpsWeekStart
 			// Galileo keeps GPS time.
-			rtcm.startOfGalileoWeek = gpsWeekStart
+			handler.startOfGalileoWeek = gpsWeekStart
 
 		} else {
 			// It's Saturday at the end of a GPS week.
 			midnightLastSunday := getStartOfLastSundayUTC(startTime)
-			rtcm.startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
+			handler.startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
 			// Galileo keeps GPS time.
-			rtcm.startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
+			handler.startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
 		}
 	} else {
 		// It's not Saturday.  The GPS week started just before midnight
 		// at the end of last Saturday.
 		midnightLastSunday := getStartOfLastSundayUTC(startTime)
-		rtcm.startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
+		handler.startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
 		// Galileo keeps GPS time
-		rtcm.startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
+		handler.startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
 	}
 
-	rtcm.timestampFromPreviousGPSMessage = (uint(startTime.Sub(rtcm.startOfGPSWeek).Milliseconds()))
+	handler.timestampFromPreviousGPSMessage = (uint(startTime.Sub(handler.startOfGPSWeek).Milliseconds()))
 	// Galileo keeps GPS time.
-	rtcm.timestampFromPreviousGalileoMessage = rtcm.timestampFromPreviousGPSMessage
+	handler.timestampFromPreviousGalileoMessage = handler.timestampFromPreviousGPSMessage
 
 	// Beidou.
 	// Get the start of this Beidou week.  Despite
 	// https://www.unoosa.org/pdf/icg/2016/Beidou-Timescale2016.pdf
 	// the correct offset appears to be +14 seconds!!!
 
-	rtcm.startOfBeidouWeek = startOfWeekUTC.Add(beidouTimeOffset)
+	handler.startOfBeidouWeek = startOfWeekUTC.Add(beidouTimeOffset)
 
-	if startTime.Before(rtcm.startOfBeidouWeek) {
+	if startTime.Before(handler.startOfBeidouWeek) {
 		// The given start date is in the previous Beidou week.  (This
 		// happens if it's within the first few seconds of Sunday UTC.)
-		rtcm.startOfBeidouWeek = rtcm.startOfBeidouWeek.AddDate(0, 0, -7)
+		handler.startOfBeidouWeek = handler.startOfBeidouWeek.AddDate(0, 0, -7)
 	}
 
-	rtcm.timestampFromPreviousBeidouMessage =
-		(uint(startTime.Sub(rtcm.startOfBeidouWeek).Milliseconds()))
+	handler.timestampFromPreviousBeidouMessage =
+		(uint(startTime.Sub(handler.startOfBeidouWeek).Milliseconds()))
 
 	// Glonass.  Set the Glonass day number and the start of this
 	// Glonass day.  The day is 0: Sunday, 1: Monday and so on, but in
@@ -568,15 +568,15 @@ func New(startTime time.Time, logger *log.Logger) *RTCM {
 	startOfDayMoscow := time.Date(startTimeMoscow.Year(), startTimeMoscow.Month(),
 		startTimeMoscow.Day(), 0, 0, 0, 0, utils.LocationMoscow)
 
-	rtcm.startOfGlonassDay = startOfDayMoscow.In(utils.LocationUTC)
+	handler.startOfGlonassDay = startOfDayMoscow.In(utils.LocationUTC)
 
 	// Set the Glonass day from the previous message to the day in Moscow
 	// at the given start time - Sunday is 0, Monday is 1 and so on.  This
 	// will be reset when the first Glonass Multiple Signal message (MSM)
 	// arrives.
-	rtcm.glonassDayFromPreviousMessage = uint(startOfDayMoscow.Weekday())
+	handler.glonassDayFromPreviousMessage = uint(startOfDayMoscow.Weekday())
 
-	return &rtcm
+	return &handler
 }
 
 func (r *RTCM) SetDisplayWriter(displayWriter io.Writer) {
@@ -957,7 +957,7 @@ func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 
 	if len(message.ErrorMessage) > 0 {
 		display += message.ErrorMessage + "\n"
-		return display
+		// return display
 	}
 
 	// The message is a set of broken out fields.  Create a readable version.  If that reveals
@@ -969,10 +969,7 @@ func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 		if !ok {
 			// Internal error:  the message says the data are a type 1005 (base position)
 			// message but when decoded they are not.
-			display += "expected the readable message to be *Message1005\n"
-			if len(message.ErrorMessage) > 0 {
-				display += message.ErrorMessage + "\n"
-			}
+			display += "the readable message should be a message type 1005\n"
 			break
 		}
 		display += m.String()
@@ -982,10 +979,7 @@ func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 		if !ok {
 			// Internal error:  the message says the data are an MSM4
 			// message but when decoded they are not.
-			display += "expected the readable message to be an MSM4\n"
-			if len(message.ErrorMessage) > 0 {
-				display += message.ErrorMessage + "\n"
-			}
+			display += "the readable message should be an MSM4\n"
 			break
 		}
 		display += m.String()
@@ -995,10 +989,7 @@ func (handler *RTCM) DisplayMessage(message *rtcm3.Message) string {
 		if !ok {
 			// Internal error:  the message says the data are an MSM4
 			// message but when decoded they are not.
-			display += "expected the readable message to be an MSM7\n"
-			if len(message.ErrorMessage) > 0 {
-				display += message.ErrorMessage + "\n"
-			}
+			display += "the readable message should be an MSM7\n"
 			break
 		}
 		display += m.String()
@@ -1099,7 +1090,7 @@ func getUTCFromTimestamp(timestamp, timestampFromPreviousMessage uint, startOfWe
 }
 
 // pause sleeps for the time defined in the RTCM.
-func (rtcm *RTCM) pause() {
+func (handler *RTCM) pause() {
 	// if int(rtcm.WaitTimeOnEOF) == 0 {
 	// 	// Looks like this rtcm wasn't created with New.
 	// 	logEntry := fmt.Sprintf("pause: %d", defaultWaitTimeOnEOF)
@@ -1114,10 +1105,10 @@ func (rtcm *RTCM) pause() {
 
 // makeLogEntry writes a string to the logger.  If the logger is nil
 // it writes to the default system log.
-func (rtcm *RTCM) makeLogEntry(s string) {
-	if rtcm.logger == nil {
+func (handler *RTCM) makeLogEntry(s string) {
+	if handler.logger == nil {
 		log.Print(s)
 	} else {
-		rtcm.logger.Print(s)
+		handler.logger.Print(s)
 	}
 }

@@ -1219,6 +1219,7 @@ func TestDisplayMessage(t *testing.T) {
 00000000  d3 00 aa 46 70 00                                 |...Fp.|
 
 bitstream is too short for an MSM header - got 0 bits, expected at least 169
+the readable message should be an MSM7
 `
 
 	// The hex dump includes a ` so we have to create this string by glueing parts together.
@@ -1408,6 +1409,7 @@ an error message
 000000e0  69 e8                                             |i.|
 
 expected message type 1005 got 1077
+the readable message should be a message type 1005
 `
 
 	const resultForFakeMSM4 = `message type 1124, frame length 226
@@ -1428,6 +1430,7 @@ expected message type 1005 got 1077
 000000e0  69 e8                                             |i.|
 
 message type 1077 is not an MSM4
+the readable message should be an MSM4
 `
 
 	const resultForFakeMSM7 = `message type 1087, frame length 42
@@ -1436,6 +1439,7 @@ message type 1077 is not an MSM4
 00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
 message type 1074 is not an MSM7
+the readable message should be an MSM7
 `
 
 	var testData = []struct {
