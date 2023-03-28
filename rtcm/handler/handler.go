@@ -1,4 +1,4 @@
-package rtcm
+package handler
 
 import (
 	"bufio"
