@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	msmHeader "github.com/goblimey/go-ntrip/rtcm/header"
-	msm4satellite "github.com/goblimey/go-ntrip/rtcm/msm4/satellite"
+	msm4satellite "github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 

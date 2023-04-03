@@ -11,9 +11,10 @@ import (
 
 	"github.com/goblimey/go-crc24q/crc24q"
 	"github.com/goblimey/go-ntrip/rtcm/header"
-	message1005 "github.com/goblimey/go-ntrip/rtcm/message1005"
-	msm4message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
-	msm7message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
+	message1005 "github.com/goblimey/go-ntrip/rtcm/type1005"
+	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
+	msm7message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
+	"github.com/goblimey/go-ntrip/rtcm/pushback"
 	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
@@ -70,7 +71,7 @@ func TestReadNextRTCM3MessageFrameWithValidMessage(t *testing.T) {
 		return
 	}
 
-	message, messageFetchError := handler.GetMessage(frame1)
+	message, messageFetchError := handler.getMessage(frame1)
 	if messageFetchError != nil {
 		t.Error(messageFetchError)
 	}
@@ -253,7 +254,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 	}
 
 	// The message is incomplete so expect an error.
-	message, messageFetchError := rtcm.GetMessage(frame1)
+	message, messageFetchError := rtcm.getMessage(frame1)
 	if messageFetchError == nil {
 		t.Error("expected to get an error (reading an incomplete message)")
 	}
@@ -322,7 +323,7 @@ func TestReadInCompleteMessageFrame(t *testing.T) {
 	}
 
 	// The message is incomplete so expect an error.
-	message, messageFetchError := rtcm.GetMessage(frame1)
+	message, messageFetchError := rtcm.getMessage(frame1)
 	if messageFetchError == nil {
 		t.Error("expected to get an error (reading an incomplete message)")
 	}
@@ -373,7 +374,7 @@ func TestReadJunk(t *testing.T) {
 		t.Fatal(err1.Error())
 	}
 
-	message, messageFetchError := rtcm.GetMessage(frame)
+	message, messageFetchError := rtcm.getMessage(frame)
 	if messageFetchError != nil {
 		t.Errorf("error getting message - %v", messageFetchError)
 	}
@@ -403,7 +404,7 @@ func TestReadOnlyJunk(t *testing.T) {
 		t.Fatal(err1.Error())
 	}
 
-	message, messageFetchError := rtcm.GetMessage(frame)
+	message, messageFetchError := rtcm.getMessage(frame)
 	if messageFetchError != nil {
 		t.Errorf("error getting message - %v", messageFetchError)
 	}
@@ -435,6 +436,106 @@ func TestReadOnlyJunk(t *testing.T) {
 	}
 }
 
+// TestFetchNextMessageFrame checks that FetchNextMessageFrame correctly
+// reads a message frame.
+func TestFetchNextMessageFrame(t *testing.T) {
+
+	var testData = []struct {
+		description     string
+		bitStream       []byte
+		wantMessageType int
+		wantError       string
+	}{
+		{"1077", testdata.Message1077, utils.MessageTypeMSM7GPS, ""},
+		{"bad CRC", testdata.CRCFailure, utils.NonRTCMMessage, "CRC is not valid"},
+		{"incomplete", testdata.IncompleteMessage, utils.NonRTCMMessage, ""},
+		{"junk at start", testdata.JunkAtStart, utils.NonRTCMMessage, ""},
+		{"all junk", testdata.AllJunk, utils.NonRTCMMessage, ""},
+		{"1024", testdata.UnhandledMessageType1024, 1024, ""},
+	}
+
+	for _, td := range testData {
+
+		// Create a ByteChannel containing the data from the bit stream.
+		ch := make(chan byte, 10000)
+		for _, b := range td.bitStream {
+			ch <- b
+		}
+		bc := pushback.New(ch)
+		bc.Close()
+
+		// Tuesday 29/8/23.
+		startDate := time.Date(2023, time.August, 29, 00, 00, 00, 0, utils.LocationUTC)
+		handler := New(startDate, logger)
+
+		gotMessage, gotError := handler.FetchNextMessageFrame(bc)
+
+		// We expect a message even when there is an error.
+		if td.wantMessageType != gotMessage.MessageType {
+			t.Errorf("%s: want %d got %d", td.description, td.wantMessageType, gotMessage.MessageType)
+		}
+
+		if td.wantError != "" {
+			if gotError == nil {
+				t.Error("want an error")
+				continue
+			}
+			if td.wantError != gotError.Error() {
+				t.Errorf("%s: want %s got %s", td.description, td.wantError, gotError.Error())
+			}
+		}
+
+	}
+}
+
+// TestFetchNextMessageFrameWithNilOrEmptyFrame checks that FetchNextMessageFrame
+// correctly handles the case when the channel is nil or empty - we get an error
+// but no message.
+func TestFetchNextMessageFrameWithNilOrEmptyFrame(t *testing.T) {
+
+	var testData = []struct {
+		description     string
+		bitStream       []byte
+		wantMessageType int
+		wantError       string
+	}{
+		{"nil frame", nil, utils.MessageTypeMSM4QZSS, "done"},
+		{"zero length", testdata.EmptyFrame, utils.MessageTypeGCPB, "done"},
+	}
+
+	for _, td := range testData {
+
+		// Create a ByteChannel containing the data from the bit stream.
+		ch := make(chan byte, 10000)
+		for _, b := range td.bitStream {
+			ch <- b
+		}
+		bc := pushback.New(ch)
+		bc.Close()
+
+		// Tuesday 29/8/23.
+		startDate := time.Date(2023, time.August, 29, 00, 00, 00, 0, utils.LocationUTC)
+		handler := New(startDate, logger)
+
+		gotMessage, gotError := handler.FetchNextMessageFrame(bc)
+
+		if gotMessage != nil {
+			t.Error("expected a nil message pointer")
+		}
+
+		if td.wantError != "" {
+			if gotError == nil {
+				t.Error("want an error")
+				continue
+			}
+			if td.wantError != gotError.Error() {
+				t.Errorf("%s: want %s got %s", td.description, td.wantError, gotError.Error())
+			}
+		}
+	}
+
+}
+
 // TestGetMessageLengthAndType checks GetMessageLengthAndType
 func TestGetMessageLengthAndType(t *testing.T) {
 
@@ -455,7 +556,7 @@ func TestGetMessageLengthAndType(t *testing.T) {
 		{"invalid", messageFrameWithIncorrectStart, utils.NonRTCMMessage, 0,
 			"message starts with 0xff not 0xd3"},
 		{"invalid", messageFrameWithLengthZero, 1097, 0,
-			"zero length message type 1097"},
+			"zero length message, type 1097"},
 		{"invalid", messageFrameWithLengthTooBig, utils.NonRTCMMessage, 0,
 			"bits 8-13 of header are 63, must be 0"},
 	}
@@ -495,7 +596,7 @@ func TestGetMessage(t *testing.T) {
 		handler := New(startTime, logger)
 		handler.StopOnEOF = true
 
-		got, messageFetchError := handler.GetMessage(td.bitStream)
+		got, messageFetchError := handler.getMessage(td.bitStream)
 		if messageFetchError != nil {
 			t.Errorf("%s: error getting message - %v", td.description, messageFetchError)
 			return
@@ -572,7 +673,7 @@ func TestGetMessageWithRealData(t *testing.T) {
 		return
 	}
 
-	message, messageFetchError := rtcm.GetMessage(frame)
+	message, messageFetchError := rtcm.getMessage(frame)
 	if messageFetchError != nil {
 		t.Errorf("error getting message - %v", messageFetchError)
 		return
@@ -628,7 +729,7 @@ func TestGetMessageWithErrors(t *testing.T) {
 	for _, td := range testData {
 		startTime := time.Now()
 		handler := New(startTime, logger)
-		gotMessage, gotError := handler.GetMessage(td.frame)
+		gotMessage, gotError := handler.getMessage(td.frame)
 		if td.want == "" {
 			if gotMessage == nil {
 				t.Error("expected a message")
@@ -706,7 +807,7 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 	for _, td := range testData {
 		startTime := time.Now()
 		handler := New(startTime, logger)
-		gotMessage, gotError := handler.GetMessage(td.frame)
+		gotMessage, gotError := handler.getMessage(td.frame)
 
 		if len(td.wantError) > 0 {
 			if gotError == nil {
@@ -767,7 +868,7 @@ func TestGetMessageWithNonRTCMMessage(t *testing.T) {
 			return
 		}
 
-		gotMessage, gotError := handler.GetMessage(bitStream)
+		gotMessage, gotError := handler.getMessage(bitStream)
 
 		if gotError != nil {
 			t.Error(gotError)
@@ -813,7 +914,7 @@ func TestReadNextMessageFrame(t *testing.T) {
 		t.Fatal(err1.Error())
 	}
 
-	message, messageFetchError := rtcmHandler.GetMessage(frame)
+	message, messageFetchError := rtcmHandler.getMessage(frame)
 	if messageFetchError != nil {
 		t.Errorf("error getting message - %v", messageFetchError)
 		return
@@ -1330,7 +1431,7 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 `
 
 	const resultForUnhandledMessageType = `message type 1024, frame length 14
-00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
+00000000  d3 00 08 40 00 00 8a 00  00 00 00 4f 5e e7        |...@.......O^.|
 
 message type 1024 currently cannot be displayed
 `
@@ -1628,7 +1729,7 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 
 // getStartOfPeriod is a helper function for TestConversionOfTimeToUTCWithRollover.
 // It gets the start of the constellation's current period (week or, for Glonass,  day)
-func getStartOfPeriod(messageType int, handler *RTCM) time.Time {
+func getStartOfPeriod(messageType int, handler *Handler) time.Time {
 	// Get the start of the week for this message, or the
 	// start of day if Glonass.
 	constellation := utils.GetConstellation(messageType)
@@ -1878,7 +1979,7 @@ func TestCheckCRC(t *testing.T) {
 func Test(t *testing.T) {
 
 	var bitStream = []byte{
-		0xd3, 0, 206,
+		0xd3, 0, 219,
 		//
 		// RTCM message type 1077 - signals from GPS satellites:
 		//         |-- multiple message flag
@@ -1888,34 +1989,34 @@ func Test(t *testing.T) {
 		//
 		// The header is 185 bits long, with 16 cell mask bits.
 		//
-		/* 0 */ 0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00,
+		0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, // 0-7
 		//                   64 bit satellite mask
 		// 0|00|0 0|0|00   0|000 1000   0100 0000   1010 0000
-		/* 8 */ 0x00, 0x08, 0x40, 0xa0,
+		0x00, 0x08, 0x40, 0xa0, // 8-11
 		// 0110 0101   0000 0000   0000 0000   0000 0000
-		/* 12 */ 0x65, 0x00, 0x00, 0x00,
+		0x65, 0x00, 0x00, 0x00, // 12-15
 		//               32 bit signal mask
 		// 0000 0000   0|010 0000   0000 0000    1000 0000
-		/* 16 */ 0x00, 0x20, 0x00, 0x80,
+		0x00, 0x20, 0x00, 0x80, // 16-19
 		//
 		//               64 bit cell mask                 Satellite cells
 		// 0000 0000   0|11|0 1|10|1   1|11|1  1|11|1   1|010   1000
-		/* 20 */ 0x00, 0x6d, 0xff, 0xa8,
+		0x00, 0x6d, 0xff, 0xa8, // 20-23
 		// 1|010 1010   0|010 0110   0|010 0011   1|010 0110
-		/* 24 */ 0xaa, 0x26, 0x23, 0xa6,
+		/* 24 */ 0xaa, 0x26, 0x23, 0xa6, // 24-27
 		// 1|010 0010   0|010 0011   0|010 0100   0|000 0|000
-		/* 28 */ 0xa2, 0x23, 0x24, 0x00,
+		0xa2, 0x23, 0x24, 0x00, // 28-31
 		// 0|000 0|000   0|000 0|000   0|000 0|000   0|011 0110
-		/* 32 */ 0x00, 0x00, 0x00, 0x36,
+		0x00, 0x00, 0x00, 0x36, // 32-35
 		// 011|0 1000
-		/* 36 */ 0x68, 0xcb, 0x83, 0x7a, // 36
-		/* 40 */ 0x6f, 0x9d, 0x7c, 0x04, 0x92, 0xfe, 0xf2, 0x05,
-		/* 48 */ 0xb0, 0x4a, 0xa0, 0xec, 0x7b, 0x0e, 0x09, 0x27,
-		//                   Signal cells
-		/* 56 */ 0xd0, 0x3f, 0x23, 0x7c, 0xb9, 0x6f, 0xbd, 0x73,
-		/* 64 */ 0xee, 0x1f, 0x01, 0x64, 0x96, 0xf5, 0x7b, 0x27,
-		/* 72 */ 0x46, 0xf1, 0xf2, 0x1a, 0xbf, 0x19, 0xfa, 0x08,
-		/* 80 */ 0x41, 0x08, 0x7b, 0xb1, 0x1b, 0x67, 0xe1, 0xa6,
+		0x68, 0xcb, 0x83, 0x7a, // 36-39
+		0x6f, 0x9d, 0x7c, 0x04, 0x92, 0xfe, 0xf2, 0x05, // 40-47
+		0xb0, 0x4a, 0xa0, 0xec, 0x7b, 0x0e, 0x09, 0x27, // 48-55
+		//          Signal cells
+		0xd0, 0x3f, 0x23, 0x7c, 0xb9, 0x6f, 0xbd, 0x73, // 56-63
+		0xee, 0x1f, 0x01, 0x64, 0x96, 0xf5, 0x7b, 0x27, // 64-71
+		0x46, 0xf1, 0xf2, 0x1a, 0xbf, 0x19, 0xfa, 0x08, // 72-79
+		0x41, 0x08, 0x7b, 0xb1, 0x1b, 0x67, 0xe1, 0xa6, // 80-87
 		0x70, 0x71, 0xd9, 0xdf, 0x0c, 0x61, 0x7f, 0x19, // 88
 		0x9c, 0x7e, 0x66, 0x66, 0xfb, 0x86, 0xc0, 0x04, // 96
 		0xe9, 0xc7, 0x7d, 0x85, 0x83, 0x7d, 0xac, 0xad, // 104
@@ -1929,10 +2030,10 @@ func Test(t *testing.T) {
 		0x70, 0x52, 0x17, 0x05, 0x01, 0xef, 0x4b, 0xde, // 168
 		0x70, 0x4c, 0xb1, 0xaf, 0x84, 0x37, 0x08, 0x2a, // 176
 		0x77, 0x95, 0xf1, 0x6e, 0x75, 0xe8, 0xea, 0x36, // 184
-		0x1b, 0xdc, 0x3d, 0x7a, 0xbc, 0x75, 0x42, 0x80, // 192
+		0x1b, 0xdc, 0x3d, 0x7a, 0xbc, 0x75, 0x42, 0x80, // 192-199
 		// Padding bytes.
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 196
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 200-207
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 208-215
 		0x00, 0x00, 0x00,
 	}
 

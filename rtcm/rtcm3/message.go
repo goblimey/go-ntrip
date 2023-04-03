@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/goblimey/go-ntrip/rtcm/message1005"
-	msm4Message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
-	msm7Message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
+	"github.com/goblimey/go-ntrip/rtcm/type1005"
+	msm4Message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
+	msm7Message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
@@ -128,7 +128,7 @@ func (message *Message) String() string {
 		switch {
 
 		case message.MessageType == 1005:
-			m, ok := message.Readable.(*message1005.Message)
+			m, ok := message.Readable.(*type1005.Message)
 			if !ok {
 				// Internal error:  the message says the data are a type 1005 (base position)
 				// message but when decoded they are not.

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
-	"github.com/goblimey/go-ntrip/rtcm/msm4/satellite"
+	"github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 

@@ -1,4 +1,4 @@
-package message1005
+package type1005
 
 import (
 	"errors"
