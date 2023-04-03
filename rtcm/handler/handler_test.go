@@ -11,12 +11,12 @@ import (
 
 	"github.com/goblimey/go-crc24q/crc24q"
 	"github.com/goblimey/go-ntrip/rtcm/header"
-	message1005 "github.com/goblimey/go-ntrip/rtcm/type1005"
-	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
-	msm7message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
 	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
+	message1005 "github.com/goblimey/go-ntrip/rtcm/type1005"
+	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
+	msm7message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 	"github.com/goblimey/go-tools/switchwriter"
 
@@ -117,12 +117,12 @@ func TestReadNextRTCM3MessageFrameWithShortBitStream(t *testing.T) {
 	}
 }
 
-// TestHandleMessages tests the handleMessages method.
-func TestHandleMessages(t *testing.T) {
-	// handleMessages reads the given data and writes any valid messages to
-	// the given channel.  Bytes 0-225 of the test data contain one valid
-	// message of type 1077 and bytes 226 onwards contain non-RTCM data, so
-	// the channel should contain a message of type 1077 and a message of
+// TestHandleMessagesFromChannel tests the HandleMessagesFromChannel method.
+func TestHandleMessagesFromChannel(t *testing.T) {
+	// HandleMessagesFromChannel consumes the data on the given input channel and sends
+	// any valid messages to the given output channel.  Bytes 0-225 of the test data
+	// contain one valid message of type 1077 and bytes 226 onwards contain non-RTCM
+	// data, so the channel should contain a message of type 1077 and a message of
 	// type utils.NonRTCMMessage.
 
 	const wantNumMessages = 2
@@ -133,25 +133,38 @@ func TestHandleMessages(t *testing.T) {
 	const wantLength1 = 9
 	var wantContents1 = testdata.BatchWith1077Frame[226:]
 
-	// reader := bytes.NewReader(messageData)
 	reader := bytes.NewReader(testdata.BatchWith1077Frame)
 
-	channels := make([]chan rtcm3.Message, 0)
-	ch := make(chan rtcm3.Message, 10)
-	channels = append(channels, ch)
+	// Create a buffered channel big enough to hold the test data, send the
+	// data to it and close it.
+	ch_source := make(chan byte, 10000)
+	for {
+		buf := make([]byte, 1)
+		n, err := reader.Read(buf)
+		if err != nil {
+			// We've read all the test data.  Done.
+			close(ch_source)
+			break
+		}
+
+		if n > 0 {
+			ch_source <- buf[0]
+		}
+	}
+
+	// Expect the resulting messages on this channel.
+	ch_result := make(chan rtcm3.Message, 10)
+
 	rtcmHandler := New(time.Now(), nil)
 	rtcmHandler.StopOnEOF = true
 
 	// Test
-	rtcmHandler.HandleMessages(reader, channels)
-	// Close the channel so that a channel reader knows when it's finished.
-	close(ch)
+	rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
 
-	// Check.  Read the data back from the channel and check the message type
-	// and validity flags.
+	// Check.  Read the data back from the channel and check the message type.
 	messages := make([]rtcm3.Message, 0)
 	for {
-		message, ok := <-ch
+		message, ok := <-ch_result
 		if !ok {
 			// Done - chan is drained.
 			break
@@ -163,71 +176,37 @@ func TestHandleMessages(t *testing.T) {
 		t.Errorf("want %d message, got %d messages", wantNumMessages, len(messages))
 	}
 
-	r0 := bytes.NewReader(messages[0].RawData)
-	resultReader0 := bufio.NewReader(r0)
-	message0, err0 := rtcmHandler.ReadNextRTCM3Message(resultReader0)
-	if err0 != nil {
-		t.Fatal(err0)
+	if wantType0 != messages[0].MessageType {
+		t.Errorf("want message type %d, got message type %d", wantType0, messages[0].MessageType)
 	}
 
-	if message0 == nil {
-		t.Errorf("message 0 is empty")
-		return
-	}
-
-	got0 := message0.MessageType
-	if wantType0 != got0 {
-		t.Errorf("want message type %d, got message type %d", wantType0, got0)
-	}
-
-	if message0.RawData == nil {
+	if messages[0].RawData == nil {
 		t.Errorf("raw data in message 0 is nil")
 		return
 	}
 
-	gotLength0 := len(message0.RawData)
-
-	if wantLength0 != gotLength0 {
-		t.Errorf("want message length %d got %d", wantLength0, gotLength0)
+	if wantLength0 != len(messages[0].RawData) {
+		t.Errorf("want message length %d got %d", wantLength0, len(messages[0].RawData))
 	}
 
-	gotContents0 := message0.RawData
-
-	if !bytes.Equal(wantContents0, gotContents0) {
+	if !bytes.Equal(wantContents0, messages[0].RawData) {
 		t.Error("contents of message 0 is not correct")
 	}
 
-	r1 := bytes.NewReader(messages[1].RawData)
-	resultReader1 := bufio.NewReader(r1)
-	message1, err1 := rtcmHandler.ReadNextRTCM3Message(resultReader1)
-	if err1 != nil {
-		t.Fatal(err1)
+	if wantType1 != messages[1].MessageType {
+		t.Errorf("want message type %d, got message type %d", wantType1, messages[1].MessageType)
 	}
 
-	if message1 == nil {
-		t.Fatal("message 1 is empty")
+	if messages[1].RawData == nil {
+		t.Errorf("raw data in message 1 is nil")
 		return
 	}
 
-	got1 := message1.MessageType
-	if wantType1 != got1 {
-		t.Errorf("want message type %d, got message type %d", wantType1, got1)
+	if wantLength1 != len(messages[1].RawData) {
+		t.Errorf("want message length %d got %d", wantLength1, len(messages[1].RawData))
 	}
 
-	if message0.RawData == nil {
-		t.Errorf("raw data in message 0 is nil")
-		return
-	}
-
-	gotLength1 := len(message1.RawData)
-
-	if wantLength1 != gotLength1 {
-		t.Errorf("want message length %d got %d", wantLength1, gotLength1)
-	}
-
-	gotContents1 := message1.RawData
-
-	if !bytes.Equal(wantContents1, gotContents1) {
+	if !bytes.Equal(wantContents1, messages[1].RawData) {
 		t.Error("contents of message 1 is not correct")
 	}
 }
@@ -1199,7 +1178,7 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 	rtcm := New(startTime, logger)
 	rtcm.StopOnEOF = true
 
-	message := rtcm3.New(utils.MessageTypeMSM7GPS, "", shortBitStream)
+	message := rtcm3.NewMessage(utils.MessageTypeMSM7GPS, "", shortBitStream)
 
 	PrepareForDisplay(message)
 
@@ -1231,7 +1210,7 @@ func TestSetDisplayWriter(t *testing.T) {
 // TestAnalyseWithMSM4 checks that Analyse correctly handles an MSM4.
 func TestAnalyseWithMSM4(t *testing.T) {
 
-	message := rtcm3.New(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
+	message := rtcm3.NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
 
 	Analyse(message)
 
@@ -1254,7 +1233,7 @@ func TestAnalyseWithMSM4(t *testing.T) {
 // TestAnalyseWithMSM7 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWithMSM7(t *testing.T) {
 
-	message := rtcm3.New(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
+	message := rtcm3.NewMessage(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
 
 	Analyse(message)
 
@@ -1277,7 +1256,7 @@ func TestAnalyseWithMSM7(t *testing.T) {
 // TestAnalyseWith1005 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWith1005(t *testing.T) {
 
-	message := rtcm3.New(utils.MessageType1005, "", testdata.MessageFrameType1005)
+	message := rtcm3.NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
 
 	Analyse(message)
 
@@ -1297,7 +1276,7 @@ func TestAnalyseWith1005(t *testing.T) {
 // (the correct behaviour being to set the Readable field to a string).
 func TestAnalyseWith1230(t *testing.T) {
 
-	message := rtcm3.New(utils.MessageTypeGCPB, "", testdata.Fake1230)
+	message := rtcm3.NewMessage(utils.MessageTypeGCPB, "", testdata.Fake1230)
 
 	Analyse(message)
 
@@ -1460,7 +1439,7 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 		{"1024", testdata.UnhandledMessageType1024, 1024, resultForUnhandledMessageType},
 	}
 	for _, td := range testData {
-		message := rtcm3.New(td.messageType, "", td.bitStream)
+		message := rtcm3.NewMessage(td.messageType, "", td.bitStream)
 		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
 		handler := New(startTime, logger)
 		handler.StopOnEOF = true
@@ -1480,10 +1459,10 @@ func TestDisplayMessageWithErrors(t *testing.T) {
 	// RTCM3 messages that will produce an error when DisplayMessage is called.
 	// In most cases the problem is that the type value in the message doesn't match
 	// the value in the raw data.
-	messageWithErrorMessage := rtcm3.New(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
-	fake1005 := rtcm3.New(utils.MessageType1005, "", testdata.MessageFrame1077)
-	fakeMSM4 := rtcm3.New(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
-	fakeMSM7 := rtcm3.New(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
+	messageWithErrorMessage := rtcm3.NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
+	fake1005 := rtcm3.NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
+	fakeMSM4 := rtcm3.NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
+	fakeMSM7 := rtcm3.NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
 	// Expected results.
 	resultForMessageWithWarning := `message type 1005, frame length 25
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|

@@ -277,6 +277,7 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 			// There is no more input.
 			logEntry := fmt.Sprintf("HandleMessagesFromChannel: %v", err)
 			rtcmHandler.makeLogEntry(logEntry)
+			close(ch_out)
 			return
 		}
 
@@ -569,7 +570,6 @@ func (rtcmHandler *Handler) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]b
 			// We've got nothing.  Pause and try again.
 			logEntry := "ReadNextRTCM3MessageFrame: frame is empty while eating, but no error"
 			rtcmHandler.makeLogEntry(logEntry)
-			rtcmHandler.pause()
 			continue
 		}
 
@@ -649,7 +649,6 @@ func (rtcmHandler *Handler) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]b
 			// nothing to read.  Pause and try again.
 			logEntry := "ReadNextRTCM3MessageFrame: no data.  Pausing"
 			rtcmHandler.makeLogEntry(logEntry)
-			rtcmHandler.pause()
 			continue
 		}
 
@@ -753,7 +752,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 
 	messageLength, messageType, formatError := rtcmHandler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
-		return rtcm3.New(messageType, formatError.Error(), bitStream), formatError
+		return rtcm3.NewMessage(messageType, formatError.Error(), bitStream), formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -783,7 +782,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 	}
 
 	// The message is complete and the CRC check passes, so it's valid.
-	message := rtcm3.New(messageType, "", bitStream[:expectedFrameLength])
+	message := rtcm3.NewMessage(messageType, "", bitStream[:expectedFrameLength])
 
 	// If the message is an MSM7, get the time (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit

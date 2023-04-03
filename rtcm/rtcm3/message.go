@@ -40,8 +40,8 @@ type Message struct {
 	Readable interface{}
 }
 
-// New creates a new message.
-func New(messageType int, errorMessage string, bitStream []byte) *Message {
+// NewMessage creates a new message.
+func NewMessage(messageType int, errorMessage string, bitStream []byte) *Message {
 
 	message := Message{
 		MessageType:  messageType,

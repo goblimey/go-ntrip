@@ -57,7 +57,7 @@ func createMSM4() *msm4message.Message {
 // createRTCMWithMSM4 creates an RTCM message containing the given MSM4,
 // setting the time to utcTime.  The Readable doesn't match the RawData.
 func createRTCMWithMSM4(msm4 *msm4message.Message, utcTime time.Time) *Message {
-	message := New(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
+	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
 	message.Readable = msm4
 	message.UTCTime = &utcTime
 
@@ -76,7 +76,7 @@ func TestNew(t *testing.T) {
 	var wantUTCTime *time.Time = nil
 	var wantReadable interface{} = nil
 
-	message := New(wantType, wantWarning, wantBitstream)
+	message := NewMessage(wantType, wantWarning, wantBitstream)
 
 	if wantType != message.MessageType {
 		t.Errorf("want %d got %d", wantType, message.MessageType)
@@ -300,7 +300,7 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 	incompleteMSM4.Satellites = nil
 	incompleteMSM4.Signals = nil
 
-	incompleteMessage := New(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
+	incompleteMessage := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
 	incompleteMessage.Readable = incompleteMSM4
 
 	// testdata.MessageBatchWithJunk starts with a message type 1077 (a GPS MSM7)
@@ -309,7 +309,7 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 		t.Error(createError)
 	}
 
-	completeMSM7Message := New(msm7.Header.MessageType, "", testdata.MessageBatchWithJunk[3:841])
+	completeMSM7Message := NewMessage(msm7.Header.MessageType, "", testdata.MessageBatchWithJunk[3:841])
 	completeMSM7Message.Readable = msm7
 	completeMSM7Message.UTCTime = &utcTime
 
@@ -344,7 +344,7 @@ func TestCopy(t *testing.T) {
 	var wantReadable interface{} = nil
 	wantBitstream := testdata.UnhandledMessageType1024
 
-	firstMessage := New(wantType, wantWarning, wantBitstream)
+	firstMessage := NewMessage(wantType, wantWarning, wantBitstream)
 
 	message := firstMessage.Copy()
 
@@ -397,7 +397,7 @@ func TestDispayable(t *testing.T) {
 		{1138, false},
 	}
 	for _, td := range testData {
-		message := New(td.messageType, "", nil)
+		message := NewMessage(td.messageType, "", nil)
 		got := message.displayable()
 		if got != td.want {
 			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
