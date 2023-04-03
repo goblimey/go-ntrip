@@ -148,10 +148,10 @@ func TestNewNonRTCM(t *testing.T) {
 func TestString(t *testing.T) {
 
 	const resultTemplateMSM4Complete = `2023-02-14 01:02:03.004 +0000 UTC
-message type 1074, frame length 36
-00000000  43 20 01 00 00 00 04 00  00 08 00 00 00 00 00 00  |C ..............|
-00000010  00 20 00 80 00 60 28 00  40 01 00 02 00 00 40 00  |. ...` + "`" + `(.@.....@.|
-00000020  00 68 8e 80                                       |.h..|
+message type 1074, frame length 42
+00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
+00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
+00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
 type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
 stationID 1, timestamp 2, multiple message, sequence number 3
@@ -166,10 +166,10 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
  8 11 {%.3f, %.3f, 14, true, 15}
 `
 
-	const wantIncompleteMSM4 = `message type 1074, frame length 36
-00000000  43 20 01 00 00 00 04 00  00 08 00 00 00 00 00 00  |C ..............|
-00000010  00 20 00 80 00 60 28 00  40 01 00 02 00 00 40 00  |. ...` + "`" + `(.@.....@.|
-00000020  00 68 8e 80                                       |.h..|
+	const wantIncompleteMSM4 = `message type 1074, frame length 42
+00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
+00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
+00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
 type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
 stationID 1, timestamp 2, multiple message, sequence number 3
