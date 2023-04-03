@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
-	msm4message "github.com/goblimey/go-ntrip/rtcm/msm4/message"
-	msm4satellite "github.com/goblimey/go-ntrip/rtcm/msm4/satellite"
-	msm4signal "github.com/goblimey/go-ntrip/rtcm/msm4/signal"
-	msm7message "github.com/goblimey/go-ntrip/rtcm/msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
+	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
+	msm4satellite "github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
+	msm4signal "github.com/goblimey/go-ntrip/rtcm/type_msm4/signal"
+	msm7message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 
 	"github.com/kylelemons/godebug/diff"
