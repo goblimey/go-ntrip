@@ -7,6 +7,25 @@ var EmptyFrame []byte
 // but we hit EOF while reading it.  Should be returned as a non-RTCM message.
 var IncompleteMessage = []byte{0xd3, 0x00, 0xaa, 0x46, 0x70, 0x00}
 
+// MessageFrameWithIncorrectStart is a frame that does not start with 0xd3.
+var MessageFrameWithIncorrectStart = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+// MessageFrameWithLengthTooBig has a second byte that's two big.  The sixteen
+// bit value in the second and third byte should less than 4095 (1111 1111 1111).
+var MessageFrameWithLengthTooBig = []byte{
+	0xd3, 0xff, 0xff,
+	0xff, 0xff, 0xff,
+	0xc7, 0x9d, 0x2f,
+}
+
+// MessageFrameWithLengthZero has zero in the second and third byte - should
+// be 1-4095.
+var MessageFrameWithLengthZero = []byte{
+	0xd3, 0x00, 0x00,
+	0x44, 0x90, 0x00,
+	0x91, 0x08, 0x46,
+}
+
 // Four bytes of junk which should be returned as a non-RTCM message,
 // followed by the start of message byte.
 var JunkAtStart = []byte{'j', 'u', 'n', 'k', ' ', 'j', 'u', 'n', 'k', 0xd3}

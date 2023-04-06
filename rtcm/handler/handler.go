@@ -1,4 +1,4 @@
-package rtcm
+package handler
 
 import (
 	"encoding/hex"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
+	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/type1005"
 	msm4Message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
 	msm7Message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
@@ -263,7 +264,7 @@ func (rtcmHandler *Handler) SetDisplayWriter(displayWriter io.Writer) {
 // HandleMessagesFromChannel reads bytes from ch_in, converts them to RTCM
 // messages and writes the messages to ch_out.  The caller is responsible
 // for creating and closing both channels.
-func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan Message) {
+func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan rtcm3.Message) {
 
 	// Turn the input channel into a pushback channel.
 	pb := pushback.New(ch_in)
@@ -271,7 +272,7 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 	// Fetch messages until there are no more.
 	for {
 		message, err := rtcmHandler.FetchNextMessageFrame(pb)
-		if err != nil {
+		if err != nil && err.Error() == "done" {
 			// There is no more input.
 			logEntry := fmt.Sprintf("HandleMessagesFromChannel: %v", err)
 			rtcmHandler.makeLogEntry(logEntry)
@@ -294,7 +295,7 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 // text, it returns the error.  If it has read some text, it just returns
 // that (the assumption being that the next call will get no text and the
 // same error).  Use GetMessage to extract the message from the result.
-func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Message, error) {
+func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rtcm3.Message, error) {
 
 	// A valid RTCM3 message frame is a header containing the start of message
 	// byte and two bytes containing a 10-bit message length, zero padded to
@@ -408,7 +409,7 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Me
 				// Return the collected data.
 				logEntry := fmt.Sprintf("FetchNextMessageFrame: error getting length and type: %v", err)
 				rtcmHandler.makeLogEntry(logEntry)
-				message := NewNonRTCM(frame)
+				message := rtcm3.NewNonRTCM(frame)
 				return message, nil
 			}
 
@@ -512,7 +513,7 @@ func (rtcmHandler *Handler) getMessageLengthAndType(bitStream []byte) (uint, int
 // as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
 // doesn't contain a valid message, it returns a message with type NonRTCMMessage.
 //
-func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
+func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error) {
 
 	if len(bitStream) == 0 {
 		return nil, errors.New("zero length message frame")
@@ -520,12 +521,12 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 
 	if bitStream[0] != startOfMessageFrame {
 		// This is not an RTCM message.
-		return NewNonRTCM(bitStream), nil
+		return rtcm3.NewNonRTCM(bitStream), nil
 	}
 
 	messageLength, messageType, formatError := rtcmHandler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
-		return NewMessage(messageType, formatError.Error(), bitStream), formatError
+		return rtcm3.NewMessage(messageType, formatError.Error(), bitStream), formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -540,7 +541,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 		// The message is incomplete, return what we have as a
 		// non-RTCM3 message.  (This can happen if it's the last message
 		// in the input stream.)
-		message := NewNonRTCM(bitStream)
+		message := rtcm3.NewNonRTCM(bitStream)
 		message.ErrorMessage = "incomplete message frame"
 		return message, errors.New(message.ErrorMessage)
 	}
@@ -549,13 +550,13 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 
 	// Check the CRC.
 	if !CheckCRC(bitStream) {
-		message := NewNonRTCM(bitStream)
+		message := rtcm3.NewNonRTCM(bitStream)
 		message.ErrorMessage = "CRC is not valid"
 		return message, errors.New(message.ErrorMessage)
 	}
 
 	// The message is complete and the CRC check passes, so it's valid.
-	message := NewMessage(messageType, "", bitStream[:expectedFrameLength])
+	message := rtcm3.NewMessage(messageType, "", bitStream[:expectedFrameLength])
 
 	// If the message is an MSM7, get the time (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
@@ -595,7 +596,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 }
 
 // Analyse decodes the raw byte stream and fills in the broken out message.
-func Analyse(message *Message) {
+func Analyse(message *rtcm3.Message) {
 	var readable interface{}
 
 	switch {
@@ -619,7 +620,7 @@ func Analyse(message *Message) {
 	}
 }
 
-func analyseMSM4(messageBitStream []byte, message *Message) {
+func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
 	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
@@ -629,7 +630,7 @@ func analyseMSM4(messageBitStream []byte, message *Message) {
 	message.Readable = msm4Message
 }
 
-func analyseMSM7(messageBitStream []byte, message *Message) {
+func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
 	msm7Message, msm7Error := msm7Message.GetMessage(messageBitStream)
 	if msm7Error != nil {
 		message.ErrorMessage = msm7Error.Error()
@@ -639,7 +640,7 @@ func analyseMSM7(messageBitStream []byte, message *Message) {
 	message.Readable = msm7Message
 }
 
-func analyse1005(messageBitStream []byte, message *Message) {
+func analyse1005(messageBitStream []byte, message *rtcm3.Message) {
 	message1005, message1005Error := type1005.GetMessage(messageBitStream)
 	if message1005Error != nil {
 		message.ErrorMessage = message1005Error.Error()
@@ -863,7 +864,7 @@ func getStartOfLastSundayUTC(now time.Time) time.Time {
 // DisplayMessage takes the given Message object and returns it
 // as a readable string.
 //
-func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
+func (rtcmHandler *Handler) DisplayMessage(message *rtcm3.Message) string {
 
 	display := fmt.Sprintf("message type %d, frame length %d\n",
 		message.MessageType, len(message.RawData))
@@ -941,7 +942,7 @@ func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 
 // PrepareForDisplay creates and returns the readable component of the message
 // ready for String to display it.
-func PrepareForDisplay(message *Message) interface{} {
+func PrepareForDisplay(message *rtcm3.Message) interface{} {
 	// Do this at most once for each message.
 	if message.Readable == nil {
 		Analyse(message)
