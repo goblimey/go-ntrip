@@ -1,4 +1,4 @@
-package rtcm3
+package rtcm
 
 import (
 	"fmt"

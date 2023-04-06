@@ -1,4 +1,4 @@
-package handler
+package rtcm
 
 import (
 	"bufio"
@@ -12,12 +12,12 @@ import (
 	"github.com/goblimey/go-crc24q/crc24q"
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
-	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	message1005 "github.com/goblimey/go-ntrip/rtcm/type1005"
 	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
 	msm7message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
+
 	"github.com/goblimey/go-tools/switchwriter"
 
 	"github.com/kylelemons/godebug/diff"
@@ -84,36 +84,41 @@ func TestReadNextRTCM3MessageFrameWithValidMessage(t *testing.T) {
 
 // TestReadNextRTCM3MessageFrameWithShortBitStream checks that ReadNextRTCM3MessageFrame
 // handles a short bitstream.
-func TestReadNextRTCM3MessageFrameWithShortBitStream(t *testing.T) {
-	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44, 0x90, 0x00}
-
-	r := bytes.NewReader(messageFrameWithLengthZero)
-	reader := bufio.NewReader(r)
-
-	now := time.Now()
-	handler := New(now, logger)
-	handler.StopOnEOF = true
-
-	// ReadNextRTCM3MessageFrame calls GetMessageLengthAndType.  That returns
-	// an error because the message length is zero.  ReadNextRTCM3MessageFrame
-	// should eat the error message and return a byte slice containing the five
-	// bytes that it consumed.
-	frame, err := handler.ReadNextRTCM3MessageFrame(reader)
-
-	if err != nil {
-		t.Errorf("want no error, got %v", err)
+func TestReadNextRTCM3MessageFrameWithInvalidFrame(t *testing.T) {
+	var testData = []struct {
+		description string
+		bitStream   []byte
+		wantLength  int
+	}{
+		{"zero length", testdata.MessageFrameWithLengthZero, 5},
+		{"too big", testdata.MessageFrameWithLengthTooBig, 5},
 	}
 
-	if frame == nil {
-		t.Error("want a message frame, got nil")
-	}
+	for _, td := range testData {
 
-	if len(frame) != 5 {
-		t.Errorf("want a message frame of length 5, got length %d", len(frame))
-	}
+		r := bytes.NewReader(td.bitStream)
+		reader := bufio.NewReader(r)
 
-	if frame[0] != 0xd3 {
-		t.Errorf("want a message frame starting 0xd3, got first byte of 0x%02x", frame[0])
+		now := time.Now()
+		handler := New(now, logger)
+		handler.StopOnEOF = true
+		frame, err := handler.ReadNextRTCM3MessageFrame(reader)
+
+		if err != nil {
+			t.Errorf("want no error, got %v", err)
+		}
+
+		if frame == nil {
+			t.Error("want a message frame, got nil")
+		}
+
+		if len(frame) != td.wantLength {
+			t.Errorf("want a message frame of length %d, got length %d", td.wantLength, len(frame))
+		}
+
+		if frame[0] != 0xd3 {
+			t.Errorf("want a message frame starting 0xd3, got first byte of 0x%02x", frame[0])
+		}
 	}
 }
 
@@ -153,7 +158,7 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	}
 
 	// Expect the resulting messages on this channel.
-	ch_result := make(chan rtcm3.Message, 10)
+	ch_result := make(chan Message, 10)
 
 	rtcmHandler := New(time.Now(), nil)
 	rtcmHandler.StopOnEOF = true
@@ -162,7 +167,7 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
 
 	// Check.  Read the data back from the channel and check the message type.
-	messages := make([]rtcm3.Message, 0)
+	messages := make([]Message, 0)
 	for {
 		message, ok := <-ch_result
 		if !ok {
@@ -425,6 +430,7 @@ func TestFetchNextMessageFrame(t *testing.T) {
 		wantMessageType int
 		wantError       string
 	}{
+		{"invalid Length", testdata.MessageFrameWithLengthTooBig, utils.NonRTCMMessage, ""},
 		{"1077", testdata.Message1077, utils.MessageTypeMSM7GPS, ""},
 		{"bad CRC", testdata.CRCFailure, utils.NonRTCMMessage, "CRC is not valid"},
 		{"incomplete", testdata.IncompleteMessage, utils.NonRTCMMessage, ""},
@@ -518,10 +524,6 @@ func TestFetchNextMessageFrameWithNilOrEmptyFrame(t *testing.T) {
 // TestGetMessageLengthAndType checks GetMessageLengthAndType
 func TestGetMessageLengthAndType(t *testing.T) {
 
-	messageFrameWithIncorrectStart := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	messageFrameWithLengthTooBig := []byte{0xd3, 0xff, 0xff, 0xff, 0xff, 0xff}
-	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44, 0x90, 0x00}
-
 	var testData = []struct {
 		description       string
 		bitStream         []byte
@@ -530,13 +532,13 @@ func TestGetMessageLengthAndType(t *testing.T) {
 		wantError         string
 	}{
 		{"valid", validMessageFrame, 1097, 170, ""},
-		{"invalid", validMessageFrame[:4], utils.NonRTCMMessage, 0,
+		{"short", validMessageFrame[:4], utils.NonRTCMMessage, 0,
 			"the message is too short to get the header and the length"},
-		{"invalid", messageFrameWithIncorrectStart, utils.NonRTCMMessage, 0,
+		{"incorrect start", testdata.MessageFrameWithIncorrectStart, utils.NonRTCMMessage, 0,
 			"message starts with 0xff not 0xd3"},
-		{"invalid", messageFrameWithLengthZero, 1097, 0,
+		{"zero length", testdata.MessageFrameWithLengthZero, 1097, 0,
 			"zero length message, type 1097"},
-		{"invalid", messageFrameWithLengthTooBig, utils.NonRTCMMessage, 0,
+		{"invalid", testdata.MessageFrameWithLengthTooBig, utils.NonRTCMMessage, 0,
 			"bits 8-13 of header are 63, must be 0"},
 	}
 	for _, td := range testData {
@@ -1178,7 +1180,7 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 	rtcm := New(startTime, logger)
 	rtcm.StopOnEOF = true
 
-	message := rtcm3.NewMessage(utils.MessageTypeMSM7GPS, "", shortBitStream)
+	message := NewMessage(utils.MessageTypeMSM7GPS, "", shortBitStream)
 
 	PrepareForDisplay(message)
 
@@ -1210,7 +1212,7 @@ func TestSetDisplayWriter(t *testing.T) {
 // TestAnalyseWithMSM4 checks that Analyse correctly handles an MSM4.
 func TestAnalyseWithMSM4(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
+	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
 
 	Analyse(message)
 
@@ -1233,7 +1235,7 @@ func TestAnalyseWithMSM4(t *testing.T) {
 // TestAnalyseWithMSM7 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWithMSM7(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
+	message := NewMessage(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
 
 	Analyse(message)
 
@@ -1256,7 +1258,7 @@ func TestAnalyseWithMSM7(t *testing.T) {
 // TestAnalyseWith1005 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWith1005(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
+	message := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
 
 	Analyse(message)
 
@@ -1276,7 +1278,7 @@ func TestAnalyseWith1005(t *testing.T) {
 // (the correct behaviour being to set the Readable field to a string).
 func TestAnalyseWith1230(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageTypeGCPB, "", testdata.Fake1230)
+	message := NewMessage(utils.MessageTypeGCPB, "", testdata.Fake1230)
 
 	Analyse(message)
 
@@ -1439,7 +1441,7 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 		{"1024", testdata.UnhandledMessageType1024, 1024, resultForUnhandledMessageType},
 	}
 	for _, td := range testData {
-		message := rtcm3.NewMessage(td.messageType, "", td.bitStream)
+		message := NewMessage(td.messageType, "", td.bitStream)
 		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
 		handler := New(startTime, logger)
 		handler.StopOnEOF = true
@@ -1459,10 +1461,10 @@ func TestDisplayMessageWithErrors(t *testing.T) {
 	// RTCM3 messages that will produce an error when DisplayMessage is called.
 	// In most cases the problem is that the type value in the message doesn't match
 	// the value in the raw data.
-	messageWithErrorMessage := rtcm3.NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
-	fake1005 := rtcm3.NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
-	fakeMSM4 := rtcm3.NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
-	fakeMSM7 := rtcm3.NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
+	messageWithErrorMessage := NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
+	fake1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
+	fakeMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
+	fakeMSM7 := NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
 	// Expected results.
 	resultForMessageWithWarning := `message type 1005, frame length 25
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
@@ -1524,7 +1526,7 @@ the readable message should be an MSM7
 
 	var testData = []struct {
 		description string
-		message     *rtcm3.Message
+		message     *Message
 		want        string
 	}{
 		{"error message", messageWithErrorMessage, resultForMessageWithWarning},
@@ -1958,62 +1960,7 @@ func TestCheckCRC(t *testing.T) {
 func Test(t *testing.T) {
 
 	var bitStream = []byte{
-		0xd3, 0, 219,
-		//
-		// RTCM message type 1077 - signals from GPS satellites:
-		//         |-- multiple message flag
-		//         | |-- sequence number
-		//         v v
-		// 0110 00|1|0 00|00 0000
-		//
-		// The header is 185 bits long, with 16 cell mask bits.
-		//
-		0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, // 0-7
-		//                   64 bit satellite mask
-		// 0|00|0 0|0|00   0|000 1000   0100 0000   1010 0000
-		0x00, 0x08, 0x40, 0xa0, // 8-11
-		// 0110 0101   0000 0000   0000 0000   0000 0000
-		0x65, 0x00, 0x00, 0x00, // 12-15
-		//               32 bit signal mask
-		// 0000 0000   0|010 0000   0000 0000    1000 0000
-		0x00, 0x20, 0x00, 0x80, // 16-19
-		//
-		//               64 bit cell mask                 Satellite cells
-		// 0000 0000   0|11|0 1|10|1   1|11|1  1|11|1   1|010   1000
-		0x00, 0x6d, 0xff, 0xa8, // 20-23
-		// 1|010 1010   0|010 0110   0|010 0011   1|010 0110
-		/* 24 */ 0xaa, 0x26, 0x23, 0xa6, // 24-27
-		// 1|010 0010   0|010 0011   0|010 0100   0|000 0|000
-		0xa2, 0x23, 0x24, 0x00, // 28-31
-		// 0|000 0|000   0|000 0|000   0|000 0|000   0|011 0110
-		0x00, 0x00, 0x00, 0x36, // 32-35
-		// 011|0 1000
-		0x68, 0xcb, 0x83, 0x7a, // 36-39
-		0x6f, 0x9d, 0x7c, 0x04, 0x92, 0xfe, 0xf2, 0x05, // 40-47
-		0xb0, 0x4a, 0xa0, 0xec, 0x7b, 0x0e, 0x09, 0x27, // 48-55
-		//          Signal cells
-		0xd0, 0x3f, 0x23, 0x7c, 0xb9, 0x6f, 0xbd, 0x73, // 56-63
-		0xee, 0x1f, 0x01, 0x64, 0x96, 0xf5, 0x7b, 0x27, // 64-71
-		0x46, 0xf1, 0xf2, 0x1a, 0xbf, 0x19, 0xfa, 0x08, // 72-79
-		0x41, 0x08, 0x7b, 0xb1, 0x1b, 0x67, 0xe1, 0xa6, // 80-87
-		0x70, 0x71, 0xd9, 0xdf, 0x0c, 0x61, 0x7f, 0x19, // 88
-		0x9c, 0x7e, 0x66, 0x66, 0xfb, 0x86, 0xc0, 0x04, // 96
-		0xe9, 0xc7, 0x7d, 0x85, 0x83, 0x7d, 0xac, 0xad, // 104
-		0xfc, 0xbe, 0x2b, 0xfc, 0x3c, 0x84, 0x02, 0x1d, // 112
-		0xeb, 0x81, 0xa6, 0x9c, 0x87, 0x17, 0x5d, 0x86, // 120
-		0xf5, 0x60, 0xfb, 0x66, 0x72, 0x7b, 0xfa, 0x2f, // 128
-		0x48, 0xd2, 0x29, 0x67, 0x08, 0xc8, 0x72, 0x15, // 136
-		0x0d, 0x37, 0xca, 0x92, 0xa4, 0xe9, 0x3a, 0x4e, // 144
-		0x13, 0x80, 0x00, 0x14, 0x04, 0xc0, 0xe8, 0x50, // 152
-		0x16, 0x04, 0xc1, 0x40, 0x46, 0x17, 0x05, 0x41, // 160
-		0x70, 0x52, 0x17, 0x05, 0x01, 0xef, 0x4b, 0xde, // 168
-		0x70, 0x4c, 0xb1, 0xaf, 0x84, 0x37, 0x08, 0x2a, // 176
-		0x77, 0x95, 0xf1, 0x6e, 0x75, 0xe8, 0xea, 0x36, // 184
-		0x1b, 0xdc, 0x3d, 0x7a, 0xbc, 0x75, 0x42, 0x80, // 192-199
-		// Padding bytes.
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 200-207
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 208-215
-		0x00, 0x00, 0x00,
+		0xd3, 0x00, 0x00, 0x44, 0x90, 0x00,
 	}
 
 	crc := crc24q.Hash(bitStream)

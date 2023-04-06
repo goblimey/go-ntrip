@@ -1,7 +1,6 @@
-package handler
+package rtcm
 
 import (
-	"bufio"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
-	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/type1005"
 	msm4Message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
 	msm7Message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
@@ -265,7 +263,7 @@ func (rtcmHandler *Handler) SetDisplayWriter(displayWriter io.Writer) {
 // HandleMessagesFromChannel reads bytes from ch_in, converts them to RTCM
 // messages and writes the messages to ch_out.  The caller is responsible
 // for creating and closing both channels.
-func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan rtcm3.Message) {
+func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan Message) {
 
 	// Turn the input channel into a pushback channel.
 	pb := pushback.New(ch_in)
@@ -296,7 +294,7 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 // text, it returns the error.  If it has read some text, it just returns
 // that (the assumption being that the next call will get no text and the
 // same error).  Use GetMessage to extract the message from the result.
-func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rtcm3.Message, error) {
+func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Message, error) {
 
 	// A valid RTCM3 message frame is a header containing the start of message
 	// byte and two bytes containing a 10-bit message length, zero padded to
@@ -410,7 +408,7 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 				// Return the collected data.
 				logEntry := fmt.Sprintf("FetchNextMessageFrame: error getting length and type: %v", err)
 				rtcmHandler.makeLogEntry(logEntry)
-				message := rtcm3.NewNonRTCM(frame)
+				message := NewNonRTCM(frame)
 				return message, nil
 			}
 
@@ -510,236 +508,11 @@ func (rtcmHandler *Handler) getMessageLengthAndType(bitStream []byte) (uint, int
 	return length, messageType, nil
 }
 
-// ReadNextRTCM3MessageFrame gets the next message frame from a reader.  The incoming
-// byte stream contains RTCM messages interspersed with messages in other
-// formats such as NMEA, UBX etc.   The resulting slice contains either a
-// single valid message or some non-RTCM text that precedes a message.  If
-// the function encounters a fatal read error and it has not yet read any
-// text, it returns the error.  If it has read some text, it just returns
-// that (the assumption being that the next call will get no text and the
-// same error).  Use GetMessage to extract the message from the result.
-func (rtcmHandler *Handler) ReadNextRTCM3MessageFrame(reader *bufio.Reader) ([]byte, error) {
-
-	// A valid RTCM message frame is a header containing the start of message
-	// byte and two bytes containing a 10-bit message length, zero padded to
-	// the left, for example 0xd3, 0x00, 0x8a.  The variable-length message
-	// comes next and always starts with a two-byte message type.  It may be
-	// padded with zero bytes at the end.  The message frame then ends with a
-	// 3-byte Cyclic Redundancy Check value.
-
-	// Call ReadBytes until we get some text or a fatal error.
-	var frame = make([]byte, 0)
-	var eatError error
-	for {
-		// Eat bytes until we see the start of message byte.
-		frame, eatError = reader.ReadBytes(startOfMessageFrame)
-		if eatError != nil {
-			// We only deal with an error if there's nothing in the buffer.
-			// If there is any text, we deal with that and assume that we will see
-			// any hard error again on the next call.
-			if len(frame) == 0 {
-				// An error and no bytes in the frame.  Deal with the error.
-				if eatError == io.EOF {
-					if rtcmHandler.StopOnEOF {
-						// EOF is fatal for the kind of input file we are reading.
-						logEntry := "ReadNextRTCM3MessageFrame: hard EOF while eating"
-						rtcmHandler.makeLogEntry(logEntry)
-						return nil, eatError
-					} else {
-						// For this kind of input, EOF just means that there is nothing
-						// to read just yet, but there may be something later.  So we
-						// just return, expecting the caller to call us again.
-						logEntry := "ReadNextRTCM3MessageFrame: non-fatal EOF while eating"
-						rtcmHandler.makeLogEntry(logEntry)
-						return nil, nil
-					}
-				} else {
-					// Any error other than EOF is always fatal.  Return immediately.
-					logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: error at start of eating - %v", eatError)
-					rtcmHandler.makeLogEntry(logEntry)
-					return nil, eatError
-				}
-			} else {
-				logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: continuing after error,  eaten %d bytes - %v",
-					len(frame), eatError)
-				rtcmHandler.makeLogEntry(logEntry)
-			}
-		}
-
-		if len(frame) == 0 {
-			// We've got nothing.  Pause and try again.
-			logEntry := "ReadNextRTCM3MessageFrame: frame is empty while eating, but no error"
-			rtcmHandler.makeLogEntry(logEntry)
-			continue
-		}
-
-		// We've read some text.
-		break
-	}
-
-	// Figure out what ReadBytes has returned.  Could be a start of message byte,
-	// some other text followed by the start of message byte or just some other
-	// text.
-	if len(frame) > 1 {
-		// We have some non-RTCM, possibly followed by a start of message
-		// byte.
-		logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: read %d bytes", len(frame))
-		rtcmHandler.makeLogEntry(logEntry)
-		if frame[len(frame)-1] == startOfMessageFrame {
-			// non-RTCM followed by start of message byte.  Push the start
-			// byte back so we see it next time and return the rest of the
-			// buffer as a non-RTCM message.
-			logEntry1 := "ReadNextRTCM3MessageFrame: found d3 - unreading"
-			rtcmHandler.makeLogEntry(logEntry1)
-			reader.UnreadByte()
-			frameWithoutTrailingStartByte := frame[:len(frame)-1]
-			logEntry2 := fmt.Sprintf("ReadNextRTCM3MessageFrame: returning %d bytes %s",
-				len(frameWithoutTrailingStartByte),
-				hex.Dump(frameWithoutTrailingStartByte))
-			rtcmHandler.makeLogEntry(logEntry2)
-			return frameWithoutTrailingStartByte, nil
-		} else {
-			// Just some non-RTCM.
-			logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: got: %d bytes %s",
-				len(frame),
-				hex.Dump(frame))
-			rtcmHandler.makeLogEntry(logEntry)
-			return frame, nil
-		}
-	}
-
-	// The buffer contains just a start of message byte so
-	// we may have the start of an RTCM message frame.
-	// Get the rest of the message frame.
-	logEntry := "ReadNextRTCM3MessageFrame: found d3 immediately"
-	rtcmHandler.makeLogEntry(logEntry)
-	var n int = 1
-	var expectedFrameLength uint = 0
-	for {
-		// Read and handle the next byte.
-		buf := make([]byte, 1)
-		l, readErr := reader.Read(buf)
-		// We've read some text, so log any read error, but ignore it.  If it's
-		// a hard error it will be caught on the next call.
-		if readErr != nil {
-			if readErr != io.EOF {
-				// Any error other than EOF is always fatal, but it will be caught
-				logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: ignoring error while reading message - %v", readErr)
-				rtcmHandler.makeLogEntry(logEntry)
-				return frame, nil
-			}
-
-			if rtcmHandler.StopOnEOF {
-				// EOF is fatal for the kind of input file we are reading.
-				logEntry := "ReadNextRTCM3MessageFrame: ignoring fatal EOF"
-				rtcmHandler.makeLogEntry(logEntry)
-				return frame, nil
-			} else {
-				// For this kind of input, EOF just means that there is nothing
-				// to read just yet, but there may be something later.  So we
-				// just pause and try again.
-				logEntry := "ReadNextRTCM3MessageFrame: ignoring non-fatal EOF"
-				rtcmHandler.makeLogEntry(logEntry)
-				continue
-			}
-		}
-
-		if l < 1 {
-			// We expected to read exactly one byte, so there is currently
-			// nothing to read.  Pause and try again.
-			logEntry := "ReadNextRTCM3MessageFrame: no data.  Pausing"
-			rtcmHandler.makeLogEntry(logEntry)
-			continue
-		}
-
-		frame = append(frame, buf[0])
-		n++
-
-		// What we do next depends upon how much of the message we have read.
-		// On the first few trips around the loop we read the header bytes and
-		// the 10-bit expected message length l.  Once we know l, we can work
-		// out the total length of the frame (which is l+6) and we can then
-		// read the remaining bytes of the frame.
-		switch {
-		case n < utils.LeaderLengthBytes+2:
-			// We haven't read enough bytes to figure out the message length yet.
-			continue
-
-		case n == utils.LeaderLengthBytes+2:
-			// We have the first three bytes of the frame so we have enough data to find
-			// the length and the type of the message (which we will need in a later trip
-			// around this loop).
-			messageLength, messageType, err := rtcmHandler.getMessageLengthAndType(frame)
-			if err != nil {
-				// We thought we'd found the start of a message, but it's something else
-				// that happens to start with the start of frame byte.
-				// Return the collected data.
-				logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: error getting length and type: %v", err)
-				rtcmHandler.makeLogEntry(logEntry)
-				return frame, nil
-			}
-
-			logEntry1 := fmt.Sprintf("ReadNextRTCM3MessageFrame: found message type %d length %d", messageType, messageLength)
-			rtcmHandler.makeLogEntry(logEntry1)
-
-			// The frame contains a 3-byte header, a variable-length message (for which
-			// we now know the length) and a 3-byte CRC.  Now we just need to continue to
-			// read bytes until we have the whole message.
-			expectedFrameLength = messageLength + utils.LeaderLengthBytes + utils.CRCLengthBytes
-			logEntry2 := fmt.Sprintf("ReadNextRTCM3MessageFrame: expecting a %d frame", expectedFrameLength)
-			rtcmHandler.makeLogEntry(logEntry2)
-
-			// Now we read the rest of the message byte by byte, one byte every trip.
-			// We know how many bytes we want, so we could just read that many using one
-			// Read call, but if the input stream is a serial connection, we would
-			// probably need several of those, so we might as well do it this way.
-			continue
-
-		case n >= int(expectedFrameLength):
-			// By this point the expected frame length has been decoded and set to a
-			// non-zero value (otherwise the previous case would have triggered) and we have
-			// read that many bytes.  So we are done.  Return the complete message frame.
-			// The CRC will be checked later.
-			//
-			// (The case condition could use ==, but using >= guarantees that the loop will
-			// terminate eventually even if my logic is faulty and the loop overruns!)
-			//
-			logEntry := fmt.Sprintf("ReadNextRTCM3MessageFrame: returning an RTCM message frame, %d bytes, expected %d", n, expectedFrameLength)
-			rtcmHandler.makeLogEntry(logEntry)
-			return frame, nil
-
-		default:
-			// In most trips around the loop, we just read the next byte and build up the
-			// message frame.
-			continue
-		}
-	}
-}
-
-// ReadNextRTCM3Message gets the next message frame from a reader, extracts
-// and returns the message.  It returns any read error that it encounters,
-// such as EOF.
-func (handler *Handler) ReadNextRTCM3Message(reader *bufio.Reader) (*rtcm3.Message, error) {
-
-	frame, err1 := handler.ReadNextRTCM3MessageFrame(reader)
-	if err1 != nil {
-		return nil, err1
-	}
-
-	if len(frame) == 0 {
-		return nil, nil
-	}
-
-	// Return the chunk as a Message.
-	message, messageFetchError := handler.getMessage(frame)
-	return message, messageFetchError
-}
-
 // getMessage extracts an RTCM3 message from the given bit stream and returns it
 // as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
 // doesn't contain a valid message, it returns a message with type NonRTCMMessage.
 //
-func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error) {
+func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 
 	if len(bitStream) == 0 {
 		return nil, errors.New("zero length message frame")
@@ -747,12 +520,12 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 
 	if bitStream[0] != startOfMessageFrame {
 		// This is not an RTCM message.
-		return rtcm3.NewNonRTCM(bitStream), nil
+		return NewNonRTCM(bitStream), nil
 	}
 
 	messageLength, messageType, formatError := rtcmHandler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
-		return rtcm3.NewMessage(messageType, formatError.Error(), bitStream), formatError
+		return NewMessage(messageType, formatError.Error(), bitStream), formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -767,7 +540,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 		// The message is incomplete, return what we have as a
 		// non-RTCM3 message.  (This can happen if it's the last message
 		// in the input stream.)
-		message := rtcm3.NewNonRTCM(bitStream)
+		message := NewNonRTCM(bitStream)
 		message.ErrorMessage = "incomplete message frame"
 		return message, errors.New(message.ErrorMessage)
 	}
@@ -776,13 +549,13 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 
 	// Check the CRC.
 	if !CheckCRC(bitStream) {
-		message := rtcm3.NewNonRTCM(bitStream)
+		message := NewNonRTCM(bitStream)
 		message.ErrorMessage = "CRC is not valid"
 		return message, errors.New(message.ErrorMessage)
 	}
 
 	// The message is complete and the CRC check passes, so it's valid.
-	message := rtcm3.NewMessage(messageType, "", bitStream[:expectedFrameLength])
+	message := NewMessage(messageType, "", bitStream[:expectedFrameLength])
 
 	// If the message is an MSM7, get the time (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
@@ -822,7 +595,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 }
 
 // Analyse decodes the raw byte stream and fills in the broken out message.
-func Analyse(message *rtcm3.Message) {
+func Analyse(message *Message) {
 	var readable interface{}
 
 	switch {
@@ -846,7 +619,7 @@ func Analyse(message *rtcm3.Message) {
 	}
 }
 
-func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
+func analyseMSM4(messageBitStream []byte, message *Message) {
 	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
@@ -856,7 +629,7 @@ func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
 	message.Readable = msm4Message
 }
 
-func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
+func analyseMSM7(messageBitStream []byte, message *Message) {
 	msm7Message, msm7Error := msm7Message.GetMessage(messageBitStream)
 	if msm7Error != nil {
 		message.ErrorMessage = msm7Error.Error()
@@ -866,7 +639,7 @@ func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
 	message.Readable = msm7Message
 }
 
-func analyse1005(messageBitStream []byte, message *rtcm3.Message) {
+func analyse1005(messageBitStream []byte, message *Message) {
 	message1005, message1005Error := type1005.GetMessage(messageBitStream)
 	if message1005Error != nil {
 		message.ErrorMessage = message1005Error.Error()
@@ -1090,7 +863,7 @@ func getStartOfLastSundayUTC(now time.Time) time.Time {
 // DisplayMessage takes the given Message object and returns it
 // as a readable string.
 //
-func (rtcmHandler *Handler) DisplayMessage(message *rtcm3.Message) string {
+func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 
 	display := fmt.Sprintf("message type %d, frame length %d\n",
 		message.MessageType, len(message.RawData))
@@ -1168,7 +941,7 @@ func (rtcmHandler *Handler) DisplayMessage(message *rtcm3.Message) string {
 
 // PrepareForDisplay creates and returns the readable component of the message
 // ready for String to display it.
-func PrepareForDisplay(message *rtcm3.Message) interface{} {
+func PrepareForDisplay(message *Message) interface{} {
 	// Do this at most once for each message.
 	if message.Readable == nil {
 		Analyse(message)
