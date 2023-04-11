@@ -11,6 +11,9 @@ import (
 //
 const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
 
+// StartOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
+const StartOfMessageFrame byte = 0xd3
+
 // The message type is 12 bits unsigned.
 const MaxMessageType = 4095
 

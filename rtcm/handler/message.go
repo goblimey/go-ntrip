@@ -1,4 +1,4 @@
-package rtcm3
+package handler
 
 import (
 	"encoding/hex"
@@ -81,6 +81,15 @@ func (message *Message) Copy() Message {
 //
 func (message *Message) String() string {
 
+	if message.Readable == nil {
+		// Expand the message.  Only do this if readable is nil.
+		// (This is partly to make the testing easier.  Some tests
+		// set the readable part to sensible values and set a junk
+		// version of the raw data.  Calling this on one of those
+		// objects would trash the Readable values.)
+		PrepareForDisplay(message)
+	}
+
 	display := ""
 
 	if message.UTCTime != nil {
@@ -118,7 +127,7 @@ func (message *Message) String() string {
 			return display
 		}
 
-		// prepareFoDisplay may have found an error.
+		// Analyse may have found an error.
 		if len(message.ErrorMessage) > 0 {
 			display += message.ErrorMessage + "\n"
 		}

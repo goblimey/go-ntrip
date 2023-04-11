@@ -4,12 +4,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
-	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/type1005"
 	msm4Message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
 	msm7Message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
@@ -72,9 +70,6 @@ import (
 // defined ready to support emerging equipment that's expected to give
 // better accuracy in the future.
 
-// defaultWaitTimeOnEOF is the default value for RTCM.WaitTimeOnEOF.
-const defaultWaitTimeOnEOF = 100 * time.Microsecond
-
 // glonassInvalidDay is the invalid value for the day part of the timestamp.
 const glonassInvalidDay = 7
 
@@ -106,32 +101,11 @@ var glonassTimeOffset = time.Duration(-1*3) * time.Hour
 var beidouLeapSeconds = 14
 var beidouTimeOffset = time.Duration(beidouLeapSeconds) * time.Second
 
-// startOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
-const startOfMessageFrame byte = 0xd3
-
 // Handler is the object used to fetch and analyse RTCM3 messages.
 type Handler struct {
 
-	// StopOnEOF indicates that the RTCM should stop reading data and
-	// terminate if it encounters End Of File.  If the data stream is
-	// a plain file which is not being written, this flag should be
-	// set.  If the data stream is a serial USB connection, EOF just
-	// means that you've read all the data that's arrived so far, so
-	// the flag should not be set and the RTCM should continue reading.
-
-	StopOnEOF bool
-
-	// WaitTimeOnEOF is the time to wait for if we encounter EOF and
-	// StopOnEOF is false.
-	WaitTimeOnEOF time.Duration
-
 	// logger is the logger (supplied via New).
 	logger *log.Logger
-
-	// displayWriter is used to write a verbose display.  Normally nil,
-	// set by SetDisplayWriter.  Note that setting this will produce
-	// *a lot* of data, so don't leave it set for too long.
-	displayWriter io.Writer
 
 	// These dates are used to interpret the timestamps in RTCM3
 	// messages.
@@ -171,9 +145,7 @@ type Handler struct {
 
 // New creates a handler using the given year, month and day to
 // identify which week the times in the messages refer to.
-func New(startTime time.Time, logger *log.Logger) *Handler {
-
-	handler := Handler{logger: logger, WaitTimeOnEOF: defaultWaitTimeOnEOF}
+func New(startTime time.Time) *Handler {
 
 	// Convert the start date to UTC.
 	startTime = startTime.In(utils.LocationUTC)
@@ -188,6 +160,8 @@ func New(startTime time.Time, logger *log.Logger) *Handler {
 	// most of Saturday UTC is the end of one GPS week but the last few
 	// seconds are the beginning of the next.
 	//
+	var startOfGalileoWeek time.Time
+	var startOfGPSWeek time.Time
 	if startTime.Weekday() == time.Saturday {
 		// This is saturday, either in the old GPS week or the new one.
 		// Get the time when the new GPS week starts (or started).
@@ -196,29 +170,36 @@ func New(startTime time.Time, logger *log.Logger) *Handler {
 		gpsWeekStart := midnightNextSunday.Add(gpsTimeOffset)
 		if startTime.Equal(gpsWeekStart) || startTime.After(gpsWeekStart) {
 			// It's Saturday in the first few seconds of a new GPS week
-			handler.startOfGPSWeek = gpsWeekStart
+			startOfGPSWeek = gpsWeekStart
 			// Galileo keeps GPS time.
-			handler.startOfGalileoWeek = gpsWeekStart
+			startOfGalileoWeek = gpsWeekStart
 
 		} else {
 			// It's Saturday at the end of a GPS week.
 			midnightLastSunday := getStartOfLastSundayUTC(startTime)
-			handler.startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
+			startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
 			// Galileo keeps GPS time.
-			handler.startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
+			startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
 		}
 	} else {
 		// It's not Saturday.  The GPS week started just before midnight
 		// at the end of last Saturday.
 		midnightLastSunday := getStartOfLastSundayUTC(startTime)
-		handler.startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
+		startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
 		// Galileo keeps GPS time
-		handler.startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
+		startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
 	}
 
-	handler.timestampFromPreviousGPSMessage = (uint(startTime.Sub(handler.startOfGPSWeek).Milliseconds()))
+	timestampFromPreviousGPSMessage := (uint(startTime.Sub(startOfGPSWeek).Milliseconds()))
 	// Galileo keeps GPS time.
-	handler.timestampFromPreviousGalileoMessage = handler.timestampFromPreviousGPSMessage
+	timestampFromPreviousGalileoMessage := timestampFromPreviousGPSMessage
+
+	handler := Handler{
+		startOfGPSWeek: startOfGPSWeek,
+		timestampFromPreviousGPSMessage: timestampFromPreviousGPSMessage,
+		startOfGalileoWeek: startOfGalileoWeek,
+		timestampFromPreviousGalileoMessage: timestampFromPreviousGalileoMessage,
+	}
 
 	// Beidou.
 	// Get the start of this Beidou week.  Despite
@@ -257,14 +238,10 @@ func New(startTime time.Time, logger *log.Logger) *Handler {
 	return &handler
 }
 
-func (rtcmHandler *Handler) SetDisplayWriter(displayWriter io.Writer) {
-	rtcmHandler.displayWriter = displayWriter
-}
-
 // HandleMessagesFromChannel reads bytes from ch_in, converts them to RTCM
 // messages and writes the messages to ch_out.  The caller is responsible
 // for creating and closing both channels.
-func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan rtcm3.Message) {
+func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan Message) {
 
 	// Turn the input channel into a pushback channel.
 	pb := pushback.New(ch_in)
@@ -274,8 +251,6 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 		message, err := rtcmHandler.FetchNextMessageFrame(pb)
 		if err != nil && err.Error() == "done" {
 			// There is no more input.
-			logEntry := fmt.Sprintf("HandleMessagesFromChannel: %v", err)
-			rtcmHandler.makeLogEntry(logEntry)
 			close(ch_out)
 			return
 		}
@@ -295,7 +270,7 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 // text, it returns the error.  If it has read some text, it just returns
 // that (the assumption being that the next call will get no text and the
 // same error).  Use GetMessage to extract the message from the result.
-func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rtcm3.Message, error) {
+func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Message, error) {
 
 	// A valid RTCM3 message frame is a header containing the start of message
 	// byte and two bytes containing a 10-bit message length, zero padded to
@@ -314,14 +289,7 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 		// time.
 		if len(frame) == 0 {
 			// An error and no bytes.  We're done.
-			logEntry := "FetchNextMessageFrame: error - " + eatError.Error()
-			rtcmHandler.makeLogEntry(logEntry)
 			return nil, eatError
-		} else {
-			// Process what we have.
-			logEntry := fmt.Sprintf("FetchNextMessageFrame: continuing after error,  eaten %d bytes - %v",
-				len(frame), eatError)
-			rtcmHandler.makeLogEntry(logEntry)
 		}
 	}
 
@@ -332,28 +300,16 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 	if len(frame) > 1 {
 		// We have some non-RTCM, possibly followed by a start of message
 		// byte.
-		logEntry := fmt.Sprintf("FetchNextMessageFrame: eaten %d bytes", len(frame))
-		rtcmHandler.makeLogEntry(logEntry)
-		if frame[len(frame)-1] == startOfMessageFrame {
+		if frame[len(frame)-1] == utils.StartOfMessageFrame {
 			// non-RTCM followed by start of message byte.  Push the start
-			// byte back so we see it next time and return the rest of the
+			// byte back so we see it next time.  Return the rest of the
 			// buffer as a non-RTCM message.
-			logEntry1 := "FetchNextMessageFrame: found d3 - unreading"
-			rtcmHandler.makeLogEntry(logEntry1)
-			pc.PushBack(startOfMessageFrame)
+			pc.PushBack(utils.StartOfMessageFrame)
 			frameWithoutTrailingStartByte := frame[:len(frame)-1]
-			logEntry2 := fmt.Sprintf("FetchNextMessageFrame: returning %d bytes %s",
-				len(frameWithoutTrailingStartByte),
-				hex.Dump(frameWithoutTrailingStartByte))
-			rtcmHandler.makeLogEntry(logEntry2)
 			message, err := rtcmHandler.getMessage(frameWithoutTrailingStartByte)
 			return message, err
 		} else {
-			// Just some non-RTCM without a start byte.  (Probably end of input.)
-			logEntry := fmt.Sprintf("FetchNextMessageFrame: got: %d bytes %s",
-				len(frame),
-				hex.Dump(frame))
-			rtcmHandler.makeLogEntry(logEntry)
+			// Just some non-RTCM without a start byte (probably end of input).
 			message, err := rtcmHandler.getMessage(frame)
 			return message, err
 		}
@@ -369,8 +325,6 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 	// happens to contain the start of message value.  Either way we return the
 	// data as a non-RTCM message.
 
-	logEntry := "FetchNextMessageFrame: found d3 immediately"
-	rtcmHandler.makeLogEntry(logEntry)
 	var n int = 1
 	var expectedFrameLength uint = 0
 	for {
@@ -379,8 +333,6 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 		if err != nil {
 			//Error - presumably end of input.  however, we've already read some text, so
 			// log the error, but ignore it. It will be picked up on the next call.
-			logEntry := "FetchNextMessageFrame: ignoring error for now"
-			rtcmHandler.makeLogEntry(logEntry)
 			message, err := rtcmHandler.getMessage(frame)
 			return message, err
 		}
@@ -390,38 +342,31 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 
 		// What we do next depends upon how much of the message we have read.
 		// On the first few trips around the loop we read the leader bytes
-		// and get the 10-bit expected message length l.  Once we know l, we
-		// can work out the total length of the frame (which is l+6) and we
-		// can then read the remaining bytes of the frame.
+		// and get the 10-bit expected message length l.  Once we know l we
+		// know the total length of the frame (l+6) and we can read the rest
+		// of it.
 		switch {
 		case n < utils.LeaderLengthBytes+2:
 			// We haven't read enough bytes to figure out the message length yet.
 			continue
 
 		case n == utils.LeaderLengthBytes+2:
-			// We have the first three bytes of the frame so we have enough data to find
-			// the length and the type of the message (which we will need in a later trip
-			// around this loop).
-			messageLength, messageType, err := rtcmHandler.getMessageLengthAndType(frame)
+			// We have the first three bytes of the frame which is enough to find
+			// the length and the type of the message (which we will need in a
+			// later trip around this loop).
+			messageLength, _, err := rtcmHandler.getMessageLengthAndType(frame)
 			if err != nil {
-				// We thought we'd found the start of a message, but it's something else
-				// that happens to start with the start of frame byte.
-				// Return the collected data.
-				logEntry := fmt.Sprintf("FetchNextMessageFrame: error getting length and type: %v", err)
-				rtcmHandler.makeLogEntry(logEntry)
-				message := rtcm3.NewNonRTCM(frame)
+				// We thought we'd found the start of an RTCM message but it's some
+				// other data that just happens to contain the start of frame byte.
+				// Return the collected data as a non-RTCM message.
+				message := NewNonRTCM(frame)
 				return message, nil
 			}
-
-			logEntry1 := fmt.Sprintf("FetchNextMessageFrame: found message type %d length %d", messageType, messageLength)
-			rtcmHandler.makeLogEntry(logEntry1)
 
 			// The frame contains a 3-byte header, a variable-length message (for which
 			// we now know the length) and a 3-byte CRC.  Now we just need to continue to
 			// read bytes until we have the whole message.
 			expectedFrameLength = messageLength + utils.LeaderLengthBytes + utils.CRCLengthBytes
-			logEntry2 := fmt.Sprintf("FetchNextMessageFrame: expecting a %d frame", expectedFrameLength)
-			rtcmHandler.makeLogEntry(logEntry2)
 
 			// Now we read the rest of the message byte by byte, one byte every trip.
 			// We know how many bytes we want, so we could just read that many using one
@@ -438,9 +383,12 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*rt
 			// (The case condition could use ==, but using >= guarantees that the loop will
 			// terminate eventually even if my logic is faulty and the loop overruns!)
 			//
-			logEntry := fmt.Sprintf("FetchNextMessageFrame: returning an RTCM message frame, %d bytes, expected %d", n, expectedFrameLength)
-			rtcmHandler.makeLogEntry(logEntry)
 			message, err := rtcmHandler.getMessage(frame)
+			if n != int(expectedFrameLength) {
+				// This should never happen!
+				message.ErrorMessage =
+					fmt.Sprintf("expected a frame of %d bytes, found %d", n, expectedFrameLength)
+			}
 			return message, err
 
 		default:
@@ -464,7 +412,7 @@ func eatUntilStartOfFrame(pc *pushback.ByteChannel) ([]byte, error) {
 		}
 		stuff = append(stuff, b)
 
-		if b == startOfMessageFrame {
+		if b == utils.StartOfMessageFrame {
 			return stuff, nil
 		}
 	}
@@ -480,7 +428,7 @@ func (rtcmHandler *Handler) getMessageLengthAndType(bitStream []byte) (uint, int
 	}
 
 	// The message header is 24 bits.  The top byte is startOfMessage.
-	if bitStream[0] != startOfMessageFrame {
+	if bitStream[0] != utils.StartOfMessageFrame {
 		message := fmt.Sprintf("message starts with 0x%0x not 0xd3", bitStream[0])
 		return 0, utils.NonRTCMMessage, errors.New(message)
 	}
@@ -513,20 +461,20 @@ func (rtcmHandler *Handler) getMessageLengthAndType(bitStream []byte) (uint, int
 // as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
 // doesn't contain a valid message, it returns a message with type NonRTCMMessage.
 //
-func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error) {
+func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 
 	if len(bitStream) == 0 {
 		return nil, errors.New("zero length message frame")
 	}
 
-	if bitStream[0] != startOfMessageFrame {
+	if bitStream[0] != utils.StartOfMessageFrame {
 		// This is not an RTCM message.
-		return rtcm3.NewNonRTCM(bitStream), nil
+		return NewNonRTCM(bitStream), nil
 	}
 
 	messageLength, messageType, formatError := rtcmHandler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
-		return rtcm3.NewMessage(messageType, formatError.Error(), bitStream), formatError
+		return NewMessage(messageType, formatError.Error(), bitStream), formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -541,7 +489,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 		// The message is incomplete, return what we have as a
 		// non-RTCM3 message.  (This can happen if it's the last message
 		// in the input stream.)
-		message := rtcm3.NewNonRTCM(bitStream)
+		message := NewNonRTCM(bitStream)
 		message.ErrorMessage = "incomplete message frame"
 		return message, errors.New(message.ErrorMessage)
 	}
@@ -550,13 +498,13 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 
 	// Check the CRC.
 	if !CheckCRC(bitStream) {
-		message := rtcm3.NewNonRTCM(bitStream)
+		message := NewNonRTCM(bitStream)
 		message.ErrorMessage = "CRC is not valid"
 		return message, errors.New(message.ErrorMessage)
 	}
 
 	// The message is complete and the CRC check passes, so it's valid.
-	message := rtcm3.NewMessage(messageType, "", bitStream[:expectedFrameLength])
+	message := NewMessage(messageType, "", bitStream[:expectedFrameLength])
 
 	// If the message is an MSM7, get the time (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
@@ -596,7 +544,7 @@ func (rtcmHandler *Handler) getMessage(bitStream []byte) (*rtcm3.Message, error)
 }
 
 // Analyse decodes the raw byte stream and fills in the broken out message.
-func Analyse(message *rtcm3.Message) {
+func Analyse(message *Message) {
 	var readable interface{}
 
 	switch {
@@ -620,7 +568,7 @@ func Analyse(message *rtcm3.Message) {
 	}
 }
 
-func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
+func analyseMSM4(messageBitStream []byte, message *Message) {
 	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
@@ -630,7 +578,7 @@ func analyseMSM4(messageBitStream []byte, message *rtcm3.Message) {
 	message.Readable = msm4Message
 }
 
-func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
+func analyseMSM7(messageBitStream []byte, message *Message) {
 	msm7Message, msm7Error := msm7Message.GetMessage(messageBitStream)
 	if msm7Error != nil {
 		message.ErrorMessage = msm7Error.Error()
@@ -640,7 +588,7 @@ func analyseMSM7(messageBitStream []byte, message *rtcm3.Message) {
 	message.Readable = msm7Message
 }
 
-func analyse1005(messageBitStream []byte, message *rtcm3.Message) {
+func analyse1005(messageBitStream []byte, message *Message) {
 	message1005, message1005Error := type1005.GetMessage(messageBitStream)
 	if message1005Error != nil {
 		message.ErrorMessage = message1005Error.Error()
@@ -864,7 +812,7 @@ func getStartOfLastSundayUTC(now time.Time) time.Time {
 // DisplayMessage takes the given Message object and returns it
 // as a readable string.
 //
-func (rtcmHandler *Handler) DisplayMessage(message *rtcm3.Message) string {
+func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 
 	display := fmt.Sprintf("message type %d, frame length %d\n",
 		message.MessageType, len(message.RawData))
@@ -942,7 +890,7 @@ func (rtcmHandler *Handler) DisplayMessage(message *rtcm3.Message) string {
 
 // PrepareForDisplay creates and returns the readable component of the message
 // ready for String to display it.
-func PrepareForDisplay(message *rtcm3.Message) interface{} {
+func PrepareForDisplay(message *Message) interface{} {
 	// Do this at most once for each message.
 	if message.Readable == nil {
 		Analyse(message)
@@ -1023,12 +971,12 @@ func getUTCFromTimestamp(timestamp, timestampFromPreviousMessage uint, startOfWe
 	return timeFromTimestamp, newStartOfWeek, nil
 }
 
-// makeLogEntry writes a string to the logger.  If the logger is nil
-// it writes to the default system log.
-func (rtcmHandler *Handler) makeLogEntry(s string) {
-	if rtcmHandler.logger == nil {
-		log.Print(s)
-	} else {
-		rtcmHandler.logger.Print(s)
-	}
-}
+// // makeLogEntry writes a string to the logger.  If the logger is nil
+// // it writes to the default system log.
+// func (rtcmHandler *Handler) makeLogEntry(s string) {
+// 	if rtcmHandler.logger == nil {
+// 		log.Print(s)
+// 	} else {
+// 		rtcmHandler.logger.Print(s)
+// 	}
+// }

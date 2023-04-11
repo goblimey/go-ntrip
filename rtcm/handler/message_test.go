@@ -1,4 +1,4 @@
-package rtcm3
+package handler
 
 import (
 	"fmt"
@@ -86,7 +86,7 @@ func TestNew(t *testing.T) {
 		t.Errorf("want %s got %s", wantWarning, message.ErrorMessage)
 	}
 
-	// Can't compare the bitstreams so convert them to strings.
+	// Can't compare the bit streams so convert them to strings.
 	want := string(wantBitstream)
 	got := string(message.RawData)
 	if want != got {

@@ -77,8 +77,8 @@ type Header struct {
 	// constellation, station and timestamp.
 	MultipleMessage bool
 
-	// IssueOfDataStation - uint3. (Possibly the position of the message in a
-	// multiple message sequence?)
+	// IssueOfDataStation - uint3. (Possibly the sequence number of the
+	// message in a multiple message sequence?)
 	IssueOfDataStation uint
 
 	// SessionTransmissionTime - uint7.

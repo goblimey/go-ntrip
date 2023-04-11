@@ -11,7 +11,6 @@ import (
 	"github.com/goblimey/go-crc24q/crc24q"
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
-	"github.com/goblimey/go-ntrip/rtcm/rtcm3"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/type1005"
 	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
@@ -88,16 +87,15 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	}
 
 	// Expect the resulting messages on this channel.
-	ch_result := make(chan rtcm3.Message, 10)
+	ch_result := make(chan Message, 10)
 
-	rtcmHandler := New(time.Now(), nil)
-	rtcmHandler.StopOnEOF = true
+	rtcmHandler := New(time.Now())
 
 	// Test
 	rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
 
 	// Check.  Read the data back from the channel and check the message type.
-	messages := make([]rtcm3.Message, 0)
+	messages := make([]Message, 0)
 	for {
 		message, ok := <-ch_result
 		if !ok {
@@ -177,7 +175,7 @@ func TestFetchNextMessageFrame(t *testing.T) {
 
 		// Tuesday 29/8/23.
 		startDate := time.Date(2023, time.August, 29, 00, 00, 00, 0, utils.LocationUTC)
-		handler := New(startDate, logger)
+		handler := New(startDate)
 
 		gotMessage, gotError := handler.FetchNextMessageFrame(bc)
 
@@ -226,7 +224,7 @@ func TestFetchNextMessageFrameWithNilOrEmptyFrame(t *testing.T) {
 
 		// Tuesday 29/8/23.
 		startDate := time.Date(2023, time.August, 29, 00, 00, 00, 0, utils.LocationUTC)
-		handler := New(startDate, logger)
+		handler := New(startDate)
 
 		gotMessage, gotError := handler.FetchNextMessageFrame(bc)
 
@@ -268,7 +266,7 @@ func TestGetMessageLengthAndType(t *testing.T) {
 			"bits 8-13 of header are 63, must be 0"},
 	}
 	for _, td := range testData {
-		handler := New(time.Now(), logger)
+		handler := New(time.Now())
 		gotMessageLength, gotMessageType, gotError := handler.getMessageLengthAndType(td.bitStream)
 		if td.wantError != "" {
 			if td.wantError != gotError.Error() {
@@ -300,8 +298,7 @@ func TestGetMessage(t *testing.T) {
 	}
 	for _, td := range testData {
 		startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, utils.LocationUTC)
-		handler := New(startTime, logger)
-		handler.StopOnEOF = true
+		handler := New(startTime)
 
 		got, messageFetchError := handler.getMessage(td.bitStream)
 		if messageFetchError != nil {
@@ -343,7 +340,7 @@ func TestGetMessageWithErrors(t *testing.T) {
 	}
 	for _, td := range testData {
 		startTime := time.Now()
-		handler := New(startTime, logger)
+		handler := New(startTime)
 		gotMessage, gotError := handler.getMessage(td.frame)
 		if td.want == "" {
 			if gotMessage == nil {
@@ -421,7 +418,7 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 	}
 	for _, td := range testData {
 		startTime := time.Now()
-		handler := New(startTime, logger)
+		handler := New(startTime)
 		gotMessage, gotError := handler.getMessage(td.frame)
 
 		if len(td.wantError) > 0 {
@@ -484,11 +481,10 @@ func TestPrepareForDisplayWithRealData(t *testing.T) {
 	}
 
 	// Expect the resulting messages on this channel.
-	ch_result := make(chan rtcm3.Message, 10)
+	ch_result := make(chan Message, 10)
 
 	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
-	rtcmHandler := New(startTime, logger)
-	rtcmHandler.StopOnEOF = true
+	rtcmHandler := New(startTime)
 
 	// Test
 	rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
@@ -583,7 +579,7 @@ func TestGPSEpochTimes(t *testing.T) {
 
 	// Sunday 2020/08/02 BST, just after the start of the GPS epoch
 	dateTime1 := time.Date(2020, time.August, 2, 1, 0, 0, (60 - gpsLeapSeconds), utils.LocationLondon)
-	rtcm1 := New(dateTime1, logger)
+	rtcm1 := New(dateTime1)
 	if expectedEpochStart != rtcm1.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(utils.DateLayout),
@@ -593,7 +589,7 @@ func TestGPSEpochTimes(t *testing.T) {
 
 	// Wednesday 2020/08/05
 	dateTime2 := time.Date(2020, time.August, 5, 12, 0, 0, 0, utils.LocationLondon)
-	rtcm2 := New(dateTime2, logger)
+	rtcm2 := New(dateTime2)
 	if expectedEpochStart != rtcm2.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(utils.DateLayout),
@@ -603,7 +599,7 @@ func TestGPSEpochTimes(t *testing.T) {
 
 	// Sunday 2020/08/02 BST, just before the end of the GPS epoch
 	dateTime3 := time.Date(2020, time.August, 9, 00, 59, 60-gpsLeapSeconds-1, 999999999, utils.LocationLondon)
-	rtcm3 := New(dateTime3, logger)
+	rtcm3 := New(dateTime3)
 	if expectedEpochStart != rtcm3.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart.Format(utils.DateLayout),
@@ -615,7 +611,7 @@ func TestGPSEpochTimes(t *testing.T) {
 	dateTime4 := time.Date(2020, time.August, 9, 1, 59, 60-gpsLeapSeconds, 0, utils.LocationParis)
 	startOfNext := time.Date(2020, time.August, 8, 23, 59, 60-gpsLeapSeconds, 0, utils.LocationUTC)
 
-	rtcm4 := New(dateTime4, logger)
+	rtcm4 := New(dateTime4)
 	if startOfNext != rtcm4.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
 			startOfNext.Format(utils.DateLayout),
@@ -640,7 +636,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 
 	// The 9th is Sunday.  This start time should be in the previous week ...
 	startTime1 := time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC)
-	rtcm1 := New(startTime1, logger)
+	rtcm1 := New(startTime1)
 
 	if !expectedStartOfPreviousWeek.Equal(rtcm1.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -649,7 +645,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 
 	// ... and so should this.
 	startTime2 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds-1, 999999999, utils.LocationUTC)
-	rtcm2 := New(startTime2, logger)
+	rtcm2 := New(startTime2)
 
 	if !expectedStartOfPreviousWeek.Equal(rtcm2.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -658,7 +654,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 
 	// This start time should be in this week.
 	startTime3 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
-	rtcm3 := New(startTime3, logger)
+	rtcm3 := New(startTime3)
 
 	if !expectedStartOfThisWeek.Equal(rtcm3.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -668,7 +664,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 	// This start time should be just at the end of this Beidou week.
 	startTime4 :=
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds-1, 999999999, utils.LocationUTC)
-	rtcm4 := New(startTime4, logger)
+	rtcm4 := New(startTime4)
 
 	if !expectedStartOfThisWeek.Equal(rtcm4.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -678,7 +674,7 @@ func TestBeidouEpochTimes(t *testing.T) {
 	// This start time should be just at the start of the next Beidou week.
 	startTime5 :=
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
-	rtcm5 := New(startTime5, logger)
+	rtcm5 := New(startTime5)
 
 	if !expectedStartOfNextWeek.Equal(rtcm5.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
@@ -699,7 +695,7 @@ func TestGlonassEpochTimes(t *testing.T) {
 
 	startTime1 :=
 		time.Date(2020, time.August, 2, 5, 0, 0, 0, utils.LocationUTC)
-	rtcm1 := New(startTime1, logger)
+	rtcm1 := New(startTime1)
 	if expectedEpochStart1 != rtcm1.startOfGlonassDay {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart1.Format(utils.DateLayout),
@@ -722,7 +718,7 @@ func TestGlonassEpochTimes(t *testing.T) {
 	// Tuesday in Moscow - day 2
 	startTime2 :=
 		time.Date(2020, time.August, 3, 22, 59, 59, 999999999, utils.LocationUTC)
-	rtcm2 := New(startTime2, logger)
+	rtcm2 := New(startTime2)
 	if expectedEpochStart2 != rtcm2.startOfGlonassDay {
 		t.Errorf("expected %s result %s\n",
 			expectedEpochStart2.Format(utils.DateLayout),
@@ -746,11 +742,8 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 	const wantErrorMessage = "bitstream is too short for an MSM header - got 80 bits, expected at least 169"
 
 	shortBitStream := testdata.MessageBatchWithJunk[:16]
-	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
-	rtcm := New(startTime, logger)
-	rtcm.StopOnEOF = true
 
-	message := rtcm3.NewMessage(utils.MessageTypeMSM7GPS, "", shortBitStream)
+	message := NewMessage(utils.MessageTypeMSM7GPS, "", shortBitStream)
 
 	PrepareForDisplay(message)
 
@@ -768,21 +761,10 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 	}
 }
 
-// TestSetDisplayWriter checks SetDisplayWriter
-func TestSetDisplayWriter(t *testing.T) {
-	startTime := time.Now()
-	handler := New(startTime, logger)
-	handler.SetDisplayWriter(logger.Writer())
-
-	if handler.displayWriter != logger.Writer() {
-		t.Error("SetDisplayWriter failed to set the writer")
-	}
-}
-
 // TestAnalyseWithMSM4 checks that Analyse correctly handles an MSM4.
 func TestAnalyseWithMSM4(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
+	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
 
 	Analyse(message)
 
@@ -805,7 +787,7 @@ func TestAnalyseWithMSM4(t *testing.T) {
 // TestAnalyseWithMSM7 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWithMSM7(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
+	message := NewMessage(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
 
 	Analyse(message)
 
@@ -828,7 +810,7 @@ func TestAnalyseWithMSM7(t *testing.T) {
 // TestAnalyseWith1005 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWith1005(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
+	message := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
 
 	Analyse(message)
 
@@ -848,7 +830,7 @@ func TestAnalyseWith1005(t *testing.T) {
 // (the correct behaviour being to set the Readable field to a string).
 func TestAnalyseWith1230(t *testing.T) {
 
-	message := rtcm3.NewMessage(utils.MessageTypeGCPB, "", testdata.Fake1230)
+	message := NewMessage(utils.MessageTypeGCPB, "", testdata.Fake1230)
 
 	Analyse(message)
 
@@ -1011,10 +993,9 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 		{"1024", testdata.UnhandledMessageType1024, 1024, resultForUnhandledMessageType},
 	}
 	for _, td := range testData {
-		message := rtcm3.NewMessage(td.messageType, "", td.bitStream)
+		message := NewMessage(td.messageType, "", td.bitStream)
 		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
-		handler := New(startTime, logger)
-		handler.StopOnEOF = true
+		handler := New(startTime)
 
 		got := handler.DisplayMessage(message)
 		if got != td.want {
@@ -1031,10 +1012,10 @@ func TestDisplayMessageWithErrors(t *testing.T) {
 	// RTCM3 messages that will produce an error when DisplayMessage is called.
 	// In most cases the problem is that the type value in the message doesn't match
 	// the value in the raw data.
-	messageWithErrorMessage := rtcm3.NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
-	fake1005 := rtcm3.NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
-	fakeMSM4 := rtcm3.NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
-	fakeMSM7 := rtcm3.NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
+	messageWithErrorMessage := NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
+	fake1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
+	fakeMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
+	fakeMSM7 := NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
 	// Expected results.
 	resultForMessageWithWarning := `message type 1005, frame length 25
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
@@ -1096,7 +1077,7 @@ the readable message should be an MSM7
 
 	var testData = []struct {
 		description string
-		message     *rtcm3.Message
+		message     *Message
 		want        string
 	}{
 		{"error message", messageWithErrorMessage, resultForMessageWithWarning},
@@ -1106,8 +1087,7 @@ the readable message should be an MSM7
 	}
 	for _, td := range testData {
 		startTime := time.Now()
-		handler := New(startTime, logger)
-		handler.StopOnEOF = true
+		handler := New(startTime)
 		got := handler.DisplayMessage(td.message)
 		if td.want != got {
 			t.Errorf("%s\n%s", td.description, diff.Diff(td.want, got))
@@ -1219,7 +1199,7 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 	}
 	for _, td := range testData {
 
-		handler := New(td.startTime, logger)
+		handler := New(td.startTime)
 
 		_, err1 := handler.getTimeFromTimeStamp(td.messageType, td.timestamp1)
 
@@ -1334,7 +1314,7 @@ func TestGetTimeFromTimeStampWithError(t *testing.T) {
 	for _, td := range testData {
 		// The start time is irrelevant so any will do.
 		startTime := time.Now()
-		handler := New(startTime, logger)
+		handler := New(startTime)
 		var zeroTime time.Time // zeroTime is the default time value.
 
 		gotTime, gotError := handler.getTimeFromTimeStamp(td.hdr.MessageType, td.hdr.Timestamp)
@@ -1374,7 +1354,7 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 		{"day/timestamp", illegal2},
 	}
 	for _, td := range testData {
-		handler := New(time.Now(), nil)
+		handler := New(time.Now())
 		utcTime, err := handler.getUTCFromGlonassTime(td.timestamp)
 
 		if !utcTime.Equal(zeroTimeValue) {
@@ -1529,10 +1509,9 @@ func TestCheckCRC(t *testing.T) {
 		}
 
 		// Expect the resulting messages on this channel.
-		ch_result := make(chan rtcm3.Message, 10)
+		ch_result := make(chan Message, 10)
 
-		rtcmHandler := New(time.Now(), logger)
-		rtcmHandler.StopOnEOF = true
+		rtcmHandler := New(time.Now())
 
 		// Test
 		rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
