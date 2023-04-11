@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 	"time"
-	
+
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
@@ -66,6 +66,6 @@ func TestGetTime(t *testing.T) {
 	junk2 := "2020-11-13T09:10:11+junk"
 	_, err6 := getTime(junk2)
 	if err6 == nil {
-		t.Errorf("timestring %s parsed but it should have failed", junk2)
+		t.Errorf("time string %s parsed but it should have failed", junk2)
 	}
 }

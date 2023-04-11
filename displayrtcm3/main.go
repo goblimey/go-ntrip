@@ -4,56 +4,69 @@
 // are many different types of RTCM message, all in different formats.
 // The most important for accurate GNSS systems are message type 1005,
 // which gives the position of the base station, and Multiple Signal
-// Messages type 7 (MSM7), which give the base station's observations
-// of satellite signals to a high precision.  The tool displays
-// these messages is a readable format.  It handles MSM7 data for
-// GPS, Galileo, GLONASS and BeiDou satellites.  These can be observed
-// from anywhere in the world, assuming an open view of the sky. The
-// RTCM data may contain other messages and these are displayed in their
-// raw binary format.
+// Messages, either type 4 (MSM4) or type 7 (MSM7).  These both contain
+// the base station's observations of satellite signals.  Type 4 messages
+// are of sufficient precision for 2-cm accurate positioning.  Type 7
+// messages are of even high precision.  A GNSS device needs only emit
+// either MSM4 or MSM7.
+//
+// Usage:
+//		displayrtcm3 file date
+//
+// Example:
+//		displayrtcm3 testdata.rtcm 2020-11-13
+//
+// The tool handles MSM data for GPS, Galileo, GLONASS and BeiDou
+// satellites.  These can be observed from anywhere in the world given
+// an open view of the sky.
+//
+// The RTCM data may contain other messages and these are displayed in
+// "od" format - hex values and readable text.  They are mostly ASCII
+// strings, for example NMEA messages, so they should be fairly readable.
 //
 // The program takes one argument which should be in the format
-// "yyyy-mm-dd".  The RTCM input should begin some time on that day.
-// If no start date is specified it's assumed that the data is being
-// generated live and the current date/time is used.
+// "yyyy-mm-dd".  This is turned into a date/time at midnight UTC on
+// that day.  This is used to figure out the start of the various
+// GNSS weeks - the GPS week and so on.
 //
-// Some RTCM messages contain a timestamp represented as
-// milliseconds since the start of an epoch, which is midnight at
-// the start of Sunday in some time zone.  This timestamp rolls over
-// every week, so the tool needs to know the data of the first
-// message.
+// Each Multiple Signal Message (MSM) contains a timestamp.  The
+// timestamps in the input data should relate to the current GNSS weeks.
+// The timestamp is represented as milliseconds since some start date, in
+// most cases the start of the week, which is midnight at the start of
+// Sunday in some time zone.  The timestamp rolls over to zero at the
+// start of the next period, so the tool needs to know which period it's
+// handling.
 //
-// The GPS timestamp rolls over a few seconds before midnight at the
+// If the tool runs for a long time, the week will roll over into the
+// next, and the next, and so on.
+//
+// The GPS timestamp rolls over a few seconds BEFORE midnight at the
 // start of Sunday in UTC (in 2021, 18 seconds before midnight).
-// Galileo uses the same timestamp as GPS.  The Beidou timestamp
-// rolls over 14 seconds AFTER midnight on Sunday.  The GLONASS
-// timestamp contains two fields, day and milliseconds since the start
-// of the day in the Moscow time zone.  Day 0 is Sunday, which start
-// at 21:00 on Saturday evening in UTC.
-//
-// If the tool is run without specifying a start date it uses the
-// current date and time as its starting point for decoding the
-// timestamps.  It's therefore most important that the system clock is
-// correct, especially if the tool is started around 9pm on a Saturday
-// or around midnight on a Sunday, which is when the timestamps roll
-// over.
+// Galileo uses the same time as GPS.  The Beidou timestamp rolls
+// over 14 seconds AFTER midnight on Sunday.  The GLONASS timestamp
+// contains two fields, day and milliseconds since the start of the day
+// in the Moscow time zone.  Day 0 is Sunday which starts at 21:00 on
+// Saturday evening in UTC.  Day 7 is an illegal value and should
+// never occur.
 //
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"time"
 
-	"github.com/goblimey/go-ntrip/rtcm"
+	handler "github.com/goblimey/go-ntrip/file_handler"
+	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
 )
 
 func main() {
 
 	var startDate time.Time
-	var reader io.Reader
+	var reader *bufio.Reader
 	if len(os.Args) < 3 {
 		log.Fatalf("usage: %s file yyyy-mm-dd", os.Args[0])
 	} else {
@@ -68,16 +81,16 @@ func main() {
 
 		fileName := os.Args[1]
 		var openError error
-		reader, openError = openFile(fileName)
+		ioReader, openError := openFile(fileName)
 		if openError != nil {
 			log.Fatalf("%s: cannot open %s - %v", appName, fileName, openError)
 		}
 
+		reader = bufio.NewReader(ioReader)
 	}
 
-	rtcmHandler := rtcm.New(startDate, log.Default())
-	// Process the input file and then stop.
-	rtcmHandler.StopOnEOF = true
+	messageChan := make(chan rtcm.Message, 100)
+	fileHandler := handler.New(startDate, messageChan)
 
 	// The output is always to stdout.
 
@@ -86,16 +99,22 @@ func main() {
 	fmt.Printf("\nNote: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)\n")
 	fmt.Printf("18 seconds ahead of UTC\n\n")
 
-	// Run HandleMessages with a single channel connected to a
-	// goroutine that displays each message in readable form.
-	var channels []chan rtcm.RTCM3Message
-	const channelCap = 1000
-	stdoutChannel := make(chan rtcm.RTCM3Message, channelCap)
-	defer close(stdoutChannel)
-	channels = append(channels, stdoutChannel)
-	go writeReadableMessages(stdoutChannel, rtcmHandler, os.Stdout)
+	// Fetch the messages.
+	go fileHandler.Handle(reader)
 
-	rtcmHandler.HandleMessages(reader, channels)
+	// Display the messages.
+	for {
+		message, ok := <-messageChan
+		if !ok {
+			// No more message.  We're done.
+			os.Exit(0)
+		}
+
+		_, writeError := fmt.Println(message.String())
+		if writeError != nil {
+			os.Stderr.Write([]byte(writeError.Error()))
+		}
+	}
 }
 
 // getTime gets a time from a string in one of three formats,
@@ -133,7 +152,7 @@ func openFile(fileName string) (io.Reader, error) {
 // decodes them to readable form and writes the result to the given
 // writer.  If the channel is closed or there is a write error, it
 // terminates.  It can be run in a go routine.
-func writeReadableMessages(ch chan rtcm.RTCM3Message, rtcmHandler *rtcm.RTCM, writer io.Writer) {
+func writeReadableMessages(ch chan rtcm.Message, rtcmHandler *rtcm.Handler, writer io.Writer) {
 
 	for {
 		message, ok := <-ch
