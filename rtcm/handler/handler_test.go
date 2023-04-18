@@ -1537,7 +1537,30 @@ func TestCheckCRC(t *testing.T) {
 func Test(t *testing.T) {
 
 	var bitStream = []byte{
-		0xd3, 0x00, 0x00, 0x44, 0x90, 0x00,
+		0xd3, 0x00, 0x24,
+	// This is the message body of an MSM - no leader or CRC.
+	// The header is 185 bits long, with 2 cell mask bits.
+	// The type is 1074, Station ID is 1:
+	// 0: 1000 0110 010|0000 0000 0001
+	0x43, 0x20, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00,
+	//                   64 bit satellite mask with satellite 4 marked.
+	// 64: 000|0 0|0|00   0|000 1000   0000 0000   0000 0000 ...
+	0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	//               32 bit signal mask with signals 2 and 16 marked.
+	// 0000 0000   0|010 0000   0000 0000   1000 0000
+	/* 128 */ 0x00, 0x20, 0x00, 0x80,
+	//
+	//                    2 bit cell mask
+	//                       Satellite cell - whole 1, frac 0.25
+	//                                                   Signal cell
+	// 160: 0000 0000   0|11|0 0000  001|0 1000   0000 0|000
+	0x00, 0x60, 0x28, 0x00,
+	// 192: 0100 0000   0000|0001   0000 0000   000|0 0010
+	0x40, 0x01, 0x00, 0x02,
+	// 224: 0000 0000   0000 0000  0|100 0000   0000 0000
+	0x00, 0x00, 0x40, 0x00,
+	// 276: 0000 000|0   011|0 100|0|  1|000 111|0  1000 0|000
+	0x00, 0x68, 0x8e, 0x80,
 	}
 
 	crc := crc24q.Hash(bitStream)

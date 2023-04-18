@@ -219,28 +219,46 @@ import (
 // set of messages.
 func TestHandle(t *testing.T) {
 
-	const wantNumMessages = 7
-	wantMessageType := []int {
-		1077, 
-		utils.NonRTCMMessage, 
+	// The test bit stream contains 7 messages.
+	bitStream := testdata.MessageBatchWithJunk
+
+	// These are the expected message types.
+	wantMessageType := []int{
+		1077,
+		utils.NonRTCMMessage,
 		1087,
-		utils.NonRTCMMessage, 
+		utils.NonRTCMMessage,
 		1097,
 		1127,
-		utils.NonRTCMMessage, 
+		utils.NonRTCMMessage,
 	}
 
-	// Create a reader connected to the bit stream.
-	r := bytes.NewReader(testdata.MessageBatchWithJunk)
+	// Create a buffered reader connected to the test bit stream.
+	r := bytes.NewReader(bitStream)
 	reader := bufio.NewReader(r)
+
+	// Create the input channel for the RTCM handler.
+	byteChan := make(chan byte)
 
 	// Create the output channel.
 	messageChan := make(chan rtcm.Message, 10)
 
-	// Create the handler and run it.
-	startTime := time.Date(2020, time.November, 13, 1, 0, 0, 0, utils.LocationUTC)
-	handler := New(startTime, messageChan)
-	go handler.Handle(reader)
+	// Create and start a file handler feeding the rtcmHandler.  The file
+	// handler reads the input bytes and messages appear on the message
+	// channel.
+
+	const waitTimeOnEOF = 0 // Do not wait when encountering End Of File.
+	const timeoutOnEOF = 0  // Time out immediately on the first End Of File.
+	fh := New(messageChan, waitTimeOnEOF, timeoutOnEOF)
+	go fh.Handle(time.Now(), reader, byteChan)
+
+	// Handle doesn't close the byte channel.  That decision is left to the
+	// caller.  Pause briefly to let the data drain and then close it.  That
+	// causes the rtcmHandler to stop waiting on any more data coming in and
+	// to process the partial messages that ends the test data.
+
+	time.Sleep(time.Second)
+	close(byteChan)
 
 	// Fetch the messages from the channel.
 	messages := make([]rtcm.Message, 0)
@@ -254,14 +272,150 @@ func TestHandle(t *testing.T) {
 
 	// Check the number of messages.
 	gotNumMessages := len(messages)
-	if wantNumMessages != gotNumMessages {
-		t.Errorf("want %d got %d", wantNumMessages, gotNumMessages)
+	if len(wantMessageType) != gotNumMessages {
+		t.Errorf("want %d got %d", len(wantMessageType), gotNumMessages)
 	}
 
 	// Check the message types.
-	for i, message:= range messages {
+	for i, message := range messages {
 		if wantMessageType[i] != message.MessageType {
-			t.Errorf("want type %d got %d", wantMessageType[i], message.MessageType)
+			t.Errorf("%d: want type %d got %d", i, wantMessageType[i], message.MessageType)
+		}
+	}
+}
+
+// TestHandleManyCalls checks that Handle correctly processes a number of bit streams
+// containing messages.
+func TestHandleManyCalls(t *testing.T) {
+
+	// If the input is a serial line with a GNSS device on the end, Handle will
+	// be called many times and the messages from each call will be sent to an
+	// aggregate channel.  This call simulates that situation using two test
+	// bit streams.  The result on the aggregate message channel should be the
+	// messages from the two bit streams in order.
+
+	const waitTimeOnEOF = 0            // Do not wait when encountering End Of File.
+	const timeoutOnEOF = 0             // Time out immediately on the first End Of File.
+	const messageChannelCapacity = 100 // The capacity of the buffered message channels.
+
+	// The first test bit stream contains 1 message, the second contains
+	// 7 messages.
+	bitStream1 := testdata.MessageFrameType1074
+	bitStream2 := testdata.MessageBatchWithJunk
+
+	// These are the expected message types.
+	wantMessageType := []int{
+		1074,
+		1077,
+		utils.NonRTCMMessage,
+		1087,
+		utils.NonRTCMMessage,
+		1097,
+		1127,
+		utils.NonRTCMMessage,
+	}
+
+	// Create a buffered reader connected to the first test bit stream.
+	r1 := bytes.NewReader(bitStream1)
+	reader1 := bufio.NewReader(r1)
+
+	// Create an aggregate message channel.  Each o the two phases below
+	// will send messages to this.
+	aggregateMessageChan := make(chan rtcm.Message, messageChannelCapacity)
+
+	// Phase 1:  read from a data source until it's exhausted and send the
+	// resulting messages to the aggregate channel.  This data source is a
+	// complete message, which is how things will be in the field - the GNSS
+	// device will send complete messages in bursts with a long(ish) delay
+	// between each burst.
+
+	// Create the input channel for the RTCM handler.  It persists
+	// over both calls of Handle.
+	byteChan1 := make(chan byte)
+
+	// Create the temporary output channel.
+	messageChan1 := make(chan rtcm.Message, messageChannelCapacity)
+
+	// Create and start a file handler feeding the rtcmHandler.  The file
+	// handler reads the input bytes and messages appear on the temporary
+	// message channel.  When it's closed, the handler is done.
+
+	fh1 := New(messageChan1, waitTimeOnEOF, timeoutOnEOF)
+	go fh1.Handle(time.Now(), reader1, byteChan1)
+
+	// Read the messages from the message channel and send them to the
+	// aggregate channel.
+	for {
+		message, ok := <-messageChan1
+		if !ok {
+			break // Phase 1 is done.
+		}
+
+		aggregateMessageChan <- message
+	}
+
+	// phase 2:  same again but with different input data.
+
+	// Create the input channel for the RTCM handler.  It persists
+	// over both calls of Handle.
+	byteChan2 := make(chan byte)
+
+	// Create a buffered reader connected to the test bit stream.
+	r2 := bytes.NewReader(bitStream2)
+	reader2 := bufio.NewReader(r2)
+
+	// Create the output channel.
+	messageChan2 := make(chan rtcm.Message, messageChannelCapacity)
+
+	// Create and start a file handler feeding the rtcmHandler.  The file
+	// handler reads the input bytes and messages appear on the message
+	// channel.
+
+	fh := New(messageChan2, waitTimeOnEOF, timeoutOnEOF)
+	go fh.Handle(time.Now(), reader2, byteChan2)
+
+	// Read the messages from the message channel and send them to the
+	// aggregate channel.
+	for {
+		message, ok := <-messageChan2
+		if !ok {
+			break // Phase 1 is done.
+		}
+
+		aggregateMessageChan <- message
+	}
+
+	// We're done.  Handle doesn't close the byte channel.  That decision is
+	// left to the caller.  Pause briefly to let the data drain and then close
+	// it.  That causes the rtcmHandler to stop waiting on any more data
+	// coming in and to process the partial message that ends the second
+	// bit stream.
+
+	// time.Sleep(time.Second)
+	// close(byteChan)
+
+	close(aggregateMessageChan)
+
+	// Fetch the messages from the aggregate channel.
+	messages := make([]rtcm.Message, 0)
+	for {
+		message, ok := <-aggregateMessageChan
+		if !ok {
+			break
+		}
+		messages = append(messages, message)
+	}
+
+	// Check the number of messages.
+	gotNumMessages := len(messages)
+	if len(wantMessageType) != gotNumMessages {
+		t.Errorf("want %d got %d", len(wantMessageType), gotNumMessages)
+	}
+
+	// Check the message types.
+	for i, message := range messages {
+		if wantMessageType[i] != message.MessageType {
+			t.Errorf("%d: want type %d got %d", i, wantMessageType[i], message.MessageType)
 		}
 	}
 }

@@ -14,46 +14,134 @@ import (
 // a USB connection fed by an NTRIP source, see the serial line handler.)
 //
 type Handler struct {
-	RTCMHandler rtcm.Handler
-	MessageChan chan rtcm.Message
+	RTCMHandler        *rtcm.Handler     // Handles RTCM3 messages ...
+	MessageChan        chan rtcm.Message // ... and issues them on this channel.
+	RetryIntervalOnEOF time.Duration     // The time to wait between retries on EOF.
+	EOFTimeout         time.Duration     // Give up retying after this time has elapsed.
+
 }
 
-// New creates a handler using the given start time.
-func New(startTime time.Time, messageChan chan rtcm.Message) *Handler {
-	rtcmHandler := rtcm.New(startTime)
-	handler := Handler{RTCMHandler: *rtcmHandler, MessageChan: messageChan}
+// New creates a handler.
+func New(messageChan chan rtcm.Message, retryIntervalOnEOF, eofTimeout time.Duration) *Handler {
+
+	handler := Handler{
+		MessageChan:        messageChan,
+		RetryIntervalOnEOF: retryIntervalOnEOF,
+		EOFTimeout:         eofTimeout,
+	}
 	return &handler
 }
 
-// Handle reads the file.  Extracted RTCM messages are sent to the handler's message
-// channel. If there is a read error (other than EOF), it's returned.
+// Handle reads the file and sends the contents to an RTCM handler which extracts
+// RTCM messages and sends them to the message channel. If there is a read error
+// (such as EOF), it's returned.
 //
-func (handler *Handler) Handle(reader *bufio.Reader) error {
+func (handler *Handler) Handle(startTime time.Time, reader *bufio.Reader, byteChan chan byte) error {
 
-	// Create a buffered channel big enough to hold a few messages.
-	sourceChan := make(chan byte, 10000)
+	// Set up an RTCM handler connected to the input and output channels
+	// and start it running.
+	handler.RTCMHandler = rtcm.New(startTime)
+	go handler.RTCMHandler.HandleMessagesFromChannel(byteChan, handler.MessageChan)
 
-	// Set up an RTCM handler connected to the input and output channels.
-	go handler.RTCMHandler.HandleMessagesFromChannel(sourceChan, handler.MessageChan)
+	// Feed bytes into the handler until the source is exhausted.
+	err := handler.HandleUntilError(reader, byteChan)
+
+	// The RTCM handler closes the message channel when it's finished processing.
+	// The caller is responsible for closing the byte channel - it may persist
+	// over many calls of Handle.
+
+	return err
+}
+
+// HandleUntilError reads from the reader and sends the result to the
+// RTCM handler until it encounters a read error, typically EOF.
+func (handler *Handler) HandleUntilError(reader *bufio.Reader, rtcmChan chan byte) error {
+
+	// It's assumed that caller has set up an RTCM handler which is consuming
+	// the data that we put onto the rtcmChan.
+	//
+	// An EOF on a read is not necessarily fatal.  It can just mean that there
+	// is no data to read just now, but there may be some in the future.  If a
+	// read gets EOF, we pause for a short while and try again.  If nothing
+	// comes in for a given timeout period, then we stop.  On any other read
+	// error we stop immediately. (Note: that situation is difficult or
+	// impossible to arrange during testing.)
+	//
+	// If the reader is connected to a file that's not being written, this will
+	// process the whole file, time out for a short while and then die.
+	//
+	// If the reader is connected to a serial line fed by a live NTRIP source,
+	// the caller should call us again with the same reader and message channel
+	// and we will continue processing.  Each burst should contain a complete
+	// set of messages so if the timeout is long enough we should read the
+	// complete set and hand it to the RTCM handler.  The aim is to tune the
+	// timeout so that as long as the source continues to send data on schedule,
+	// this function continues running.  That could be for days, weeks or months.
+	//
+	// On a serial line the data will likely arrive in bursts, maybe once every
+	// second, for one tenth of a second, followed by silence and then the next
+	// burst.  If the timeout is too short then we may return too early, part way
+	// through reading an RTCM message.  That could result in data being lost or
+	// a message being broken into parts, each part becoming a non-RTCM message on
+	// the message channel.
+	//
+	// Note that we DO NOT close the reader or the channel.  the caller may call us
+	// again with the same arguments and we will continue.
+
+	// timeOfFirstEOF is set when the read has returned EOF one or more times
+	// in a row.  It's the time that we saw the first EOF .  If the last read
+	// was successful, the value is nil.
+
+	// Ensure that the byte channel is closed on return.
+	defer close(rtcmChan)
+
+	var timeOfFirstEOF *time.Time
 
 	// Read the file and send the data to the channel.
 	for {
 		buf := make([]byte, 1)
 		n, err := reader.Read(buf)
 		if err != nil {
-			close(sourceChan)
-			if err == io.EOF {
-				return nil // EOF - expected behaviour.
-			} else {
-				// Some kind of file handling error.  (This is VERY difficult
-				// to provoke during testing.)
+			// Error of some kind, probably EOF.
+			if err != io.EOF {
+				// Some other kind of file handling error.  (This is difficult
+				// to provoke during testing without using a mock.)
 				return err
 			}
+
+			// EOF.  That may really mean end of file or just that there
+			// is currently no data to read.
+			if handler.EOFTimeout == 0 {
+				// No timeout so don't retry.
+				return err
+			}
+
+			//Retry until the timeout elapses and then return.
+			if timeOfFirstEOF == nil {
+				// The last read was successful, this one produced EOF.
+				// Set up the timeout, pause and try again.
+				t := time.Now()
+				timeOfFirstEOF = &t
+				time.Sleep(handler.RetryIntervalOnEOF)
+				continue
+			}
+
+			// If we get to here, we've seen EOF this time and last time too.
+			now := time.Now()
+			if now.Sub(*timeOfFirstEOF) > handler.EOFTimeout {
+				// The timeout has elapsed.  Give up.
+				return err
+			}
+
+			// The timeout has not elapsed yet.  Pause and try again.
+			time.Sleep(handler.RetryIntervalOnEOF)
 		}
 
-		// We have read a byte.  Send it to the channel to be handled.
 		if n > 0 {
-			sourceChan <- buf[0]
+			// We have read a byte.  Reset the timeout mechanism and send the
+			// byte to the channel.
+			timeOfFirstEOF = nil
+			rtcmChan <- buf[0]
 		}
 	}
 }

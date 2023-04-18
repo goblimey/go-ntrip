@@ -43,19 +43,14 @@ import (
 	"time"
 )
 
-// Config contains the values from the JSON config file and a
-// pointer to the system log.  To support unit testing, functions
-// that need to write to the log should get it from the config
-// or from an argument.  (we want to control whether a unit test
-// writes to a real log file.)
+// Config contains the values from the JSON config file and a ready-made writer
+// that writes to the system log.  To support unit testing, functions that
+// write to the log should use this writer - we don't want to force unit tests
+// to write to a real log file.)
+//
 type Config struct {
 	// Filenames is a list of filenames to try to open - first one wins.
 	Filenames []string `json:"input"`
-
-	// StopOnEOF says whether or not to stop processing on EOF.  When reading
-	// from a serial USB port, it should be false.  When reading from a plain
-	// file that's not being written by another process, it should be true.
-	StopOnEOF bool `json:"stop_on_eof"`
 
 	// RecordMessages says whether to record a verbatim copy of RTCM messages in a file.
 	RecordMessages bool `json:"record_messages"`
@@ -69,22 +64,33 @@ type Config struct {
 	DisplayMessages bool `json:"display_messages"`
 
 	// CasterHostName is host name of the NTRIP (broad)caster.
-	CasterHostName string `json:"casterhostname"`
+	CasterHostName string `json:"caster_host_name"`
 
 	// CasterPort is port on which the (broad)caster is listening for NTRIP traffic.
-	CasterPort uint `json:"casterport"`
+	CasterPort uint `json:"caster_port"`
 
 	// CasterUsername is the user name to connect to the NTRIP (broad)caster.
-	CasterUserName string `json:"casterUserName"`
+	CasterUserName string `json:"caster_user_name"`
 
 	// CasterPassword is password to connect to the NTRIP (broad)caster.
-	CasterPassword string `json:"casterPassword"`
+	CasterPassword string `json:"caster_password"`
+
+	// WaitTimeOnEOF specifies how long to wait if a read operation on a
+	// serial connection returns EOF, before trying the read again.  The
+	// value given in the JSON should be in milliseconds.
+	WaitTimeOnEOF uint `json:"wait_time_on_EOF_millis"`
+
+	// TimeoutOnEOF specifies how long we allow reads to get repeated EOFs
+	// before we give up and terminate.  The value is in seconds.  A typical 
+	// NTRIP source emits a stream of messages once every second so the
+	// timeout will typically be a one or two seconds.
+	TimeoutOnEOF uint `json:"timeout_on_EOF_seconds"`
 
 	// LostInputConnectionTimeout defines the input timeout.
 	LostInputConnectionTimeout uint `json:"timeout"`
 
 	// LostConnectionSleepTime is the time to sleep between connection attempts.
-	LostInputConnectionSleepTime uint `json:"sleeptime"`
+	LostInputConnectionSleepTime uint `json:"sleep_time"`
 
 	// systemLog is the Writer used for the daily activity log (as opposed to
 	// the log of incoming RTCM messages) and can be nil.  It's not supplied

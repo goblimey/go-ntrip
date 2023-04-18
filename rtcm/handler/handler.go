@@ -195,9 +195,9 @@ func New(startTime time.Time) *Handler {
 	timestampFromPreviousGalileoMessage := timestampFromPreviousGPSMessage
 
 	handler := Handler{
-		startOfGPSWeek: startOfGPSWeek,
-		timestampFromPreviousGPSMessage: timestampFromPreviousGPSMessage,
-		startOfGalileoWeek: startOfGalileoWeek,
+		startOfGPSWeek:                      startOfGPSWeek,
+		timestampFromPreviousGPSMessage:     timestampFromPreviousGPSMessage,
+		startOfGalileoWeek:                  startOfGalileoWeek,
 		timestampFromPreviousGalileoMessage: timestampFromPreviousGalileoMessage,
 	}
 

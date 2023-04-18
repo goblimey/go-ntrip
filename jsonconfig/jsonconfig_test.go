@@ -18,12 +18,14 @@ func TestGetJSONControl(t *testing.T) {
 		"record_messages": true,
 		"message_log_directory": "someDirectory",
 		"display_messages": true,
-		"casterhostname": "caster.example.com",
-		"casterport": 2101,
-		"casterUserName": "user",
-		"casterPassword": "password",
+		"caster_host_name": "caster.example.com",
+		"caster_port": 2101,
+		"caster_user_name": "user",
+		"caster_password": "password",
 		"timeout": 1,
-		"sleeptime": 2
+		"sleep_time": 2,
+		"wait_time_on_EOF_millis": 3,
+		"timeout_on_EOF_seconds": 4
 	}`)
 
 	writer := switchwriter.New()
@@ -51,10 +53,6 @@ func TestGetJSONControl(t *testing.T) {
 	if config.Filenames[1] != "b" {
 		t.Errorf("parsing json, expected file 1 to be b, got %s",
 			config.Filenames[1])
-	}
-
-	if !config.StopOnEOF {
-		t.Error("parsing json, expected StopOnEOF to be true")
 	}
 
 	if config.CasterHostName != "caster.example.com" {
@@ -93,7 +91,17 @@ func TestGetJSONControl(t *testing.T) {
 	}
 
 	if config.LostInputConnectionSleepTime != 2 {
-		t.Errorf("parsing json, expected timeout to be 1, got %d",
+		t.Errorf("parsing json, expected sleep time to be 2, got %d",
 			config.LostInputConnectionSleepTime)
+	}
+
+	if config.WaitTimeOnEOF != 3 {
+		t.Errorf("parsing json, expected wait time to be 3, got %d",
+			config.WaitTimeOnEOF)
+	}
+
+	if config.TimeoutOnEOF != 4 {
+		t.Errorf("parsing json, expected wait time to be 4, got %d",
+			config.TimeoutOnEOF)
 	}
 }
