@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
+	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
+
+	"github.com/kylelemons/godebug/diff"
 )
 
 // TestGetTime tests getTime
@@ -67,5 +71,46 @@ func TestGetTime(t *testing.T) {
 	_, err6 := getTime(junk2)
 	if err6 == nil {
 		t.Errorf("time string %s parsed but it should have failed", junk2)
+	}
+}
+
+// TestDisplayMessages checks that DisplayMessages correctly displays input
+// containing a single message.
+func TestDisplayMessage(t *testing.T) {
+
+	const want = `RTCM data
+
+Note: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)
+18 seconds ahead of UTC
+
+message type 1230, frame length 14
+00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
+
+(Message type 1230 - GLONASS code-phase biases - don't know how to decode this)
+`
+
+	reader := bytes.NewReader(testdata.Fake1230)
+
+	bufferBytes := make([]byte, 0, 1000)
+	buffer := bytes.NewBuffer(bufferBytes)
+
+	err := DisplayMessages(time.Now(), reader, buffer, 0, 0)
+
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	gotBytes := make([]byte, 1000)
+	n, readError := buffer.Read(gotBytes)
+
+	if readError != nil {
+		t.Error(readError)
+	}
+
+	got := string(gotBytes[:n])
+
+	if want != got {
+		t.Errorf(diff.Diff(want, got))
 	}
 }

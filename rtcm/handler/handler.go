@@ -272,16 +272,33 @@ func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out ch
 // same error).  Use GetMessage to extract the message from the result.
 func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Message, error) {
 
-	// A valid RTCM3 message frame is a header containing the start of message
-	// byte and two bytes containing a 10-bit message length, zero padded to
-	// the left, for example 0xd3, 0x00, 0x8a.  The variable-length message
+	// A valid RTCM3 message frame is a leader containing the start of message
+	// byte 0xd3 and two bytes containing a 10-bit message length, zero padded
+	// to the left, for example 0xd3, 0x00, 0x8a.  The variable-length message
 	// comes next and always starts with a 12-bit message type, zero padded to
 	// the left.  The message may be padded with zero bytes at the end.  The
 	// message frame then ends with a 3-byte Cyclic Redundancy Check value.
+	//
+	// So, to scan a complete message frame we need to scan the first five
+	// bytes, the 3-byte leader and the first two bytes of the embedded message.
+	// Then we can figure out the length of the embedded message, then scan the
+	// remaining bytes of it and the 3-byte CRC.  While we are doing all this
+	// we must watch for the input becoming exhausted, leaving us with part of
+	// a message.  We also need to be aware that encountering a 0xd3 byte doesn't
+	// guarantee the start of an RTCM message.  We may just have blundered across
+	// one in the middle of an RTCM message or in some other binary data.  We
+	// only know we have an RTCM message frame when we have scanned and checked
+	// the CRC.
+	//
+	// If we scan some bytes and find that they are not a valid RTCM message
+	// frame we return them as a Non-RTCM message (message type -1).
 
+	// Create a buffer to hold the message frame.
 	var frame = make([]byte, 0)
-	// Eat bytes until we see the start of message byte.
+
+	// phase 1: eat bytes until we see the start of message frame byte.
 	frame, eatError := eatUntilStartOfFrame(pc)
+
 	if eatError != nil {
 		// The channel is exhausted. If there's nothing in the buffer, return
 		// an error.  If there is something in the buffer, continue and deal
@@ -293,110 +310,85 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Me
 		}
 	}
 
-	// Figure out what eatUntilStartOfFrame has eaten.  It could be just the
-	// start of message byte, some other text followed by the start of message
-	// byte or just some other text. In the last case we should be at the end
-	// of the input and the next call will return an error.
+	// eatUntilStartOfFrame has returned some text.  Figure out what it is.  It
+	// could be just the start of message frame byte, some other text followed
+	// by the start of message frame byte or just some other text. That last
+	// case should only happen if we scanned some text and then hit the end of
+	// the input.  In that case the next call of this will eat and immediately
+	// get an error, but right now we want to return what we've read for
+	// processing.)
+	//
 	if len(frame) > 1 {
-		// We have some non-RTCM, possibly followed by a start of message
-		// byte.
+		// We have some non-RTCM.
 		if frame[len(frame)-1] == utils.StartOfMessageFrame {
-			// non-RTCM followed by start of message byte.  Push the start
-			// byte back so we see it next time.  Return the rest of the
+			// The non-RTCM is followed by start of message byte.  Push the
+			// start byte back so we see it next time.  Return the rest of the
 			// buffer as a non-RTCM message.
 			pc.PushBack(utils.StartOfMessageFrame)
 			frameWithoutTrailingStartByte := frame[:len(frame)-1]
-			message, err := rtcmHandler.getMessage(frameWithoutTrailingStartByte)
-			return message, err
+			return NewNonRTCM(frameWithoutTrailingStartByte), nil
 		} else {
-			// Just some non-RTCM without a start byte (probably end of input).
-			message, err := rtcmHandler.getMessage(frame)
-			return message, err
+			// We just have some non-RTCM without a start byte.  (Probably
+			// because we reached the end of the input).
+			return NewNonRTCM(frame), nil
 		}
 	}
 
-	// If we get to here, the buffer contains one byte, a start of message byte,
-	// so we might have the start of an RTCM message frame.  The length of the
-	// frame is given by the length of the embedded message.  We have to read
-	// enough of the frame to find that length, then read the rest. Once we have
-	// all of it we can check the CRC.  If it's correct then the message is an
-	// RTCM3.  If not then either some characters have been dropped and the
-	// message is corrupt or we just came across a byte in some binary data that
-	// happens to contain the start of message value.  Either way we return the
-	// data as a non-RTCM message.
+	// Phase 2:  if we get to here, the frame buffer contains one byte.  It's
+	// the start of message frame byte which may (or may not) mark the beginning
+	// of an RTCM message frame.  If so, the length of the frame is given by the
+	// length of the embedded message plus leader and CRC.  We have to read
+	// enough of the frame to find that length.
 
-	var n int = 1
-	var expectedFrameLength uint = 0
-	for {
-		// Read and handle the next byte.
+	const leaderAndMessageLength = utils.LeaderLengthBytes + 2
+
+	for i := 1; i < leaderAndMessageLength; i++ {
+
 		b, err := pc.GetNextByte()
+
 		if err != nil {
-			//Error - presumably end of input.  however, we've already read some text, so
-			// log the error, but ignore it. It will be picked up on the next call.
-			message, err := rtcmHandler.getMessage(frame)
-			return message, err
+			//Error - presumably end of input.  however, we've already read some
+			// test so return that.  the end of input will be picked up on the
+			// next call.
+			return NewNonRTCM(frame), nil
 		}
 
 		frame = append(frame, b)
-		n++
-
-		// What we do next depends upon how much of the message we have read.
-		// On the first few trips around the loop we read the leader bytes
-		// and get the 10-bit expected message length l.  Once we know l we
-		// know the total length of the frame (l+6) and we can read the rest
-		// of it.
-		switch {
-		case n < utils.LeaderLengthBytes+2:
-			// We haven't read enough bytes to figure out the message length yet.
-			continue
-
-		case n == utils.LeaderLengthBytes+2:
-			// We have the first three bytes of the frame which is enough to find
-			// the length and the type of the message (which we will need in a
-			// later trip around this loop).
-			messageLength, _, err := rtcmHandler.getMessageLengthAndType(frame)
-			if err != nil {
-				// We thought we'd found the start of an RTCM message but it's some
-				// other data that just happens to contain the start of frame byte.
-				// Return the collected data as a non-RTCM message.
-				message := NewNonRTCM(frame)
-				return message, nil
-			}
-
-			// The frame contains a 3-byte header, a variable-length message (for which
-			// we now know the length) and a 3-byte CRC.  Now we just need to continue to
-			// read bytes until we have the whole message.
-			expectedFrameLength = messageLength + utils.LeaderLengthBytes + utils.CRCLengthBytes
-
-			// Now we read the rest of the message byte by byte, one byte every trip.
-			// We know how many bytes we want, so we could just read that many using one
-			// Read call, but if the input stream is a serial connection, we would
-			// probably need several of those, so we might as well do it this way.
-			continue
-
-		case n >= int(expectedFrameLength):
-			// By this point the expected frame length has been decoded and set to a
-			// non-zero value (otherwise the previous case would have triggered) and we have
-			// read that many bytes.  So we are done.  Return the complete message frame.
-			// The CRC will be checked later.
-			//
-			// (The case condition could use ==, but using >= guarantees that the loop will
-			// terminate eventually even if my logic is faulty and the loop overruns!)
-			//
-			message, err := rtcmHandler.getMessage(frame)
-			if n != int(expectedFrameLength) {
-				// This should never happen!
-				message.ErrorMessage =
-					fmt.Sprintf("expected a frame of %d bytes, found %d", n, expectedFrameLength)
-			}
-			return message, err
-
-		default:
-			// In most trips around the loop we just read the next byte and add it to the
-			// message frame.
-			continue
-		}
 	}
+
+	// Figure out the length of the frame. (This may detect that the message is
+	// not RTCM.)
+	messageLength, _, typeError := rtcmHandler.getMessageLengthAndType(frame)
+
+	if typeError != nil {
+		// We thought we'd found the start of an RTCM message but it's some
+		// other data that just happens to contain the start of frame byte.
+		// Return the collected data as a non-RTCM message.
+		return NewNonRTCM(frame), nil
+	}
+
+	// Phase 3: get the rest of the message frame.
+
+	messageFrameLength := messageLength + utils.LeaderLengthBytes + utils.CRCLengthBytes
+	wantBytes := int(messageFrameLength) - len(frame)
+
+	for i := 0; i < wantBytes; i++ {
+		b, err := pc.GetNextByte()
+
+		if err != nil {
+			//Error - presumably end of input.  however, we've already read some
+			// test so return that.  the end of input will be picked up on the
+			// next call.
+			return NewNonRTCM(frame), nil
+		}
+
+		frame = append(frame, b)
+	}
+
+	// Phase 4: create a message from the frame and return it.  (This also checks
+	// the CRC.  If that fails the text is returned as a non-RTCM message.)
+
+	return rtcmHandler.getMessage(frame)
 }
 
 // eatUntilStartOfFrame reads bytes from the channel until it encounters
@@ -886,6 +878,199 @@ func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 	}
 
 	return display
+}
+
+// Message contains an RTCM3 message, possibly broken out into readable form,
+// or a stream of non-RTCM data.  Message type NonRTCMMessage indicates the
+// second case.
+type Message struct {
+	// MessageType is the type of the RTCM message (the message number).
+	// RTCM messages all have a positive message number.  Type NonRTCMMessage
+	// is negative and indicates a stream of bytes that doesn't contain a
+	// valid RTCM message, for example an NMEA message, an incomplete RTCM or
+	// a corrupt RTCM.
+	MessageType int
+
+	// ErrorMessage contains any error message encountered while fetching
+	// the message.
+	ErrorMessage string
+
+	// RawData is the message frame in its original binary form
+	//including the header and the CRC.
+	RawData []byte
+
+	// If the message is an MSM, UTCTime points to a Time value containing
+	// the time in UTC from the message timestamp.
+	// If the message is not an MSM, the value is nil.
+	UTCTime *time.Time
+
+	// Readable is a broken out version of the RTCM message.  It's accessed
+	// via the Readable method.
+	Readable interface{}
+}
+
+// NewMessage creates a new message.
+func NewMessage(messageType int, errorMessage string, bitStream []byte) *Message {
+
+	message := Message{
+		MessageType:  messageType,
+		RawData:      bitStream,
+		ErrorMessage: errorMessage,
+	}
+
+	return &message
+}
+
+// NewNonRTCM creates a Non-RTCM message.
+func NewNonRTCM(bitStream []byte) *Message {
+	message := Message{
+		MessageType: utils.NonRTCMMessage,
+		RawData:     bitStream,
+	}
+	return &message
+}
+
+// Copy makes a copy of the message and its contents.
+func (message *Message) Copy() Message {
+	// Make a copy of the raw data.
+	rawData := make([]byte, len(message.RawData))
+	copy(rawData, message.RawData)
+	// Create a new message.  Omit the readable part - it may not be needed
+	// and if it is needed, it will be created automatically at that point.
+	var newMessage = Message{
+		MessageType:  message.MessageType,
+		RawData:      rawData,
+		ErrorMessage: message.ErrorMessage,
+	}
+	return newMessage
+}
+
+// String takes the given Message object and returns it
+// as a readable string.
+//
+func (message *Message) String() string {
+
+	if message.Readable == nil {
+		// Expand the message.  Only do this if readable is nil.
+		// (This is partly to make the testing easier.  Some tests
+		// set the readable part to sensible values and set a junk
+		// version of the raw data.  Calling this on one of those
+		// objects would trash the Readable values.)
+		PrepareForDisplay(message)
+	}
+
+	display := ""
+
+	if message.UTCTime != nil {
+		// If the time is set (which should only happen if the message is an MSM),
+		// display it.
+		display += message.UTCTime.Format(utils.DateLayout) + "\n"
+	}
+
+	if len(message.ErrorMessage) > 0 {
+		display += fmt.Sprintf("message type %d, frame length %d %s\n",
+			message.MessageType, len(message.RawData), message.ErrorMessage)
+	} else {
+		display += fmt.Sprintf("message type %d, frame length %d\n",
+			message.MessageType, len(message.RawData))
+	}
+
+	display += hex.Dump(message.RawData) + "\n"
+
+	if len(message.ErrorMessage) > 0 {
+		display += message.ErrorMessage + "\n"
+	}
+
+	if message.MessageType == utils.NonRTCMMessage {
+		return display
+	}
+
+	if message.Readable != nil {
+
+		// The message has a readable form.
+
+		// In some cases the displayable is a simple string.
+		m, ok := message.Readable.(string)
+		if ok {
+			display += m + "\n"
+			return display
+		}
+
+		// Analyse may have found an error.
+		if len(message.ErrorMessage) > 0 {
+			display += message.ErrorMessage + "\n"
+		}
+
+		// The message is a set of broken out fields.  Create a readable version.  If that reveals
+		// an error, the Valid flag will be unset and a warning added to the message.
+		switch {
+
+		case message.MessageType == 1005:
+			m, ok := message.Readable.(*type1005.Message)
+			if !ok {
+				// Internal error:  the message says the data are a type 1005 (base position)
+				// message but when decoded they are not.
+				display += "expected the readable message to be *Message1005\n"
+				if len(message.ErrorMessage) > 0 {
+					display += message.ErrorMessage + "\n"
+				}
+				break
+			}
+			display += m.String()
+
+		case utils.MSM4(message.MessageType):
+			m, ok := message.Readable.(*msm4Message.Message)
+			if !ok {
+				// Internal error:  the message says the data are an MSM4
+				// message but when decoded they are not.
+				display += "expected the readable message to be an MSM4\n"
+				if len(message.ErrorMessage) > 0 {
+					display += message.ErrorMessage + "\n"
+				}
+				break
+			}
+			display += m.String()
+
+		case utils.MSM7(message.MessageType):
+			m, ok := message.Readable.(*msm7Message.Message)
+			if !ok {
+				// Internal error:  the message says the data are an MSM4
+				// message but when decoded they are not.
+				display += "expected the readable message to be an MSM7\n"
+				if len(message.ErrorMessage) > 0 {
+					display += message.ErrorMessage + "\n"
+				}
+				break
+			}
+			display += m.String()
+
+			// The default case can't be reached - PrepareForDisplay calls
+			// Analyse which sets Readable field to an error message if it can't
+			// display the message.  That case was taken care of earlier.
+			//
+			// default:
+			// 	display += "the message is not displayable\n"
+		}
+
+	}
+
+	return display
+}
+
+// displayable is true if the message type is one that we know how
+// to display in a readable form.
+func (message *Message) displayable() bool {
+	// we currently can display messages of type 1005, MSM4 and MSM7.
+
+	if message.MessageType == utils.NonRTCMMessage {
+		return false
+	}
+
+	if utils.MSM(message.MessageType) || message.MessageType == 1005 {
+		return true
+	}
+
+	return false
 }
 
 // PrepareForDisplay creates and returns the readable component of the message

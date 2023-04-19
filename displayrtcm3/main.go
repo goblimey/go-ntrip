@@ -65,54 +65,78 @@ import (
 
 func main() {
 
-	var startDate time.Time
-	var reader *bufio.Reader
+	var startTime time.Time
+	var reader io.Reader
 	if len(os.Args) < 3 {
 		log.Fatalf("usage: %s file yyyy-mm-dd", os.Args[0])
-	} else {
-		appName := os.Args[0]
+	}
+	appName := os.Args[0]
 
-		// The format of arg[2] should be yyyy-mm-dd.
-		var timeError error
-		startDate, timeError = getTime(os.Args[2])
-		if timeError != nil {
-			log.Fatalf("usage: %s file yyyy-mm-dd", appName)
-		}
-
-		fileName := os.Args[1]
-		var openError error
-		ioReader, openError := openFile(fileName)
-		if openError != nil {
-			log.Fatalf("%s: cannot open %s - %v", appName, fileName, openError)
-		}
-
-		reader = bufio.NewReader(ioReader)
+	// The format of arg[2] should be yyyy-mm-dd.  arg[3] is a file containing RTCM messages.
+	var timeError error
+	startTime, timeError = getTime(os.Args[2])
+	if timeError != nil {
+		log.Printf("usage: %s file yyyy-mm-dd", appName)
+		log.Fatalf(timeError.Error())
 	}
 
-	messageChan := make(chan rtcm.Message, 100)
-	fileHandler := handler.New(startDate, messageChan)
+	fileName := os.Args[1]
+	reader, openError := openFile(fileName)
+	if openError != nil {
+		log.Fatalf("%s: cannot open %s - %v", appName, fileName, openError)
+	}
 
-	// The output is always to stdout.
+	const waitTimeOnEOF = time.Duration(100) * time.Millisecond
+	const timeoutOnEOF = time.Duration(2) * time.Second
+
+	displayError := DisplayMessages(startTime, reader, os.Stdout, waitTimeOnEOF, timeoutOnEOF)
+
+	if displayError != nil {
+		// Some kind of error writing.  This should never happen unless
+		// the disk fills or fails.  Writing to stderr is all we can do
+		// and if that's connected to a file on the same disk, it will
+		// probably fail too.
+		os.Stderr.Write([]byte(displayError.Error()))
+		os.Exit(1)
+	}
+
+	os.Exit(0)
+}
+
+// DisplayMessages converts the bytes from the reader to messages and sends them
+// to the writer.
+func DisplayMessages(startDate time.Time, reader io.Reader, writer io.Writer, waitTimeOnEOF, timeoutOnEOF time.Duration) error {
+
+	// Create a buffered reader.
+	bufferedReader := bufio.NewReader(reader)
+
+	// Create and start an RTCM handler.
+	const messageChannelCap = 100
+	messageChan := make(chan rtcm.Message, messageChannelCap)
+
+	// Create and start a file handler.  It reads the input and converts them
+	// to messages.  The messages appear on the message channel.
+	fileHandler := handler.New(messageChan, waitTimeOnEOF, timeoutOnEOF)
 
 	// Write the heading.
-	fmt.Printf("RTCM data\n")
-	fmt.Printf("\nNote: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)\n")
-	fmt.Printf("18 seconds ahead of UTC\n\n")
+	writer.Write([]byte("RTCM data\n"))
+	writer.Write([]byte("\nNote: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)\n"))
+	writer.Write([]byte("18 seconds ahead of UTC\n\n"))
 
 	// Fetch the messages.
-	go fileHandler.Handle(reader)
+	go fileHandler.Handle(startDate, bufferedReader)
 
 	// Display the messages.
 	for {
 		message, ok := <-messageChan
 		if !ok {
 			// No more message.  We're done.
-			os.Exit(0)
+			return nil
 		}
 
-		_, writeError := fmt.Println(message.String())
+		_, writeError := writer.Write([]byte(message.String()))
 		if writeError != nil {
-			os.Stderr.Write([]byte(writeError.Error()))
+			return writeError
 		}
 	}
 }

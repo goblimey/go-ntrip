@@ -52,9 +52,9 @@ var UnhandledMessageType1024 = []byte{
 // Fake1230 is a fake message with type 1230 (Glonass code/phase bias).
 // The contents is junk - it does not match the 1230 structure.
 // 1230 is 0x4ce.
-var Fake1230 = []byte{0xd3, 0x04, 0xce,
+var Fake1230 = []byte{0xd3, 0x00, 0x08,
 	0x4c, 0xe0, 00, 0x8a, 0, 0, 0, 0,
-	0xf7, 0x3c, 0xf2,
+	0xa8, 0xf7, 0x2a,
 }
 
 var CRCFailure = []byte{0xd3, 0, 0x08,
