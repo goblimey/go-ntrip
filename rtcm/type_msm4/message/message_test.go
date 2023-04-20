@@ -252,7 +252,7 @@ func TestGetMessage(t *testing.T) {
 	const wantWholeMillis = 1
 	const wantFractionalMillis = 0x100 // 0001 0000 0000
 
-	message, err := GetMessage(testdata.MessageType1074)
+	message, err := GetMessage(testdata.MessageFrameType1074_1)
 
 	if err != nil {
 		t.Error(err)
@@ -423,19 +423,19 @@ func TestGetMessageWithErrors(t *testing.T) {
 		Want        string
 	}{
 		{
-			"header too short", testdata.MessageType1074[:26],
+			"header too short", testdata.MessageFrameType1074_1[:26],
 			"bitstream is too short for an MSM header - got 160 bits, expected at least 169",
 		},
 		{
-			"satellite cells too short", testdata.MessageType1074[:29],
+			"satellite cells too short", testdata.MessageFrameType1074_1[:29],
 			"overrun - not enough data for 1 MSM4 satellite cells - need 18 bits, got 13",
 		},
 		{
-			"Signal cells too short", testdata.MessageType1074[:34],
+			"Signal cells too short", testdata.MessageFrameType1074_1[:34],
 			"overrun - want 2 MSM4 signals, got 1",
 		},
 		{
-			"not MSM4", testdata.Message1077,
+			"not MSM4", testdata.MessageFrameType1077,
 			"message type 1077 is not an MSM4",
 		},
 	}

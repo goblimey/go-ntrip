@@ -31,7 +31,7 @@ func Test(t *testing.T) {
 
 	var bitStream = []byte{
 		0xd3, 0x00, 0x08,
-	0x4c, 0xe0, 00, 0x8a, 0, 0, 0, 0,
+		0x4c, 0xe0, 00, 0x8a, 0, 0, 0, 0,
 	}
 
 	crc := crc24q.Hash(bitStream)
@@ -79,12 +79,12 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	const wantNumMessages = 2
 	const wantType0 = 1077
 	const wantLength0 = 226
-	var wantContents0 = testdata.BatchWith1077Frame[:226]
+	var wantContents0 = testdata.MesageBatchWith1077[:226]
 	const wantType1 = utils.NonRTCMMessage
 	const wantLength1 = 9
-	var wantContents1 = testdata.BatchWith1077Frame[226:]
+	var wantContents1 = testdata.MesageBatchWith1077[226:]
 
-	reader := bytes.NewReader(testdata.BatchWith1077Frame)
+	reader := bytes.NewReader(testdata.MesageBatchWith1077)
 
 	// Create a buffered channel big enough to hold the test data, send the
 	// data to it and close it.
@@ -172,15 +172,15 @@ func TestFetchNextMessageFrame(t *testing.T) {
 		wantError       string
 	}{
 		// provokes an error while scanning the message length (phase 2)
-		{"very short", testdata.Message1077[:4], utils.NonRTCMMessage, ""},
+		{"very short", testdata.MessageFrameType1077[:4], utils.NonRTCMMessage, ""},
 		// provokes an error while scanning the rest of the message (phase 3)
 		{"incomplete", testdata.IncompleteMessage, utils.NonRTCMMessage, ""},
 		// The message length must be no more than 1024 bytes.
 		{"Length too big", testdata.MessageFrameWithLengthTooBig, utils.NonRTCMMessage, ""},
-		{"bad CRC", testdata.CRCFailure, utils.NonRTCMMessage, "CRC is not valid"},
+		{"bad CRC", testdata.MessageFrameWithCRCFailure, utils.NonRTCMMessage, "CRC is not valid"},
 		{"junk followed by RTCM", testdata.JunkAtStart, utils.NonRTCMMessage, ""},
 		{"all junk", testdata.AllJunk, utils.NonRTCMMessage, ""},
-		{"1077", testdata.Message1077, utils.MessageTypeMSM7GPS, ""},
+		{"1077", testdata.MessageFrameType1077, utils.MessageTypeMSM7GPS, ""},
 		{"1024", testdata.UnhandledMessageType1024, 1024, ""},
 	}
 
@@ -312,8 +312,8 @@ func TestGetMessage(t *testing.T) {
 		bitStream   []byte
 		want        int
 	}{
-		{"1230", testdata.Fake1230, utils.MessageTypeGCPB},
 		{"junk", testdata.AllJunk, utils.NonRTCMMessage},
+		{"1230", testdata.Fake1230, utils.MessageTypeGCPB},
 		{"1074", testdata.MessageBatch, utils.MessageTypeMSM4GPS},
 		{"1005", testdata.MessageFrameType1005, utils.MessageType1005},
 	}
@@ -344,7 +344,7 @@ var FrameWithIllegalGlonassDay = []byte{
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 }
 
-//TestGetMessageWithErrors checks that GetMessage returns correct error messages.
+// TestGetMessageWithErrors checks that GetMessage returns correct error messages.
 func TestGetMessageWithErrors(t *testing.T) {
 
 	empty := make([]byte, 0)
@@ -782,26 +782,10 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 	}
 }
 
-// TestStringWithNilReadable checks that a String fills in the Readable field
-// of a message when it's nil.
-func TestStringWithNilReadable(t *testing.T) {
-	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
-
-	if message.Readable != nil {
-		t.Error("expected the Readable part to be nil")
-	}
-
-	_ = message.String()
-
-	if message.Readable == nil {
-		t.Error("expected the Readable part to be not nil after String has been called")
-	}
-}
-
 // TestAnalyseWithMSM4 checks that Analyse correctly handles an MSM4.
 func TestAnalyseWithMSM4(t *testing.T) {
 
-	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074)
+	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_2)
 
 	Analyse(message)
 
@@ -890,7 +874,6 @@ func TestDisplayMessage(t *testing.T) {
 00000000  d3 00 aa 46 70 00                                 |...Fp.|
 
 bitstream is too short for an MSM header - got 0 bits, expected at least 169
-the readable message should be an MSM7
 `
 
 	// The hex dump includes a ` so we have to create this string by glueing parts together.
@@ -1025,7 +1008,7 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 		{"not RTCM", testdata.AllJunk, utils.NonRTCMMessage, resultForNotRTCM},
 		{"incomplete", testdata.IncompleteMessage, 1127, resultForIncomplete},
 		{"1005", testdata.MessageFrameType1005, 1005, resultFor1005},
-		{"msm4", testdata.MessageFrameType1074, 1074, resultForMSM4},
+		{"msm4", testdata.MessageFrameType1074_2, 1074, resultForMSM4},
 		{"msm7", testdata.MessageBatchWithJunk, 1077, resultForMSM7},
 		{"1024", testdata.UnhandledMessageType1024, 1024, resultForUnhandledMessageType},
 	}
@@ -1052,7 +1035,7 @@ func TestDisplayMessageWithErrors(t *testing.T) {
 	messageWithErrorMessage := NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
 	fake1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
 	fakeMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
-	fakeMSM7 := NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074)
+	fakeMSM7 := NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074_2)
 	// Expected results.
 	resultForMessageWithWarning := `message type 1005, frame length 25
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
@@ -1079,7 +1062,6 @@ an error message
 000000e0  69 e8                                             |i.|
 
 expected message type 1005 got 1077
-the readable message should be a message type 1005
 `
 
 	const resultForFakeMSM4 = `message type 1124, frame length 226
@@ -1100,7 +1082,6 @@ the readable message should be a message type 1005
 000000e0  69 e8                                             |i.|
 
 message type 1077 is not an MSM4
-the readable message should be an MSM4
 `
 
 	const resultForFakeMSM7 = `message type 1087, frame length 42
@@ -1109,7 +1090,6 @@ the readable message should be an MSM4
 00000020  00 40 00 00 68 8e 80 83  f7 4b                    |.@..h....K|
 
 message type 1074 is not an MSM7
-the readable message should be an MSM7
 `
 
 	var testData = []struct {
@@ -1520,8 +1500,8 @@ func TestCheckCRC(t *testing.T) {
 		bitStream   []byte
 		want        bool
 	}{
-		{"valid", testdata.BatchWith1077Frame, true},
-		{"CRC failure", testdata.CRCFailure, false},
+		{"valid", testdata.MesageBatchWith1077, true},
+		{"CRC failure", testdata.MessageFrameWithCRCFailure, false},
 		{"short", shortFrame, false},
 	}
 	for _, td := range testData {
@@ -1610,7 +1590,7 @@ func createMSM4() *msm4message.Message {
 // createRTCMWithMSM4 creates an RTCM message containing the given MSM4,
 // setting the time to utcTime.  The Readable doesn't match the RawData.
 func createRTCMWithMSM4(msm4 *msm4message.Message, utcTime time.Time) *Message {
-	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
+	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	message.Readable = msm4
 	message.UTCTime = &utcTime
 
@@ -1662,9 +1642,6 @@ func TestNewNonRTCM(t *testing.T) {
 
 	const wantType = utils.NonRTCMMessage
 	const wantWarning = ""
-	const wantValid = false
-	const wantComplete = false
-	const wantCRCValid = false
 	var wantBitstream = []byte{'j', 'u', 'n', 'k'}
 	var wantUTCTime *time.Time = nil
 	var wantReadable interface{} = nil
@@ -1700,6 +1677,32 @@ func TestNewNonRTCM(t *testing.T) {
 // TestString checks the message.String method for various message types.
 func TestString(t *testing.T) {
 
+	const wantNonRTCM = `message type -1, frame length 4
+00000000  6a 75 6e 6b                                       |junk|
+
+`
+
+	const wantShortFrame = `message type 1005, frame length 7
+00000000  d3 00 13 3e d0 02 0f                              |...>...|
+
+overrun - expected 152 bits in a message type 1005, got 8
+`
+
+	const want1024 = `message type 1024, frame length 14
+00000000  d3 00 08 40 00 00 8a 00  00 00 00 4f 5e e7        |...@.......O^.|
+
+message type 1024 currently cannot be displayed
+`
+
+	const want1005 = `message type 1005, frame length 25
+00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
+00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
+
+message type 1005 - Base Station Information
+stationID 2, ITRF realisation year 3, ignored 0xf,
+x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
+ECEF coords in metres (12.3456, 23.4567, 34.5678)
+`
 	const resultTemplateMSM4Complete = `2023-02-14 01:02:03.004 +0000 UTC
 message type 1074, frame length 42
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
@@ -1821,6 +1824,71 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 31 16 {21670767.783, 88736342.592, 779, false, 876, -441.969}
 `
 
+	const wantCrazy1005 = `message type 1005, frame length 225
+00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
+00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
+00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
+00000030  fe f2 05 b0 4a a0 ec 7b  0e 09 27 d0 3f 23 7c b9  |....J..{..'.?#|.|
+00000040  6f bd 73 ee 1f 01 64 96  f5 7b 27 46 f1 f2 1a bf  |o.s...d..{'F....|
+00000050  19 fa 08 41 08 7b b1 1b  67 e1 a6 70 71 d9 df 0c  |...A.{..g..pq...|
+00000060  61 7f 19 9c 7e 66 66 fb  86 c0 04 e9 c7 7d 85 83  |a...~ff......}..|
+00000070  7d ac ad fc be 2b fc 3c  84 02 1d eb 81 a6 9c 87  |}....+.<........|
+00000080  17 5d 86 f5 60 fb 66 72  7b fa 2f 48 d2 29 67 08  |.]..` + "`" + `.fr{./H.)g.|
+00000090  c8 72 15 0d 37 ca 92 a4  e9 3a 4e 13 80 00 14 04  |.r..7....:N.....|
+000000a0  c0 e8 50 16 04 c1 40 46  17 05 41 70 52 17 05 01  |..P...@F..ApR...|
+000000b0  ef 4b de 70 4c b1 af 84  37 08 2a 77 95 f1 6e 75  |.K.pL...7.*w..nu|
+000000c0  e8 ea 36 1b dc 3d 7a bc  75 42 80 00 00 00 00 00  |..6..=z.uB......|
+000000d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 0c 2d  |...............-|
+000000e0  f3                                                |.|
+
+expected message type 1005 got 1077
+`
+	const wantCrazyMSM4 = `message type 1124, frame length 225
+00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
+00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
+00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
+00000030  fe f2 05 b0 4a a0 ec 7b  0e 09 27 d0 3f 23 7c b9  |....J..{..'.?#|.|
+00000040  6f bd 73 ee 1f 01 64 96  f5 7b 27 46 f1 f2 1a bf  |o.s...d..{'F....|
+00000050  19 fa 08 41 08 7b b1 1b  67 e1 a6 70 71 d9 df 0c  |...A.{..g..pq...|
+00000060  61 7f 19 9c 7e 66 66 fb  86 c0 04 e9 c7 7d 85 83  |a...~ff......}..|
+00000070  7d ac ad fc be 2b fc 3c  84 02 1d eb 81 a6 9c 87  |}....+.<........|
+00000080  17 5d 86 f5 60 fb 66 72  7b fa 2f 48 d2 29 67 08  |.]..` + "`" + `.fr{./H.)g.|
+00000090  c8 72 15 0d 37 ca 92 a4  e9 3a 4e 13 80 00 14 04  |.r..7....:N.....|
+000000a0  c0 e8 50 16 04 c1 40 46  17 05 41 70 52 17 05 01  |..P...@F..ApR...|
+000000b0  ef 4b de 70 4c b1 af 84  37 08 2a 77 95 f1 6e 75  |.K.pL...7.*w..nu|
+000000c0  e8 ea 36 1b dc 3d 7a bc  75 42 80 00 00 00 00 00  |..6..=z.uB......|
+000000d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 0c 2d  |...............-|
+000000e0  f3                                                |.|
+
+message type 1077 is not an MSM4
+`
+
+	const wantCrazyMSM7 = `message type 1097, frame length 42
+00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
+00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
+00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
+
+message type 1074 is not an MSM7
+`
+
+	// nonRTCMMessage is a Non-RTCM message built from a frame that
+	// doesn't contain any RTCM material.
+	nonRTCMMessage := NewNonRTCM(testdata.AllJunk)
+
+	// messageFromShortFrame is a message built from a frame too short
+	// to make sense of - the embedded message is only one byte long so
+	// the message length is incomplete.  The display will contain an
+	// error message.
+	messageFromShortFrame := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005[:7])
+
+	// message1024 is a message of type 1024.  It's not handled and
+	// displaying it produces a Readable field which is just a
+	// string containing a warning message.
+	message1024 := NewMessage(1024, "", testdata.UnhandledMessageType1024)
+
+	// message1005 is a message type 1005 - base position.
+	message1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
+
 	// A message containing an MSM4 or an MSM7 has a date attached.
 	// Use this one.
 	utcTime := time.Date(2023, time.February, 14, 1, 2, 3, int(4*time.Millisecond), utils.LocationUTC)
@@ -1853,7 +1921,7 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 	incompleteMSM4.Satellites = nil
 	incompleteMSM4.Signals = nil
 
-	incompleteMessage := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageType1074)
+	incompleteMessage := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	incompleteMessage.Readable = incompleteMSM4
 
 	// testdata.MessageBatchWithJunk starts with a message type 1077 (a GPS MSM7)
@@ -1866,14 +1934,29 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 	completeMSM7Message.Readable = msm7
 	completeMSM7Message.UTCTime = &utcTime
 
+	// These messages have the wrong message type, which
+	// String() treats as special cases.
+	crazy1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1077)
+	crazyMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrameType1077)
+	// This one is an MSM4 but the message type is forced to be MSM7.
+	crazyMSM7 := NewMessage(utils.MessageTypeMSM7Galileo, "", testdata.MessageFrameType1074_1)
+	crazyMSM7.MessageType = utils.MessageTypeMSM7Galileo
+
 	var testData = []struct {
 		description string
 		message     *Message
 		want        string
 	}{
+		{"not handled", message1024, want1024},
+		{"no RTCM", nonRTCMMessage, wantNonRTCM},
+		{"short frame", messageFromShortFrame, wantShortFrame},
 		{"complete MSM4", completeMSM4Message, wantCompleteMSM4},
 		{"incomplete MSM4", incompleteMessage, wantIncompleteMSM4},
+		{"1005", message1005, want1005},
 		{"complete MSM7", completeMSM7Message, wantMSM7},
+		{"crazy 1005", crazy1005, wantCrazy1005},
+		{"crazy MSM4", crazyMSM4, wantCrazyMSM4},
+		{"crazy MSM7", crazyMSM7, wantCrazyMSM7},
 	}
 
 	for _, td := range testData {
@@ -1882,6 +1965,22 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 		if td.want != got {
 			t.Errorf("%s\n%s", td.description, diff.Diff(td.want, got))
 		}
+	}
+}
+
+// TestStringWithNilReadable checks that a String fills in the Readable field
+// of a message when it's nil.
+func TestStringWithNilReadable(t *testing.T) {
+	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_2)
+
+	if message.Readable != nil {
+		t.Error("expected the Readable part to be nil")
+	}
+
+	_ = message.String()
+
+	if message.Readable == nil {
+		t.Error("expected the Readable part to be not nil after String has been called")
 	}
 }
 

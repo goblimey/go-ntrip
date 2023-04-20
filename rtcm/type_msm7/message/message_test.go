@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
+	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/type_msm7/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/type_msm7/signal"
-	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 
 	"github.com/kylelemons/godebug/diff"
@@ -123,19 +123,19 @@ func TestGetMessageWithErrors(t *testing.T) {
 		Want        string
 	}{
 		{
-			"header too short", testdata.Message1077[:27],
+			"header too short", testdata.MessageFrameType1077[:27],
 			"bitstream is too short for an MSM header - got 168 bits, expected at least 169",
 		},
 		{
-			"satellite cells too short", testdata.Message1077[:60],
+			"satellite cells too short", testdata.MessageFrameType1077[:60],
 			"overrun - not enough data for 8 MSM7 satellite cells - need 288 bits, got 271",
 		},
 		{
-			"Signal cells too short", testdata.Message1077[:72],
+			"Signal cells too short", testdata.MessageFrameType1077[:72],
 			"overrun - want at least one 80-bit signal cell when multiple message flag is set, got only 79 bits left",
 		},
 		{
-			"notMSM7", testdata.MessageType1074,
+			"notMSM7", testdata.MessageFrameType1074_1,
 			"message type 1074 is not an MSM7",
 		},
 	}
@@ -239,8 +239,7 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 31  2 {21670772.711, 113880577.055, 624, false, 736, -442.539}
 31 16 {21670767.783, 88738155.231, 624, false, 640, -442.550}
 `
-	// message, err := GetMessage(message1077Bitstream)
-	message, err := GetMessage(testdata.Message1077)
+	message, err := GetMessage(testdata.MessageFrameType1077)
 	if err != nil {
 		t.Fatal(err)
 	}

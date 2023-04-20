@@ -452,7 +452,6 @@ func (rtcmHandler *Handler) getMessageLengthAndType(bitStream []byte) (uint, int
 // getMessage extracts an RTCM3 message from the given bit stream and returns it
 // as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
 // doesn't contain a valid message, it returns a message with type NonRTCMMessage.
-//
 func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
 
 	if len(bitStream) == 0 {
@@ -636,7 +635,6 @@ func (rtcmHandler *Handler) getTimeFromTimeStamp(messageType int, timestamp uint
 
 // GetUTCFromGPSTime converts a GPS time to UTC, using the start time
 // to find the correct epoch.
-//
 func (rtcmHandler *Handler) getUTCFromGPSTime(timestamp uint) (time.Time, error) {
 	// The GPS week starts at midnight at the start of Sunday
 	// but GPS time is ahead of UTC by a few leap seconds, so in
@@ -724,7 +722,6 @@ func (rtcmHandler *Handler) getUTCFromGlonassTime(timestamp uint) (time.Time, er
 
 // GetUTCFromGalileoTime converts a Galileo time to UTC, using the same epoch
 // as the start time.
-//
 func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, error) {
 	// Galileo follows GPS time, but we keep separate state variables.
 	//
@@ -753,7 +750,6 @@ func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, er
 
 // GetUTCFromBeidouTime converts a Baidou time to UTC, using the Beidou
 // epoch given by the start time.
-//
 func (rtcmHandler *Handler) getUTCFromBeidouTime(timestamp uint) (time.Time, error) {
 
 	// The Beidou week starts at midnight at the start of Sunday
@@ -785,7 +781,6 @@ func (rtcmHandler *Handler) getUTCFromBeidouTime(timestamp uint) (time.Time, err
 
 // getStartOfLastSundayUTC gets midnight at the start of the
 // last Sunday (which may be today) in UTC.
-//
 func getStartOfLastSundayUTC(now time.Time) time.Time {
 	// Convert the time to UTC, which may change the day.
 	now = now.In(utils.LocationUTC)
@@ -803,7 +798,6 @@ func getStartOfLastSundayUTC(now time.Time) time.Time {
 
 // DisplayMessage takes the given Message object and returns it
 // as a readable string.
-//
 func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 
 	display := fmt.Sprintf("message type %d, frame length %d\n",
@@ -822,59 +816,31 @@ func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 
 	readable := PrepareForDisplay(message)
 
-	// In some cases the displayable is a simple string.
-	m, ok := readable.(string)
-	if ok {
-		display += m + "\n"
-		return display
-	}
-
 	if len(message.ErrorMessage) > 0 {
 		display += message.ErrorMessage + "\n"
-		// return display
 	}
 
-	// The message is a set of broken out fields.  Create a readable version.  If that reveals
-	// an error, the Valid flag will be unset and a warning added to the message.
+	// The message could be one of type 1005 or an MSM, which means that
+	// it's a set of broken out fields and can be displayed as a string,
+	// or it could have a Readable which is already a string.  If any of
+	// those, add the string to the display.
+	s, isString := readable.(string)
+	m1005, is1005 := readable.(*type1005.Message)
+	msm4, isMSM4 := readable.(*msm4Message.Message)
+	msm7, isMSM7 := readable.(*msm7Message.Message)
+
 	switch {
+	case isString:
+		display += s + "\n"
+	case is1005:
+		// The message is type 1005
+		display += m1005.String()
+		return display
+	case isMSM4:
+		display += msm4.String()
 
-	case message.MessageType == 1005:
-		m, ok := readable.(*type1005.Message)
-		if !ok {
-			// Internal error:  the message says the data are a type 1005 (base position)
-			// message but when decoded they are not.
-			display += "the readable message should be a message type 1005\n"
-			break
-		}
-		display += m.String()
-
-	case utils.MSM4(message.MessageType):
-		m, ok := readable.(*msm4Message.Message)
-		if !ok {
-			// Internal error:  the message says the data are an MSM4
-			// message but when decoded they are not.
-			display += "the readable message should be an MSM4\n"
-			break
-		}
-		display += m.String()
-
-	case utils.MSM7(message.MessageType):
-		m, ok := readable.(*msm7Message.Message)
-		if !ok {
-			// Internal error:  the message says the data are an MSM4
-			// message but when decoded they are not.
-			display += "the readable message should be an MSM7\n"
-			break
-		}
-		display += m.String()
-
-		// The default case can't be reached - Readable is only set if the
-		// rtcm handler's PrepareForDisplay has been called.  That calls
-		// Analyse which sets Readable field to an error message if it can't
-		// display the message.  That case was taken care of earlier.
-		//
-		// default:
-		// 	display += "the message is not displayable\n"
+	case isMSM7:
+		display += msm7.String()
 	}
 
 	return display
@@ -947,7 +913,6 @@ func (message *Message) Copy() Message {
 
 // String takes the given Message object and returns it
 // as a readable string.
-//
 func (message *Message) String() string {
 
 	if message.Readable == nil {
@@ -967,13 +932,8 @@ func (message *Message) String() string {
 		display += message.UTCTime.Format(utils.DateLayout) + "\n"
 	}
 
-	if len(message.ErrorMessage) > 0 {
-		display += fmt.Sprintf("message type %d, frame length %d %s\n",
-			message.MessageType, len(message.RawData), message.ErrorMessage)
-	} else {
-		display += fmt.Sprintf("message type %d, frame length %d\n",
-			message.MessageType, len(message.RawData))
-	}
+	display += fmt.Sprintf("message type %d, frame length %d\n",
+		message.MessageType, len(message.RawData))
 
 	display += hex.Dump(message.RawData) + "\n"
 
@@ -996,62 +956,23 @@ func (message *Message) String() string {
 			return display
 		}
 
-		// Analyse may have found an error.
-		if len(message.ErrorMessage) > 0 {
-			display += message.ErrorMessage + "\n"
-		}
+		// If the message is a set of broken out fields, create a readable version
+		// and add it to the display.
 
-		// The message is a set of broken out fields.  Create a readable version.  If that reveals
-		// an error, the Valid flag will be unset and a warning added to the message.
+		m1005, is1005 := message.Readable.(*type1005.Message)
+		msm4, isMSM4 := message.Readable.(*msm4Message.Message)
+		msm7, isMSM7 := message.Readable.(*msm7Message.Message)
+
 		switch {
+		case is1005:
+			display += m1005.String()
 
-		case message.MessageType == 1005:
-			m, ok := message.Readable.(*type1005.Message)
-			if !ok {
-				// Internal error:  the message says the data are a type 1005 (base position)
-				// message but when decoded they are not.
-				display += "expected the readable message to be *Message1005\n"
-				if len(message.ErrorMessage) > 0 {
-					display += message.ErrorMessage + "\n"
-				}
-				break
-			}
-			display += m.String()
+		case isMSM4:
+			display += msm4.String()
 
-		case utils.MSM4(message.MessageType):
-			m, ok := message.Readable.(*msm4Message.Message)
-			if !ok {
-				// Internal error:  the message says the data are an MSM4
-				// message but when decoded they are not.
-				display += "expected the readable message to be an MSM4\n"
-				if len(message.ErrorMessage) > 0 {
-					display += message.ErrorMessage + "\n"
-				}
-				break
-			}
-			display += m.String()
-
-		case utils.MSM7(message.MessageType):
-			m, ok := message.Readable.(*msm7Message.Message)
-			if !ok {
-				// Internal error:  the message says the data are an MSM4
-				// message but when decoded they are not.
-				display += "expected the readable message to be an MSM7\n"
-				if len(message.ErrorMessage) > 0 {
-					display += message.ErrorMessage + "\n"
-				}
-				break
-			}
-			display += m.String()
-
-			// The default case can't be reached - PrepareForDisplay calls
-			// Analyse which sets Readable field to an error message if it can't
-			// display the message.  That case was taken care of earlier.
-			//
-			// default:
-			// 	display += "the message is not displayable\n"
+		case isMSM7:
+			display += msm7.String()
 		}
-
 	}
 
 	return display
@@ -1112,7 +1033,6 @@ func CheckCRC(frame []byte) bool {
 
 // ParseGlonassTimeStamp separates out the two parts of a Glonass
 // timestamp -3/27 day/milliseconds from start of day.
-//
 func ParseGlonassTimeStamp(timestamp uint) (uint, uint, error) {
 
 	// The timestamp must fit into 30 bits.

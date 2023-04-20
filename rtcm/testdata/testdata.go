@@ -36,13 +36,11 @@ var AllJunk = []byte{'j', 'u', 'n', 'k'}
 // We should get this result when we read the junkAtStartReader or the junkReader.
 const WantJunk = "junk"
 
-// This is a dummy message of type 1024, which is not is not handled.
-// Processing it produces a warning to that effect.
-// The leader contains the type and the CRC is correct, which is all
-// we need for our testing.  The data is NOT a correctly formatted
-// type 1024 message.
-//
-// 1024 is 0x400
+// This is a dummy message of type 1024 (0x400), which is not is not
+// handled.  Attempting to display it should produce a warning to
+// that effect.  The leader contains the type and the CRC is correct,
+// which is all we need for our testing.  The embedded message is NOT
+// a correctly formatted type 1024 message.
 var UnhandledMessageType1024 = []byte{
 	0xd3, 0, 0x08,
 	0x40, 0, 0, 0x8a, 0, 0, 0, 0,
@@ -57,7 +55,7 @@ var Fake1230 = []byte{0xd3, 0x00, 0x08,
 	0xa8, 0xf7, 0x2a,
 }
 
-var CRCFailure = []byte{0xd3, 0, 0x08,
+var MessageFrameWithCRCFailure = []byte{0xd3, 0, 0x08,
 	0x4c, 0xe0, 0x00,
 	0x8a, 0, 0, 0, 0,
 	// For a legal CRC the next line would be 0xa8, 0xf7, 0x2a,
@@ -84,7 +82,7 @@ var MessageFrameType1005 = []byte{
 	0x5b, 0x90, 0x5f,
 }
 
-var Message1077 = []byte{
+var MessageFrameType1077 = []byte{
 
 	// A real RTCM message frame captured from a UBlox GPS device.  This contains a message
 	// type 1077 (a GPS MSM7), padded with null bytes at the end. Bytes 6 and 7 (0x62, 0x00)
@@ -153,7 +151,7 @@ var Message1077 = []byte{
 	0x0c, 0x2d, 0xf3, // 222-224 of message frame.
 }
 
-var BatchWith1077Frame = []byte{
+var MesageBatchWith1077 = []byte{
 
 	// RTCM message type 1077 - signals from GPS satellites:
 	0xd3, 0x00, 0xdc, // header - message length (0xdc - 220)
@@ -179,7 +177,7 @@ var BatchWith1077Frame = []byte{
 	's', 'o', 'm', 'e', ' ', 'j', 'u', 'n', 'k', // junk which should be returned as a non-RTCM message.
 }
 
-var MessageType1074 = []byte{
+var MessageFrameType1074_1 = []byte{
 	// A hand-crafted message type 1074 - MSM 4 GPS with leader and CRC.
 	0xd3, 0x04, 0x32, // leader
 	// The header is 185 bits long, with 2 cell mask bits.
@@ -206,6 +204,38 @@ var MessageType1074 = []byte{
 	0x00, 0x68, 0x8e, 0x80,
 	// CRC
 	0x6e, 0x75, 0x44,
+}
+
+// MessageFrameType1074_2 is a message frame containing a leader, a message of type
+// 1074 (a GPS MessageFrameType1074_2) and a valid CRC.
+var MessageFrameType1074_2 = []byte{
+	// 3-byte leader with message length 36 bytes.
+	0xd3, 0x00, 0x24,
+	// This is the message body of an MSM - no leader or CRC.
+	// The header is 185 bits long, with 2 cell mask bits.
+	// The type is 1074, Station ID is 1:
+	// 0: 1000 0110 010|0000 0000 0001
+	0x43, 0x20, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00,
+	//                   64 bit satellite mask with satellite 4 marked.
+	// 64: 000|0 0|0|00   0|000 1000   0000 0000   0000 0000 ...
+	0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	//               32 bit signal mask with signals 2 and 16 marked.
+	// 0000 0000   0|010 0000   0000 0000   1000 0000
+	/* 128 */ 0x00, 0x20, 0x00, 0x80,
+	//
+	//                    2 bit cell mask
+	//                       Satellite cell - whole 1, frac 0.25
+	//                                                   Signal cell
+	// 160: 0000 0000   0|11|0 0000  001|0 1000   0000 0|000
+	0x00, 0x60, 0x28, 0x00,
+	// 192: 0100 0000   0000|0001   0000 0000   000|0 0010
+	0x40, 0x01, 0x00, 0x02,
+	// 224: 0000 0000   0000 0000  0|100 0000   0000 0000
+	0x00, 0x00, 0x40, 0x00,
+	// 276: 0000 000|0   011|0 100|0|  1|000 111|0  1000 0|000
+	0x00, 0x68, 0x8e, 0x80,
+	// 3-byte CRC.
+	0x83, 0xf7, 0x4b,
 }
 
 // MessageBatch contain a batch of RTCM3 messages.  In each message byte 0
@@ -473,36 +503,4 @@ var WantResultFromProcessMessages = []byte{
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe5, 0x1e, 0xd8,
-}
-
-// MessageFrameType1074 is a message frame containing a leader, a message of type
-// 1074 (a GPS MessageFrameType1074) and a valid CRC.
-var MessageFrameType1074 = []byte{
-	// 3-byte leader with message length 36 bytes.
-	0xd3, 0x00, 0x24,
-	// This is the message body of an MSM - no leader or CRC.
-	// The header is 185 bits long, with 2 cell mask bits.
-	// The type is 1074, Station ID is 1:
-	// 0: 1000 0110 010|0000 0000 0001
-	0x43, 0x20, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00,
-	//                   64 bit satellite mask with satellite 4 marked.
-	// 64: 000|0 0|0|00   0|000 1000   0000 0000   0000 0000 ...
-	0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	//               32 bit signal mask with signals 2 and 16 marked.
-	// 0000 0000   0|010 0000   0000 0000   1000 0000
-	/* 128 */ 0x00, 0x20, 0x00, 0x80,
-	//
-	//                    2 bit cell mask
-	//                       Satellite cell - whole 1, frac 0.25
-	//                                                   Signal cell
-	// 160: 0000 0000   0|11|0 0000  001|0 1000   0000 0|000
-	0x00, 0x60, 0x28, 0x00,
-	// 192: 0100 0000   0000|0001   0000 0000   000|0 0010
-	0x40, 0x01, 0x00, 0x02,
-	// 224: 0000 0000   0000 0000  0|100 0000   0000 0000
-	0x00, 0x00, 0x40, 0x00,
-	// 276: 0000 000|0   011|0 100|0|  1|000 111|0  1000 0|000
-	0x00, 0x68, 0x8e, 0x80,
-	// 3-byte CRC.
-	0x83, 0xf7, 0x4b,
 }

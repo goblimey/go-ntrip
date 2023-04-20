@@ -281,7 +281,7 @@ func TestHandleManyCalls(t *testing.T) {
 	// If the input is a serial line with a GNSS device on the end, Handle will
 	// be called many times and the messages from each call will be sent to an
 	// aggregate channel.  This test simulates that situation by calling Handle
-	// twice using different bit streams each time.  The result on the aggregate 
+	// twice using different bit streams each time.  The result on the aggregate
 	// message channel should be the messages from the two bit streams in order.
 
 	const waitTimeOnEOF = 0            // Do not wait when encountering End Of File.
@@ -290,7 +290,7 @@ func TestHandleManyCalls(t *testing.T) {
 
 	// The first test bit stream contains 1 message, the second contains
 	// 7 messages.
-	bitStream1 := testdata.MessageFrameType1074
+	bitStream1 := testdata.MessageFrameType1074_2
 	bitStream2 := testdata.MessageBatchWithJunk
 
 	// These are the expected message types.
