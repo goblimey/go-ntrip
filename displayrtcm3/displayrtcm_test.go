@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 	"time"
 
@@ -87,6 +88,7 @@ message type 1230, frame length 14
 00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
 
 (Message type 1230 - GLONASS code-phase biases - don't know how to decode this)
+
 `
 
 	reader := bytes.NewReader(testdata.Fake1230)
@@ -112,5 +114,52 @@ message type 1230, frame length 14
 
 	if want != got {
 		t.Errorf(diff.Diff(want, got))
+	}
+}
+
+// TestOpenFile tests the openFile function using the test file testdata.rtcm.
+func TestOpenFile(t *testing.T) {
+	reader, openError := openFile("testdata.rtcm")
+
+	if openError != nil {
+		t.Error(openError)
+	}
+
+	// The file starts with a 0xd3 byte.  Check that we can read it.
+	buffer := make([]byte, 1)
+
+	n, readError := reader.Read(buffer)
+
+	if readError != nil {
+		t.Error(readError)
+	}
+
+	if n != 1 {
+		t.Errorf("want 1 byte got %d", n)
+		return
+	}
+
+	if buffer[0] != 0xd3 {
+		t.Errorf("want 0xd3 byte got 0x%2x", buffer[0])
+		return
+	}
+
+}
+
+// TestOpenFileWithError tests the openFile function using a file name that
+// doesn't exist.
+func TestOpenFileWithError(t *testing.T) {
+	const filename = "junk"
+	want := fmt.Sprintf("open %s: no such file or directory", filename)
+	_, openError := openFile("junk")
+
+	if openError == nil {
+		t.Error("expected an error")
+	}
+
+	got := openError.Error()
+
+	if got != want {
+		t.Errorf("want %s got %s", want, got)
 	}
 }

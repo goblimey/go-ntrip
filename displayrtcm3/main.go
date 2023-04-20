@@ -11,10 +11,12 @@
 // either MSM4 or MSM7.
 //
 // Usage:
-//		displayrtcm3 file date
+//
+//	displayrtcm3 file date
 //
 // Example:
-//		displayrtcm3 testdata.rtcm 2020-11-13
+//
+//	displayrtcm3 testdata.rtcm 2020-11-13
 //
 // The tool handles MSM data for GPS, Galileo, GLONASS and BeiDou
 // satellites.  These can be observed from anywhere in the world given
@@ -48,7 +50,6 @@
 // in the Moscow time zone.  Day 0 is Sunday which starts at 21:00 on
 // Saturday evening in UTC.  Day 7 is an illegal value and should
 // never occur.
-//
 package main
 
 import (
@@ -127,18 +128,9 @@ func DisplayMessages(startDate time.Time, reader io.Reader, writer io.Writer, wa
 	go fileHandler.Handle(startDate, bufferedReader)
 
 	// Display the messages.
-	for {
-		message, ok := <-messageChan
-		if !ok {
-			// No more message.  We're done.
-			return nil
-		}
+	writeError := writeReadableMessages(messageChan, fileHandler, writer)
 
-		_, writeError := writer.Write([]byte(message.String()))
-		if writeError != nil {
-			return writeError
-		}
-	}
+	return writeError
 }
 
 // getTime gets a time from a string in one of three formats,
@@ -176,15 +168,18 @@ func openFile(fileName string) (io.Reader, error) {
 // decodes them to readable form and writes the result to the given
 // writer.  If the channel is closed or there is a write error, it
 // terminates.  It can be run in a go routine.
-func writeReadableMessages(ch chan rtcm.Message, rtcmHandler *rtcm.Handler, writer io.Writer) {
+func writeReadableMessages(ch chan rtcm.Message, fileHandler *handler.Handler, writer io.Writer) error {
 
 	for {
 		message, ok := <-ch
 		if !ok {
-			return
+			return nil
 		}
 		// Decode the message.  (The result is very verbose!)
-		display := fmt.Sprintf("%s\n", rtcmHandler.DisplayMessage(&message))
-		writer.Write([]byte(display))
+		display := fmt.Sprintf("%s\n", fileHandler.RTCMHandler.DisplayMessage(&message))
+		_, writeError := writer.Write([]byte(display))
+		if writeError != nil {
+			return writeError
+		}
 	}
 }
