@@ -17,7 +17,7 @@ type Handler struct {
 	RTCMHandler        *rtcm.Handler     // Handles RTCM3 messages ...
 	MessageChan        chan rtcm.Message // ... and issues them on this channel.
 	RetryIntervalOnEOF time.Duration     // The time to wait between retries on EOF.
-	EOFTimeout         time.Duration     // Give up retying after this time has elapsed.
+	EOFTimeout         time.Duration     // Give up retrying after this time has elapsed.
 
 }
 

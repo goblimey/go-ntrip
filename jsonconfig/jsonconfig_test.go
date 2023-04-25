@@ -10,7 +10,6 @@ import (
 
 // TestJSONControl tests that the correct data is produced when the
 // text from a JSON control file is unmarshalled.
-//
 func TestGetJSONControl(t *testing.T) {
 	reader := strings.NewReader(`{
 		"input": ["a", "b"],
@@ -22,11 +21,16 @@ func TestGetJSONControl(t *testing.T) {
 		"caster_port": 2101,
 		"caster_user_name": "user",
 		"caster_password": "password",
-		"timeout": 1,
-		"sleep_time": 2,
-		"wait_time_on_EOF_millis": 3,
-		"timeout_on_EOF_seconds": 4
+		"read_timeout_milliseconds": 100,
+		"sleep_time_after_failed_open_milliseconds": 200,
+		"wait_time_on_EOF_millis": 300,
+		"timeout_on_EOF_milliseconds":2000
 	}`)
+
+	const wantReadTimeout = 100
+	const wantSleepTime = 200
+	const wantWaitTime = 300
+	const wantEOFTimeout = 2000
 
 	writer := switchwriter.New()
 	logger := log.New(writer, "jsonconfig_test", 0)
@@ -85,23 +89,51 @@ func TestGetJSONControl(t *testing.T) {
 		t.Error("parsing json, expected display_message to be true")
 	}
 
-	if config.LostInputConnectionTimeout != 1 {
-		t.Errorf("parsing json, expected timeout to be 1, got %d",
-			config.LostInputConnectionTimeout)
+	if config.ReadTimeoutMilliSeconds != wantReadTimeout {
+		t.Errorf("parsing json, expected timeout to be %d, got %d",
+			wantReadTimeout, config.ReadTimeoutMilliSeconds)
 	}
 
-	if config.LostInputConnectionSleepTime != 2 {
-		t.Errorf("parsing json, expected sleep time to be 2, got %d",
-			config.LostInputConnectionSleepTime)
+	if config.SleepTimeAfterFailedOpenMilliSeconds != wantSleepTime {
+		t.Errorf("parsing json, expected sleep time to be %d, got %d",
+			wantSleepTime, config.SleepTimeAfterFailedOpenMilliSeconds)
 	}
 
-	if config.WaitTimeOnEOF != 3 {
-		t.Errorf("parsing json, expected wait time to be 3, got %d",
-			config.WaitTimeOnEOF)
+	if config.WaitTimeOnEOFMilliseconds != wantWaitTime {
+		t.Errorf("parsing json, expected wait time to be %d, got %d",
+			wantWaitTime, config.WaitTimeOnEOFMilliseconds)
 	}
 
-	if config.TimeoutOnEOF != 4 {
-		t.Errorf("parsing json, expected wait time to be 4, got %d",
-			config.TimeoutOnEOF)
+	if config.TimeoutOnEOFMilliSeconds != wantEOFTimeout {
+		t.Errorf("parsing json, expected wait time to be %d, got %d",
+			wantEOFTimeout, config.TimeoutOnEOFMilliSeconds)
+	}
+}
+
+// TestTimeouts checks that the read timeout is correctly converted to a
+// duration.
+func TestReadTimeout(t *testing.T) {
+	const timeout = 2
+	const want = 2000000
+
+	config := Config{ReadTimeoutMilliSeconds: timeout}
+
+	got := config.ReadTimeout()
+	if want != got {
+		t.Errorf("want %d got %d", want, got)
+	}
+}
+
+// TestSleepTimeAfterReadTimeout checks that SleepTimeAfterReadTimeout correctly
+// converts the value in the config to a duration.
+func TestSleepTimeAfterReadTimeout(t *testing.T) {
+	const sleepTime = 300
+	const want = 300000000
+
+	config := Config{SleepTimeAfterFailedOpenMilliSeconds: sleepTime}
+
+	got := config.SleepTimeAfterFailedOpen()
+	if want != got {
+		t.Errorf("want %d got %d", want, got)
 	}
 }

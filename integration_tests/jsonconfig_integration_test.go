@@ -35,12 +35,14 @@ func TestGetJSONConfigFromFile(t *testing.T) {
 		"record_messages": true,
 		"display_messages": true,
 		"message_log_directory": "foo",
-		"casterhostname": "caster.example.com",
-		"casterport": 2101,
-		"casterUserName": "user",
-		"casterPassword": "password",
-		"timeout": 1,
-		"sleeptime": 2
+		"caster_host_name": "caster.example.com",
+		"caster_port": 2101,
+		"caster_user_name": "user",
+		"caster_password": "password",
+		"read_timeout_milliseconds": 1,
+		"sleep_time_after_failed_open_milliseconds": 2,
+		"wait_time_on_EOF_millis": 3,
+		"timeout_on_EOF_milliseconds": 34
 	}`
 	controlFileName := "config.json"
 
@@ -104,7 +106,6 @@ func TestGetJSONConfigFromFile(t *testing.T) {
 // TestWaitAndConnectToInput tests that waitAndConnectToInput returns a
 // reader connected to the correct file when the file does not exist
 // initially.  Warning:  this test pauses for a significant time.)
-//
 func TestWaitAndConnectToInput(t *testing.T) {
 
 	workingDirectory, err := testsupport.CreateWorkingDirectory()
@@ -118,8 +119,8 @@ func TestWaitAndConnectToInput(t *testing.T) {
 	filenames = append(filenames, "a")
 	filenames = append(filenames, "b")
 	filenames = append(filenames, "c")
-	config := jsonconfig.Config{Filenames: filenames, LostInputConnectionTimeout: 1,
-		LostInputConnectionSleepTime: 1}
+	config := jsonconfig.Config{Filenames: filenames, ReadTimeoutMilliSeconds: 1,
+		SleepTimeAfterFailedOpenMilliSeconds: 1}
 
 	// Wait for a short time and then create file "b" with some contents.
 	const expectedContents = "Hello world"

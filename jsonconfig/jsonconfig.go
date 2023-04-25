@@ -47,7 +47,6 @@ import (
 // that writes to the system log.  To support unit testing, functions that
 // write to the log should use this writer - we don't want to force unit tests
 // to write to a real log file.)
-//
 type Config struct {
 	// Filenames is a list of filenames to try to open - first one wins.
 	Filenames []string `json:"input"`
@@ -75,22 +74,28 @@ type Config struct {
 	// CasterPassword is password to connect to the NTRIP (broad)caster.
 	CasterPassword string `json:"caster_password"`
 
-	// WaitTimeOnEOF specifies how long to wait if a read operation on a
-	// serial connection returns EOF, before trying the read again.  The
-	// value given in the JSON should be in milliseconds.
-	WaitTimeOnEOF uint `json:"wait_time_on_EOF_millis"`
+	// ReadTimeoutSeconds defines the input timeout in milliseconds.  This is
+	// bound into the reader by getInputFile.  The function ReadTimeout
+	// returns this as a duration.
+	ReadTimeoutMilliSeconds uint `json:"read_timeout_milliseconds"`
 
-	// TimeoutOnEOF specifies how long we allow reads to get repeated EOFs
-	// before we give up and terminate.  The value is in seconds.  A typical 
-	// NTRIP source emits a stream of messages once every second so the
-	// timeout will typically be a one or two seconds.
-	TimeoutOnEOF uint `json:"timeout_on_EOF_seconds"`
+	// SleepTimeAfterFailedOpenMilliSeconds defines the time that a caller of
+	// getInputFile should pause before retrying if it fails to find any of
+	// the files listed in the config.  The function SleepTimeAfterFailedOpen returns this
+	// as a duration.
+	SleepTimeAfterFailedOpenMilliSeconds uint `json:"sleep_time_after_failed_open_milliseconds"`
 
-	// LostInputConnectionTimeout defines the input timeout.
-	LostInputConnectionTimeout uint `json:"timeout"`
+	// WaitTimeOnEOFMilliseconds specifies in milliseconds how long a caller
+	// should wait before retrying if a read operation on a serial connection
+	// returns EOF.  The function WaitTimeOnEOF returns this as a duration.
+	WaitTimeOnEOFMilliseconds uint `json:"wait_time_on_EOF_millis"`
 
-	// LostConnectionSleepTime is the time to sleep between connection attempts.
-	LostInputConnectionSleepTime uint `json:"sleep_time"`
+	// TimeoutOnEOFMilliSeconds returns the duration of the timeout that a caller
+	// should apply when a series of read operations return EOF.  A value of 0 means
+	// that the caller should give up on the first EOF.
+	//
+	// The function TimeoutOnEOF returns this as a duration.
+	TimeoutOnEOFMilliSeconds uint `json:"timeout_on_EOF_milliseconds"`
 
 	// systemLog is the Writer used for the daily activity log (as opposed to
 	// the log of incoming RTCM messages) and can be nil.  It's not supplied
@@ -145,9 +150,34 @@ func getJSONConfig(jsonSource io.Reader, systemLog *log.Logger) (*Config, error)
 	}
 
 	// Set the fields that are not set by the JSON.
+
 	config.systemLog = systemLog
 
 	return &config, nil
+}
+
+// ReadTimeout gets the read timeout as a duration.
+func (config *Config) ReadTimeout() time.Duration {
+	return time.Duration(config.ReadTimeoutMilliSeconds) * time.Millisecond
+}
+
+// SleepTimeAfterFailedOpen returns the time that a caller of getInputFile should
+// pause before retrying if it fails to find any of the files listed in the config.
+func (config *Config) SleepTimeAfterFailedOpen() time.Duration {
+	return time.Duration(config.SleepTimeAfterFailedOpenMilliSeconds) * time.Millisecond
+}
+
+// WaitTimeOnEOF returns the time that a caller should pause before retrying
+// after a read operation has failed.
+func (config *Config) WaitTimeOnEOF() time.Duration {
+	return time.Duration(config.WaitTimeOnEOFMilliseconds) * time.Millisecond
+}
+
+// TimeoutOnEOF returns the duration of the timeout that should be applied
+// when a series of read operations return EOF.  A value of 0 means that the
+// caller should give up on the first EOF.
+func (config *Config) TimeoutOnEOF() time.Duration {
+	return time.Duration(config.WaitTimeOnEOFMilliseconds) * time.Millisecond
 }
 
 // connectionFailureLogged controls when a connection failure is
@@ -157,11 +187,10 @@ var connectionFailureLogged = false
 // WaitAndConnectToInput tries repeatedly (potentially indefinitely)
 // to connect to one of the input files whose names are given.
 func (config *Config) WaitAndConnectToInput() io.Reader {
-	sleepTime := time.Duration(config.LostInputConnectionSleepTime) * time.Second
 	for {
-		reader := config.findInputDevice()
+		reader := config.getInputFile()
 		if reader != nil {
-			logEntry1 := "waitAndConnect: connected to GNSS source"
+			logEntry1 := "waitAndConnectToInput: connected to GNSS source"
 			if config.systemLog != nil {
 				config.systemLog.Println(logEntry1)
 			} else {
@@ -183,39 +212,14 @@ func (config *Config) WaitAndConnectToInput() io.Reader {
 			connectionFailureLogged = true
 		}
 		// Pause and try again.
-		time.Sleep(sleepTime)
+		time.Sleep(config.SleepTimeAfterFailedOpen())
 	}
-}
-
-// findInputDevice searches the given list of InputFiles.If one of the named
-// files exists and can be opened for reading, it returns a Reader connected
-// to it.  The Reader responds to the supplied Context (which may, for example,
-// contain a read timeout).
-func (config *Config) findInputDevice() io.Reader {
-	// Note:  The device names "/dev/ttyACM0" etc on a Raspberry Pi
-	// DO NOT relate to the physical USB sockets on the circuit board. They
-	// are used in turn. After the Pi boots, the first connection uses
-	// "/dev/ttyACM0".  If the GNSS device loses power briefly, then when it
-	// comes back, the connection is represented by "/dev/ttyACM1", and so on,
-	// even though the USB plu is connected to the same port. So, whenever
-	// software running on the Pi needs to establish a connection with a serial
-	// USB device, it needs to do this search.
-
-	file := config.getInputFile()
-	if file == nil {
-		// None of the input file are present. Return nil.
-		return nil
-	}
-
-	// The file exists and is open.  Return it.
-	return file
 }
 
 // getInputFile returns a connection to the first file in the given list
 // that it can open for reading or nil if it can't open any file.  The
 // connection returned has a read deadline set given by the configuration.
-//
-func (config *Config) getInputFile() *os.File {
+func (config *Config) getInputFile() io.Reader {
 	for _, name := range config.Filenames {
 		file, err := os.Open(name)
 		if err == nil {
@@ -226,15 +230,16 @@ func (config *Config) getInputFile() *os.File {
 				log.Println(logEntry)
 			}
 			// The file exists and we've just opened it for reading.
+			// Set the read deadline using the value given in the config.
+			deadline := time.Now().Add(config.ReadTimeout())
+			file.SetReadDeadline(deadline)
+			// Return the file as a reader.
 			return file
 		}
 
-		// Set the read deadline to the value given in the config.
-		durationToDeadline := time.Duration(config.LostInputConnectionTimeout) *
-			time.Second
-		deadline := time.Now().Add(durationToDeadline)
-		file.SetReadDeadline(deadline)
+		// The open failed.  Try the next file.
 	}
 
+	// The attempt to open every file in the list failed.
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 	"github.com/goblimey/go-tools/clock"
 )
 
@@ -16,8 +17,7 @@ import (
 func TestGetStartOfday(t *testing.T) {
 	// This replicates the logic of the function under test, so it's
 	// really just a round trip test.
-	locationUTC, _ := time.LoadLocation("UTC")
-	now := time.Date(2020, time.February, 14, 22, 12, 0, 0, locationUTC)
+	now := time.Date(2020, time.February, 14, 22, 12, 0, 0, utils.LocationUTC)
 	sod := getStartOfDay(now)
 	if sod.Year() != 2020 {
 		t.Fatalf("expected year to be 2020 actually %d", sod.Year())
@@ -52,8 +52,7 @@ func TestGetStartOfday(t *testing.T) {
 func TestGetEndOfDay(t *testing.T) {
 	// This replicates the logic of the function under test, so it's
 	// really just a round trip test.
-	locationUTC, _ := time.LoadLocation("UTC")
-	now := time.Date(2020, time.February, 14, 22, 12, 0, 0, locationUTC)
+	now := time.Date(2020, time.February, 14, 22, 12, 0, 0, utils.LocationUTC)
 	eod := getEndOfDay(now)
 	if eod.Year() != 2020 {
 		t.Errorf("expected year to be 2020 actually %d", eod.Year())
@@ -86,10 +85,8 @@ func TestGetEndOfDay(t *testing.T) {
 
 // TestShouldBeLogging tests that shouldBeLogging works when logging and
 // when not logging.
-//
 func TestShouldBeLogging(t *testing.T) {
-	locationUTC, _ := time.LoadLocation("UTC")
-	now := time.Date(2020, time.February, 14, 22, 59, 0, 0, locationUTC)
+	now := time.Date(2020, time.February, 14, 22, 59, 0, 0, utils.LocationUTC)
 	if !shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns false during the day - at %v", now)
 	}
@@ -97,62 +94,60 @@ func TestShouldBeLogging(t *testing.T) {
 	// Logging should be off at exactly end of day, exactly start of day and at
 	// all times between.
 	now = time.Date(2020, time.February, 14,
-		endOfDayHour, endOfDayMinute, endOfDaySecond-1, 999999, locationUTC)
+		endOfDayHour, endOfDayMinute, endOfDaySecond-1, 999999, utils.LocationUTC)
 	if !shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns false just before start of day - at %v", now)
 	}
 
 	now = time.Date(2020, time.February, 14,
-		startOfDayHour, startOfDayMinute, startOfDaySecond, 0, locationUTC)
+		startOfDayHour, startOfDayMinute, startOfDaySecond, 0, utils.LocationUTC)
 	if shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns true at exactly start of day - at %v", now)
 	}
 
-	now = time.Date(2020, time.February, 14, 0, 0, 0, 0, locationUTC)
+	now = time.Date(2020, time.February, 14, 0, 0, 0, 0, utils.LocationUTC)
 	if shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns true at midnight - at %v", now)
 	}
 
 	now = time.Date(2020, time.February, 14,
-		endOfDayHour, endOfDayMinute, endOfDaySecond, 0, locationUTC)
+		endOfDayHour, endOfDayMinute, endOfDaySecond, 0, utils.LocationUTC)
 	if shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns true at exactly end of day - at %v", now)
 	}
 
 	now = time.Date(2020, time.February, 14,
-		startOfDayHour, startOfDayMinute, startOfDaySecond, 1, locationUTC)
+		startOfDayHour, startOfDayMinute, startOfDaySecond, 1, utils.LocationUTC)
 	if !shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns false just after start of day - at %v", now)
 	}
 
 	// Do the same again but with the UK timezone.
-
-	locationUK, _ := time.LoadLocation("Europe/London")
 	now = time.Date(2020, time.April, 1,
-		endOfDayHour, endOfDayMinute, endOfDaySecond-1, 999999, locationUK)
+		endOfDayHour, endOfDayMinute, endOfDaySecond-1, 999999, utils.LocationLondon)
 	if !shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns false just before start of day - at %v", now)
 	}
 
 	now = time.Date(2020, time.April, 1,
-		startOfDayHour, startOfDayMinute, startOfDaySecond, 0, locationUK)
+		startOfDayHour, startOfDayMinute, startOfDaySecond, 0, utils.LocationLondon)
 	if shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns true at exactly start of day - at %v", now)
 	}
 
-	now = time.Date(2020, time.April, 1, 0, 0, 0, 0, locationUK)
+	now = time.Date(2020, time.April, 1, 0, 0, 0, 0, utils.LocationLondon)
 	if shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns true at midnight UTC- at %v", now)
 	}
 
 	now = time.Date(2020, time.April, 1,
-		endOfDayHour, endOfDayMinute, endOfDaySecond, 0, locationUK)
+		endOfDayHour, endOfDayMinute, endOfDaySecond, 0, utils.LocationLondon)
 	if shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns true at exactly end of day - at %v", now)
 	}
 
 	now = time.Date(2020, time.April, 1,
-		startOfDayHour, startOfDayMinute, startOfDaySecond, 1, locationUK)
+		startOfDayHour, startOfDayMinute, startOfDaySecond, 1, utils.LocationLondon)
 	if !shouldBeLogging(now) {
 		t.Errorf("shouldBeLogging() returns false just after start of day - at %v", now)
 	}
@@ -160,10 +155,8 @@ func TestShouldBeLogging(t *testing.T) {
 
 // TestGetTodaysLogFilename checks that getTodaysLogFilename returns a filename
 // containing today's timestamp.
-//
 func TestGetTodaysLogFilename(t *testing.T) {
-	locationUTC, _ := time.LoadLocation("UTC")
-	now := time.Date(2020, time.February, 14, 22, 59, 0, 0, locationUTC)
+	now := time.Date(2020, time.February, 14, 22, 59, 0, 0, utils.LocationUTC)
 	const expectedFilename = "data.2020-02-14.rtcm3"
 
 	filename := getTodaysLogFilename(now)
@@ -175,7 +168,6 @@ func TestGetTodaysLogFilename(t *testing.T) {
 
 // TestWriteWhenLoggingEnabled checks that the Writer does not write
 // to the log file when logging is disabled.
-//
 func TestWriteWhenLoggingEnabled(t *testing.T) {
 
 	// NOTE:  this test uses the filestore.
@@ -189,16 +181,10 @@ func TestWriteWhenLoggingEnabled(t *testing.T) {
 	}
 	defer removeWorkingDirectory(wd)
 
-	// Set times when logging is enabled and write some text to the logger.
-	locationUTC, err := time.LoadLocation("UTC")
-	if err != nil {
-		t.Errorf("error while loading UTC timezone - %v", err)
-	}
-
 	times := []time.Time{
-		time.Date(2020, 2, 14, 0, 0, 5, 1, locationUTC),
-		time.Date(2020, 2, 14, 12, 0, 0, 0, locationUTC),
-		time.Date(2020, 2, 14, 23, 59, 54, 999999, locationUTC),
+		time.Date(2020, 2, 14, 0, 0, 5, 1, utils.LocationUTC),
+		time.Date(2020, 2, 14, 12, 0, 0, 0, utils.LocationUTC),
+		time.Date(2020, 2, 14, 23, 59, 54, 999999, utils.LocationUTC),
 	}
 
 	clock := clock.NewSteppingClock(&times)
@@ -287,7 +273,6 @@ func TestWriteWhenLoggingEnabled(t *testing.T) {
 
 // TestNoWriteWhenLoggingDisabled checks that the Writer does not write
 // to the log file when logging is disabled.
-//
 func TestNoWriteWhenLoggingDisabled(t *testing.T) {
 
 	// NOTE:  this test uses the filestore.
@@ -302,17 +287,13 @@ func TestNoWriteWhenLoggingDisabled(t *testing.T) {
 
 	// Set times close to midnight and write some text to the logger.  It should not
 	// write anything to the log file.
-	locationUTC, err := time.LoadLocation("UTC")
-	if err != nil {
-		t.Errorf("error while loading UTC timezone - %v", err)
-	}
 
 	// Create a stepping clock with times around midnight.
 	times := []time.Time{
-		time.Date(2020, 2, 14, 0, 0, 4, 0, locationUTC),
-		time.Date(2020, 2, 14, 0, 0, 5, 0, locationUTC),
-		time.Date(2020, 2, 14, 23, 59, 55, 1, locationUTC),
-		time.Date(2020, 2, 14, 23, 59, 59, 0, locationUTC)}
+		time.Date(2020, 2, 14, 0, 0, 4, 0, utils.LocationUTC),
+		time.Date(2020, 2, 14, 0, 0, 5, 0, utils.LocationUTC),
+		time.Date(2020, 2, 14, 23, 59, 55, 1, utils.LocationUTC),
+		time.Date(2020, 2, 14, 23, 59, 59, 0, utils.LocationUTC)}
 
 	clock := clock.NewSteppingClock(&times)
 
@@ -419,11 +400,7 @@ func TestPushOldLogs(t *testing.T) {
 	}
 	file.Close()
 
-	locationUTC, err := time.LoadLocation("UTC")
-	if err != nil {
-		t.Fatalf("error while loading UTC timezone - %v", err)
-	}
-	now := time.Date(2020, 2, 14, 12, 13, 14, 15, locationUTC)
+	now := time.Date(2020, 2, 14, 12, 13, 14, 15, utils.LocationUTC)
 
 	todaysLogFileName := getTodaysLogFilename(now)
 	pathname = loggingDirectory + "/" + todaysLogFileName
@@ -487,7 +464,6 @@ func TestPushOldLogs(t *testing.T) {
 }
 
 // makeUUID creates a UUID.  See https://yourbasic.org/golang/generate-uuid-guid/.
-//
 func makeUUID() string {
 	// Produces something like "9e0825f2-e557-28df-93b7-a01c789f36a8".
 	b := make([]byte, 16)
@@ -502,7 +478,6 @@ func makeUUID() string {
 
 // createWorkingDirectory create a working directory and makes it the current
 // directory.
-//
 func createWorkingDirectory() (string, error) {
 	directoryName := "/tmp/" + makeUUID()
 	err := os.Mkdir(directoryName, os.ModePerm)
@@ -517,7 +492,6 @@ func createWorkingDirectory() (string, error) {
 }
 
 // removeWorkingDirectory removes the working directory and any files in it.
-//
 func removeWorkingDirectory(directoryName string) error {
 	err := os.RemoveAll(directoryName)
 	if err != nil {
