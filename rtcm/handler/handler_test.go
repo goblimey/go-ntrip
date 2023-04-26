@@ -321,7 +321,7 @@ func TestGetMessage(t *testing.T) {
 		startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, utils.LocationUTC)
 		handler := New(startTime)
 
-		got, messageFetchError := handler.getMessage(td.bitStream)
+		got, messageFetchError := handler.GetMessage(td.bitStream)
 		if messageFetchError != nil {
 			t.Errorf("%s: error getting message - %v", td.description, messageFetchError)
 			return
@@ -362,7 +362,7 @@ func TestGetMessageWithErrors(t *testing.T) {
 	for _, td := range testData {
 		startTime := time.Now()
 		handler := New(startTime)
-		gotMessage, gotError := handler.getMessage(td.frame)
+		gotMessage, gotError := handler.GetMessage(td.frame)
 		if td.want == "" {
 			if gotMessage == nil {
 				t.Error("expected a message")
@@ -440,7 +440,7 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 	for _, td := range testData {
 		startTime := time.Now()
 		handler := New(startTime)
-		gotMessage, gotError := handler.getMessage(td.frame)
+		gotMessage, gotError := handler.GetMessage(td.frame)
 
 		if len(td.wantError) > 0 {
 			if gotError == nil {

@@ -170,13 +170,14 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"os"
 	"time"
 
-	handler "github.com/goblimey/go-ntrip/file_handler"
+	AppCore "github.com/goblimey/go-ntrip/apps/appcore"
+	// handler "github.com/goblimey/go-ntrip/file_handler"
+	"github.com/goblimey/go-ntrip/jsonconfig"
 	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
 )
 
@@ -203,50 +204,51 @@ func main() {
 		log.Fatalf("%s: cannot open %s - %v", appName, fileName, openError)
 	}
 
-	const waitTimeOnEOF = time.Duration(100) * time.Millisecond
-	const timeoutOnEOF = time.Duration(2) * time.Second
+	// We just need the EOF timeout to be zero, which causes HandleMessages
+	// to stop when the input file is exhausted, so the zero value of the
+	// config is suitable.
+	var config jsonconfig.Config
 
-	displayError := DisplayMessages(startTime, reader, os.Stdout, waitTimeOnEOF, timeoutOnEOF)
-
-	if displayError != nil {
-		// Some kind of error writing.  This should never happen unless
-		// the disk fills or fails.  Writing to stderr is all we can do
-		// and if that's connected to a file on the same disk, it will
-		// probably fail too.
-		os.Stderr.Write([]byte(displayError.Error()))
-		os.Exit(1)
-	}
+	HandleMessages(startTime, reader, os.Stdout, &config)
 
 	os.Exit(0)
 }
 
-// DisplayMessages converts the bytes from the reader to messages and sends them
-// to the writer.
-func DisplayMessages(startDate time.Time, reader io.Reader, writer io.Writer, waitTimeOnEOF, timeoutOnEOF time.Duration) error {
+func HandleMessages(startTime time.Time, reader io.Reader, writer io.Writer, config *jsonconfig.Config) {
 
-	// Create a buffered reader.
 	bufferedReader := bufio.NewReader(reader)
-
-	// Create and start an RTCM handler.
-	const messageChannelCap = 100
-	messageChan := make(chan rtcm.Message, messageChannelCap)
-
-	// Create and start a file handler.  It reads the input and converts them
-	// to messages.  The messages appear on the message channel.
-	fileHandler := handler.New(messageChan, waitTimeOnEOF, timeoutOnEOF)
-
 	// Write the heading.
 	writer.Write([]byte("RTCM data\n"))
 	writer.Write([]byte("\nNote: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)\n"))
 	writer.Write([]byte("18 seconds ahead of UTC\n\n"))
 
-	// Fetch the messages.
-	go fileHandler.Handle(startDate, bufferedReader)
+	messageChan := make(chan rtcm.Message, 2)
+	go DisplayMessages(messageChan, writer)
 
-	// Display the messages.
-	writeError := writeReadableMessages(messageChan, fileHandler, writer)
+	channels := make([]chan rtcm.Message, 0)
+	channels = append(channels, messageChan)
+	appCore := AppCore.New(config, channels)
+	appCore.HandleMessagesUntilEOF(bufferedReader)
 
-	return writeError
+	close(messageChan)
+}
+
+// DisplayMessages receives messages from the given channel, produces a
+// readable display of each and writes them to the writer.  It can be
+// run in a goroutine.
+func DisplayMessages(messageChan chan rtcm.Message, writer io.Writer) error {
+	for {
+		message, ok := <-messageChan
+		if !ok {
+			return nil
+		}
+		// Decode the message.  (The result is very verbose!)
+		display := message.String()
+		_, writeError := writer.Write([]byte(display))
+		if writeError != nil {
+			return writeError
+		}
+	}
 }
 
 // getTime gets a time from a string in one of three formats,
@@ -278,24 +280,4 @@ func openFile(fileName string) (io.Reader, error) {
 	}
 
 	return file, nil
-}
-
-// writeReadableMessages receives the RTCM messages from the channel,
-// decodes them to readable form and writes the result to the given
-// writer.  If the channel is closed or there is a write error, it
-// terminates.  It can be run in a go routine.
-func writeReadableMessages(ch chan rtcm.Message, fileHandler *handler.Handler, writer io.Writer) error {
-
-	for {
-		message, ok := <-ch
-		if !ok {
-			return nil
-		}
-		// Decode the message.  (The result is very verbose!)
-		display := fmt.Sprintf("%s\n", fileHandler.RTCMHandler.DisplayMessage(&message))
-		_, writeError := writer.Write([]byte(display))
-		if writeError != nil {
-			return writeError
-		}
-	}
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goblimey/go-ntrip/jsonconfig"
+	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 
@@ -77,7 +79,52 @@ func TestGetTime(t *testing.T) {
 
 // TestDisplayMessages checks that DisplayMessages correctly displays input
 // containing a single message.
-func TestDisplayMessage(t *testing.T) {
+func TestDisplayMessages(t *testing.T) {
+
+	const want = `message type 1005, frame length 25
+00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
+00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
+
+message type 1005 - Base Station Information
+stationID 2, ITRF realisation year 3, ignored 0xf,
+x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
+ECEF coords in metres (12.3456, 23.4567, 34.5678)
+`
+
+	rtcmHandler := rtcm.New(time.Now())
+	message, gotError := rtcmHandler.GetMessage(testdata.MessageFrameType1005)
+	if gotError != nil {
+		t.Error(gotError)
+		return
+	}
+
+	messageChan := make(chan rtcm.Message, 1)
+	messageChan <- *message
+
+	close(messageChan)
+
+	var buffer bytes.Buffer
+
+	DisplayMessages(messageChan, &buffer)
+
+	gotBytes := make([]byte, 1000)
+	n, readError := buffer.Read(gotBytes)
+
+	if readError != nil {
+		t.Error(readError)
+	}
+
+	got := string(gotBytes[:n])
+
+	if want != got {
+		t.Errorf("want:\n%s\ngot:\n%s\n", want, got)
+		t.Error(diff.Diff(want, got))
+	}
+}
+
+// TestHandleMessages checks that HandleMessages correctly displays input
+// containing a single message.
+func TestHandleMessages(t *testing.T) {
 
 	const want = `RTCM data
 
@@ -88,22 +135,20 @@ message type 1230, frame length 14
 00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
 
 (Message type 1230 - GLONASS code-phase biases - don't know how to decode this)
-
 `
 
 	reader := bytes.NewReader(testdata.Fake1230)
+	var buffer bytes.Buffer
 
-	bufferBytes := make([]byte, 0, 1000)
-	buffer := bytes.NewBuffer(bufferBytes)
+	var config jsonconfig.Config
 
-	err := DisplayMessages(time.Now(), reader, buffer, 0, 0)
+	HandleMessages(time.Now(), reader, &buffer, &config)
 
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	// Pause to allow the channels to drain.
 
-	gotBytes := make([]byte, 1000)
+	time.Sleep(time.Second)
+
+	gotBytes := make([]byte, 2000)
 	n, readError := buffer.Read(gotBytes)
 
 	if readError != nil {

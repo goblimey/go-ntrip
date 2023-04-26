@@ -388,7 +388,7 @@ func (rtcmHandler *Handler) FetchNextMessageFrame(pc *pushback.ByteChannel) (*Me
 	// Phase 4: create a message from the frame and return it.  (This also checks
 	// the CRC.  If that fails the text is returned as a non-RTCM message.)
 
-	return rtcmHandler.getMessage(frame)
+	return rtcmHandler.GetMessage(frame)
 }
 
 // eatUntilStartOfFrame reads bytes from the channel until it encounters
@@ -449,10 +449,10 @@ func (rtcmHandler *Handler) getMessageLengthAndType(bitStream []byte) (uint, int
 	return length, messageType, nil
 }
 
-// getMessage extracts an RTCM3 message from the given bit stream and returns it
+// GetMessage extracts an RTCM3 message from the given bit stream and returns it
 // as an RTC3Message. If the bit stream is empty, it returns an error.  If the data
 // doesn't contain a valid message, it returns a message with type NonRTCMMessage.
-func (rtcmHandler *Handler) getMessage(bitStream []byte) (*Message, error) {
+func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 
 	if len(bitStream) == 0 {
 		return nil, errors.New("zero length message frame")
