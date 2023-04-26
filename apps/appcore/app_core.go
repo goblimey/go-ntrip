@@ -10,6 +10,7 @@ import (
 	fileHandler "github.com/goblimey/go-ntrip/file_handler"
 	"github.com/goblimey/go-ntrip/jsonconfig"
 	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
 type AppCore struct {
@@ -50,7 +51,13 @@ func (appCore *AppCore) HandleMessages() {
 		r := appCore.Conf.WaitAndConnectToInput()
 		reader := bufio.NewReader(r)
 
-		appCore.HandleMessagesUntilEOF(reader)
+		continueFlag := appCore.HandleMessagesUntilEOF(reader)
+
+		if continueFlag == 1 {
+			// Stop processing.  This is to allow a unit test to run this function.
+			// It should never happen in production.
+			break
+		}
 	}
 }
 
@@ -61,7 +68,12 @@ func (appCore *AppCore) HandleMessages() {
 // of the AppCore's channels.  It's assumed that something is listening to
 // each channel and doing something with the messages, for example writing
 // them to a log file.
-func (appCore *AppCore) HandleMessagesUntilEOF(reader *bufio.Reader) {
+//
+// In production the value returned is always 0 (continue).  In test the
+// returned value may be 1 (stop).  If a caller that would normally run
+// indefinitely receives a stop return, it should stop.  This is to allow
+// unit testing of processes that would normally never terminate.
+func (appCore *AppCore) HandleMessagesUntilEOF(reader *bufio.Reader) int {
 
 	// Create a message channel.
 	messageChan := make(chan rtcm.Message)
@@ -87,10 +99,18 @@ func (appCore *AppCore) HandleMessagesUntilEOF(reader *bufio.Reader) {
 		if !more {
 			break
 		}
+
+		if message.MessageType == utils.MessageTypeStop {
+			// We've received the stop message (which should only
+			// happen in testing).  Tell the caller to stop.
+			return 1
+		}
 		for i := range appCore.Channels {
 			if appCore.Channels[i] != nil {
 				appCore.Channels[i] <- message
 			}
 		}
 	}
+
+	return 0
 }

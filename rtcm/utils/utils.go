@@ -8,7 +8,6 @@ import (
 
 // dateLayout defines the layout of dates when they are displayed.  It
 // produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone".
-//
 const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
 
 // StartOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
@@ -21,10 +20,14 @@ const MaxMessageType = 4095
 // the incoming data stream will contains RTCM3 messages interspersed with data
 // in other formats (NMEA, UBX etc).  Any non-RTCM messages in between two
 // RTCM3 messages will be presented as a single non-RTCM message.
-//
 const NonRTCMMessage = -1
 
-// Message types.
+// MessageTypeStop indicates that a message handler should stop.  This should
+// never happen in production.  It's a special facility to allow unit testing
+// of processes that would normally run indefinitely.
+const MessageTypeStop = -2
+
+// RTCM3 Message types.
 const MessageType1005 = 1005 // Base position.
 const MessageTypeGCPB = 1230 // Glonass code/phase bias.
 const MessageTypeMSM4GPS = 1074
@@ -305,7 +308,6 @@ func GetApproxRangeMetres(wholeMillis, fractionalMillis uint) float64 {
 // own list of signals and equivalent wavelengths.  Some of the possible
 // signal IDs are not used and so have no associated wavelength, so the
 // result may be an error.
-//
 func GetSignalWavelength(constellation string, signalID uint) float64 {
 
 	switch constellation {
@@ -326,7 +328,6 @@ func GetSignalWavelength(constellation string, signalID uint) float64 {
 // GetNumberOfSignalCells gets the number of signal cells in the MSM message
 // contained in a bitstream.  The startPosition is the point in the bit stream
 // where the signal cells start.  The bitsPerCell gives the size of each cell.
-//
 func GetNumberOfSignalCells(bitStream []byte, startPosition, bitsPerCell uint) int {
 	// This is used to interpret MSM4 and MSM7 messages.  The cell size is
 	// different for both of those messages but apart from that, the logic is
@@ -552,7 +553,6 @@ func getSignalFrequencyGlonass(signalID uint) float64 {
 
 // getSignalWavelengthGlonass gets the signal carrier wavelength for a GLONASS satellite
 // if it's defined.
-//
 func getSignalWavelengthGlonass(signalID uint) float64 {
 	frequency := getSignalFrequencyGlonass(signalID)
 	if frequency == 0 {
@@ -597,7 +597,6 @@ func getSignalFrequencyBeidou(signalID uint) float64 {
 
 // GetSigWaveLenBD returns the signal carrier wavelength for a Beidou satellite
 // if it's defined.
-//
 func getSignalWavelengthBeidou(signalID uint) float64 {
 	frequency := getSignalFrequencyBeidou(signalID)
 	if frequency == 0 {
