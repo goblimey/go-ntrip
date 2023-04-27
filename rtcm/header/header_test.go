@@ -19,7 +19,7 @@ func TestNew(t *testing.T) {
 	const wantCellMask = 1
 	const wantMessageType = 1074
 	const wantStationID = 1
-	const wantEpochTime = 2
+	const wantTimestamp = 2
 	const wantMultipleMessage = true
 	const wantIssue = 3
 	const wantTransTime = 4
@@ -28,7 +28,7 @@ func TestNew(t *testing.T) {
 	const wantSmoothing = true
 	const wantSmoothingInterval = 7
 
-	gotHeader := New(wantMessageType, wantStationID, wantEpochTime, wantMultipleMessage,
+	gotHeader := New(wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator,
 		wantExternalClockSteeringIndicator, true, wantSmoothingInterval,
 		wantSatelliteMask, wantSignalMask, wantCellMask)
@@ -41,8 +41,8 @@ func TestNew(t *testing.T) {
 		t.Errorf("want %d got %d", wantStationID, gotHeader.StationID)
 	}
 
-	if gotHeader.Timestamp != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotHeader.Timestamp)
+	if gotHeader.Timestamp != wantTimestamp {
+		t.Errorf("want %d got %d", wantTimestamp, gotHeader.Timestamp)
 	}
 
 	if !gotHeader.MultipleMessage {
@@ -52,8 +52,8 @@ func TestNew(t *testing.T) {
 	if gotHeader.IssueOfDataStation != wantIssue {
 		t.Errorf("want %d got %d", wantIssue, gotHeader.IssueOfDataStation)
 	}
-	if gotHeader.Timestamp != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotHeader.Timestamp)
+	if gotHeader.Timestamp != wantTimestamp {
+		t.Errorf("want %d got %d", wantTimestamp, gotHeader.Timestamp)
 	}
 
 	if gotHeader.ClockSteeringIndicator != wantClockSteeringIndicator {
@@ -327,7 +327,7 @@ func TestGetMSMHeader(t *testing.T) {
 	}
 
 	if header.Timestamp != wantHeader.Timestamp {
-		t.Errorf("got epoch time %d, want %d",
+		t.Errorf("got timestamp %d, want %d",
 			header.Timestamp, wantHeader.Timestamp)
 	}
 

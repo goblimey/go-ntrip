@@ -57,9 +57,9 @@ var validMessageFrame = []byte{
 
 var lenValidMessageInBits = len(validMessageFrame) * 8
 
-// maxEpochTime is the value of a GPS, Galileo and Beidou
+// timestampAtEndOfWeek is the value of a GPS, Galileo and Beidou
 // timestamp at the end of the week, just before it rolls over.
-const maxEpochTime uint = (7 * 24 * 3600 * 1000) - 1
+const timestampAtEndOfWeek uint = (7 * 24 * 3600 * 1000) - 1
 
 var logger *log.Logger
 
@@ -109,7 +109,7 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	rtcmHandler := New(time.Now())
 
 	// Test
-	rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
+	rtcmHandler.HandleMessages(ch_source, ch_result)
 
 	// Check.  Read the data back from the channel and check the message type.
 	messages := make([]Message, 0)
@@ -508,7 +508,7 @@ func TestPrepareForDisplayWithRealData(t *testing.T) {
 	rtcmHandler := New(startTime)
 
 	// Test
-	rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
+	rtcmHandler.HandleMessages(ch_source, ch_result)
 
 	// Check.  Read the first message back from the channel and check it.
 	m, ok := <-ch_result
@@ -591,19 +591,19 @@ func TestPrepareForDisplayWithRealData(t *testing.T) {
 	}
 }
 
-// TestGPSEpochTimes tests that New sets up the correct start times
-// for the GPS epochs.
-func TestGPSEpochTimes(t *testing.T) {
+// TestGPSStartTime tests that New sets up the correct start times
+// of the GPS weeks.
+func TestGPSStartTime(t *testing.T) {
 
-	expectedEpochStart :=
+	wantWeekStart :=
 		time.Date(2020, time.August, 1, 23, 59, 60-gpsLeapSeconds, 0, utils.LocationUTC)
 
-	// Sunday 2020/08/02 BST, just after the start of the GPS epoch
+	// Sunday 2020/08/02 BST, just after the start of the GPS week
 	dateTime1 := time.Date(2020, time.August, 2, 1, 0, 0, (60 - gpsLeapSeconds), utils.LocationLondon)
 	rtcm1 := New(dateTime1)
-	if expectedEpochStart != rtcm1.startOfGPSWeek {
+	if wantWeekStart != rtcm1.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
-			expectedEpochStart.Format(utils.DateLayout),
+			wantWeekStart.Format(utils.DateLayout),
 			rtcm1.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
@@ -611,24 +611,24 @@ func TestGPSEpochTimes(t *testing.T) {
 	// Wednesday 2020/08/05
 	dateTime2 := time.Date(2020, time.August, 5, 12, 0, 0, 0, utils.LocationLondon)
 	rtcm2 := New(dateTime2)
-	if expectedEpochStart != rtcm2.startOfGPSWeek {
+	if wantWeekStart != rtcm2.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
-			expectedEpochStart.Format(utils.DateLayout),
+			wantWeekStart.Format(utils.DateLayout),
 			rtcm2.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
 
-	// Sunday 2020/08/02 BST, just before the end of the GPS epoch
+	// Sunday 2020/08/02 BST, just before the end of the GPS week.
 	dateTime3 := time.Date(2020, time.August, 9, 00, 59, 60-gpsLeapSeconds-1, 999999999, utils.LocationLondon)
 	rtcm3 := New(dateTime3)
-	if expectedEpochStart != rtcm3.startOfGPSWeek {
+	if wantWeekStart != rtcm3.startOfGPSWeek {
 		t.Errorf("expected %s result %s\n",
-			expectedEpochStart.Format(utils.DateLayout),
+			wantWeekStart.Format(utils.DateLayout),
 			rtcm3.startOfGPSWeek.Format(utils.DateLayout))
 		return
 	}
 
-	// Sunday 2020/08/02 BST, at the start of the next GPS epoch.
+	// Sunday 2020/08/02 BST, at the start of the next GPS week.
 	dateTime4 := time.Date(2020, time.August, 9, 1, 59, 60-gpsLeapSeconds, 0, utils.LocationParis)
 	startOfNext := time.Date(2020, time.August, 8, 23, 59, 60-gpsLeapSeconds, 0, utils.LocationUTC)
 
@@ -641,16 +641,16 @@ func TestGPSEpochTimes(t *testing.T) {
 	}
 }
 
-// TestBeidouEpochTimes checks that New sets the correct start times
-// for this and the next Beidou epoch.
-func TestBeidouEpochTimes(t *testing.T) {
+// TestBeidouStartTimes checks that New sets the correct start times
+// for this and the next Beidou week.
+func TestBeidouStartTimes(t *testing.T) {
 	// Like GPS time, the Beidou time rolls over every seven days,
 	// but it uses a different number of leap seconds.
 
 	// The first few seconds of Sunday UTC are in the previous Beidou week.
-	expectedStartOfPreviousWeek :=
+	wantStartOfPreviousWeek :=
 		time.Date(2020, time.August, 2, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
-	expectedStartOfThisWeek :=
+	wantStartOfThisWeek :=
 		time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
 	expectedStartOfNextWeek :=
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
@@ -659,27 +659,27 @@ func TestBeidouEpochTimes(t *testing.T) {
 	startTime1 := time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC)
 	rtcm1 := New(startTime1)
 
-	if !expectedStartOfPreviousWeek.Equal(rtcm1.startOfBeidouWeek) {
+	if !wantStartOfPreviousWeek.Equal(rtcm1.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfPreviousWeek.Format(utils.DateLayout), rtcm1.startOfBeidouWeek.Format(utils.DateLayout))
+			wantStartOfPreviousWeek.Format(utils.DateLayout), rtcm1.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// ... and so should this.
 	startTime2 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds-1, 999999999, utils.LocationUTC)
 	rtcm2 := New(startTime2)
 
-	if !expectedStartOfPreviousWeek.Equal(rtcm2.startOfBeidouWeek) {
+	if !wantStartOfPreviousWeek.Equal(rtcm2.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfPreviousWeek.Format(utils.DateLayout), rtcm2.startOfBeidouWeek.Format(utils.DateLayout))
+			wantStartOfPreviousWeek.Format(utils.DateLayout), rtcm2.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// This start time should be in this week.
 	startTime3 := time.Date(2020, time.August, 9, 0, 0, beidouLeapSeconds, 0, utils.LocationUTC)
 	rtcm3 := New(startTime3)
 
-	if !expectedStartOfThisWeek.Equal(rtcm3.startOfBeidouWeek) {
+	if !wantStartOfThisWeek.Equal(rtcm3.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfThisWeek.Format(utils.DateLayout), rtcm3.startOfBeidouWeek.Format(utils.DateLayout))
+			wantStartOfThisWeek.Format(utils.DateLayout), rtcm3.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// This start time should be just at the end of this Beidou week.
@@ -687,9 +687,9 @@ func TestBeidouEpochTimes(t *testing.T) {
 		time.Date(2020, time.August, 16, 0, 0, beidouLeapSeconds-1, 999999999, utils.LocationUTC)
 	rtcm4 := New(startTime4)
 
-	if !expectedStartOfThisWeek.Equal(rtcm4.startOfBeidouWeek) {
+	if !wantStartOfThisWeek.Equal(rtcm4.startOfBeidouWeek) {
 		t.Errorf("expected %s result %s\n",
-			expectedStartOfThisWeek.Format(utils.DateLayout), rtcm4.startOfBeidouWeek.Format(utils.DateLayout))
+			wantStartOfThisWeek.Format(utils.DateLayout), rtcm4.startOfBeidouWeek.Format(utils.DateLayout))
 	}
 
 	// This start time should be just at the start of the next Beidou week.
@@ -703,33 +703,33 @@ func TestBeidouEpochTimes(t *testing.T) {
 	}
 }
 
-// TestGlonassEpochTimes tests that New sets up the correct start time
-// for the Glonass epochs.
-func TestGlonassEpochTimes(t *testing.T) {
+// TestGlonassStartTimes tests that New sets up the correct start time
+// for the Glonass weeks.
+func TestGlonassStartTimes(t *testing.T) {
 
 	// expect 9pm Saturday 1st August - midnight Sunday 2nd August in Russia - Glonass day 0.
-	expectedEpochStart1 :=
+	wantStartTime1 :=
 		time.Date(2020, time.August, 1, 21, 0, 0, 0, utils.LocationUTC)
 
 		// expect Glonass day 0.
-	expectedGlonassDay1 := uint(0)
+	wantGlonassDay1 := uint(0)
 
 	startTime1 :=
 		time.Date(2020, time.August, 2, 5, 0, 0, 0, utils.LocationUTC)
 	rtcm1 := New(startTime1)
-	if expectedEpochStart1 != rtcm1.startOfGlonassDay {
+	if wantStartTime1 != rtcm1.startOfGlonassDay {
 		t.Errorf("expected %s result %s\n",
-			expectedEpochStart1.Format(utils.DateLayout),
+			wantStartTime1.Format(utils.DateLayout),
 			rtcm1.startOfGlonassDay.Format(utils.DateLayout))
 	}
 
-	if expectedGlonassDay1 != rtcm1.glonassDayFromPreviousMessage {
+	if wantGlonassDay1 != rtcm1.glonassDayFromPreviousMessage {
 		t.Errorf("expected %d result %d\n",
-			expectedGlonassDay1, rtcm1.glonassDayFromPreviousMessage)
+			wantGlonassDay1, rtcm1.glonassDayFromPreviousMessage)
 	}
 
 	// 21:00 on Monday 3rd August - 00:00 on Tuesday in Moscow - Glonass day 2.
-	expectedEpochStart2 :=
+	wantStartTime2 :=
 		time.Date(2020, time.August, 3, 21, 0, 0, 0, utils.LocationUTC)
 	// 21:00 on Tuesday 4th August - 00:00 on Wednesday in Moscow - Glonass day 3
 
@@ -740,9 +740,9 @@ func TestGlonassEpochTimes(t *testing.T) {
 	startTime2 :=
 		time.Date(2020, time.August, 3, 22, 59, 59, 999999999, utils.LocationUTC)
 	rtcm2 := New(startTime2)
-	if expectedEpochStart2 != rtcm2.startOfGlonassDay {
+	if wantStartTime2 != rtcm2.startOfGlonassDay {
 		t.Errorf("expected %s result %s\n",
-			expectedEpochStart2.Format(utils.DateLayout),
+			wantStartTime2.Format(utils.DateLayout),
 			rtcm1.startOfGlonassDay.Format(utils.DateLayout))
 	}
 	if expectedGlonassDay2 != rtcm2.glonassDayFromPreviousMessage {
@@ -1112,8 +1112,8 @@ message type 1074 is not an MSM7
 	}
 }
 
-func createHeader(messageType int, epochTime uint) *header.Header {
-	return header.New(messageType, 0, epochTime, false, 0, 0, 0, 0, false, 0, 0, 0, 0)
+func createHeader(messageType int, timestamp uint) *header.Header {
+	return header.New(messageType, 0, timestamp, false, 0, 0, 0, 0, false, 0, 0, 0, 0)
 }
 
 // TestConversionOfTimeToUTC checks that the converting a timestamp to
@@ -1169,7 +1169,7 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 			time.Date(2020, time.August, 9, 00, 00, 14, 0, utils.LocationUTC),
 			0, // Start of the week.
 			time.Date(2020, time.August, 9, 00, 00, 14, 0, utils.LocationUTC),
-			maxEpochTime, // just before end of week.
+			timestampAtEndOfWeek, // just before end of week.
 			time.Date(2020, time.August, 15, 00, 00, 13, 999, utils.LocationUTC),
 			500, // rolled over
 			time.Date(2020, time.August, 16, 00, 00, 14, 0, utils.LocationUTC),
@@ -1391,17 +1391,17 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 	}
 }
 
-// TestParseGlonassEpochTime tests ParseGlonassEpochTime
-func TestParseGlonassEpochTime(t *testing.T) {
+// TestParseGlonassStartTime tests ParseGlonassTimestap
+func TestParseGlonassStartTime(t *testing.T) {
 	// Maximum expected millis - twenty four hours of millis, less 1.
 	const maxMillis = (24 * 3600 * 1000) - 1
 
 	// Day = 0, millis = 0
 	const expectedDay1 uint = 0
 	const expectedMillis1 = 0
-	const epochTime1 = 0
+	const timestamp1 = 0
 
-	day1, millis1, err1 := ParseGlonassTimeStamp(uint(epochTime1))
+	day1, millis1, err1 := ParseGlonassTimeStamp(uint(timestamp1))
 
 	if err1 != nil {
 		t.Error(err1)
@@ -1416,9 +1416,9 @@ func TestParseGlonassEpochTime(t *testing.T) {
 
 	// Day = 0, millis = max
 	const expectedDay2 uint = 0
-	const epochTime2 = maxMillis
+	const timestamp2 = maxMillis
 
-	day2, millis2, err2 := ParseGlonassTimeStamp(uint(epochTime2))
+	day2, millis2, err2 := ParseGlonassTimeStamp(uint(timestamp2))
 
 	if err2 != nil {
 		t.Error(err2)
@@ -1435,9 +1435,9 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	// Day = max, millis = 0
 	const expectedDay3 uint = 6
 	const expectedMillis3 uint = 0
-	const epochTime3 = 6 << 27
+	const timestamp3 = 6 << 27
 
-	day3, millis3, err3 := ParseGlonassTimeStamp(uint(epochTime3))
+	day3, millis3, err3 := ParseGlonassTimeStamp(uint(timestamp3))
 
 	if err3 != nil {
 		t.Error(err3)
@@ -1453,9 +1453,9 @@ func TestParseGlonassEpochTime(t *testing.T) {
 	// Day = max, mills = max..
 	const expectedDay4 uint = 6
 
-	const epochTime4 = 6<<27 | uint(maxMillis)
+	const timestamp4 = 6<<27 | uint(maxMillis)
 
-	day4, millis4, err4 := ParseGlonassTimeStamp(uint(epochTime4))
+	day4, millis4, err4 := ParseGlonassTimeStamp(uint(timestamp4))
 
 	if err4 != nil {
 		t.Error(err4)
@@ -1468,15 +1468,15 @@ func TestParseGlonassEpochTime(t *testing.T) {
 		t.Errorf("expected millis %d result %d", maxMillis, millis4)
 	}
 
-	// These values can't actually happen in a Glonass epoch - the day can only
+	// These values can't actually happen in a Glonass week - the day can only
 	// be up to 6 and the millis only run up to 24hours minus 1 milli.  However.
 	// we'll test the logic anyway.
 	const expectedDay5 uint = 7
 	const expectedMillis5 uint = 0x7ffffff
 
-	const epochTime5 uint = 0x3fffffff // 11 1111 1111 ... (30 bits).
+	const timestamp5 uint = 0x3fffffff // 11 1111 1111 ... (30 bits).
 
-	day5, millis5, err5 := ParseGlonassTimeStamp(uint(epochTime5))
+	day5, millis5, err5 := ParseGlonassTimeStamp(uint(timestamp5))
 
 	if err5 != nil {
 		t.Error(err5)
@@ -1531,7 +1531,7 @@ func TestCheckCRC(t *testing.T) {
 		rtcmHandler := New(time.Now())
 
 		// Test
-		rtcmHandler.HandleMessagesFromChannel(ch_source, ch_result)
+		rtcmHandler.HandleMessages(ch_source, ch_result)
 
 		// Check.  Read the data back from the channel and check the CRC.
 
@@ -1554,7 +1554,7 @@ const wantSignalMask = 7
 const wantCellMask = 1
 const wantMessageType = 1074
 const wantStationID = 1
-const wantEpochTime = 2
+const wantTimestamp = 2
 const wantMultipleMessage = true
 const wantIssue = 3
 const wantTransTime = 4
@@ -1576,7 +1576,7 @@ const wantCNR = 15
 const wantWavelength = 16.0
 
 func createMSM4() *msm4message.Message {
-	hdr := header.New(wantMessageType, wantStationID, wantEpochTime, wantMultipleMessage,
+	hdr := header.New(wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator, wantExternalClockSteeringIndicator,
 		wantSmoothing, wantSmoothingInterval, wantSatelliteMask, wantSignalMask, wantCellMask)
 	sat := msm4satellite.New(wantSatelliteID, wantRangeWhole, wantRangeFractional)

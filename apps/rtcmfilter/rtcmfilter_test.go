@@ -52,7 +52,7 @@ message type 1024 currently cannot be displayed
 
 		rtcmHandler := rtcm.New(time.Now())
 
-		rtcmHandler.HandleMessagesFromChannel(byteChan, messageChan)
+		rtcmHandler.HandleMessages(byteChan, messageChan)
 
 		// Step 2: Create a dummy writer and write the message to it.
 

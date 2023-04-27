@@ -126,7 +126,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 	// slice for each satellite and one inner slice for each observed signal.
 	//
 	// If the multiple message flag is set in the header, the message is one of a set
-	// with the same epoch time and station ID.  Each message in the set contains some
+	// with the same timestamp and station ID.  Each message in the set contains some
 	// of the signals.  If the multiple message flag is not set then we expect the
 	// message to contain all the signals.
 
@@ -357,7 +357,6 @@ func (cell *Cell) RangeInMetres() float64 {
 // PhaseRange combines the range and the phase range from an MSM4
 // message and returns the result in cycles. It returns zero if the input
 // measurements are invalid and an error if the signal is not in use.
-//
 func (cell *Cell) PhaseRange() float64 {
 
 	// In the RTKLIB, the decode_msm4 function uses the range from the

@@ -238,10 +238,10 @@ func New(startTime time.Time) *Handler {
 	return &handler
 }
 
-// HandleMessagesFromChannel reads bytes from ch_in, converts them to RTCM
+// HandleMessages reads bytes from ch_in, converts them to RTCM
 // messages and writes the messages to ch_out.  The caller is responsible
 // for creating and closing both channels.
-func (rtcmHandler *Handler) HandleMessagesFromChannel(ch_in chan byte, ch_out chan Message) {
+func (rtcmHandler *Handler) HandleMessages(ch_in chan byte, ch_out chan Message) {
 
 	// Turn the input channel into a pushback channel.
 	pb := pushback.New(ch_in)
@@ -499,7 +499,7 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 
 	// If the message is an MSM7, get the time (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
-	// station ID followed by the 30-bit epoch time, followed by lots of other
+	// station ID followed by the 30-bit timestamp, followed by lots of other
 	// stuff and finally a 3-byte CRC.  If we get to here then the leader and
 	// CRC are present and the message contains at least a complete header.
 
@@ -634,7 +634,7 @@ func (rtcmHandler *Handler) getTimeFromTimeStamp(messageType int, timestamp uint
 }
 
 // GetUTCFromGPSTime converts a GPS time to UTC, using the start time
-// to find the correct epoch.
+// to find the time of the start of the week.
 func (rtcmHandler *Handler) getUTCFromGPSTime(timestamp uint) (time.Time, error) {
 	// The GPS week starts at midnight at the start of Sunday
 	// but GPS time is ahead of UTC by a few leap seconds, so in
@@ -720,8 +720,8 @@ func (rtcmHandler *Handler) getUTCFromGlonassTime(timestamp uint) (time.Time, er
 
 }
 
-// GetUTCFromGalileoTime converts a Galileo time to UTC, using the same epoch
-// as the start time.
+// GetUTCFromGalileoTime converts a Galileo time to UTC, using the 
+// start time to find the start time of the current week.
 func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, error) {
 	// Galileo follows GPS time, but we keep separate state variables.
 	//
@@ -748,8 +748,8 @@ func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, er
 	return timeFromTimestamp, nil
 }
 
-// GetUTCFromBeidouTime converts a Baidou time to UTC, using the Beidou
-// epoch given by the start time.
+// GetUTCFromBeidouTime converts a Baidou time to UTC, using the 
+// start time to find the time of the start of the current week.
 func (rtcmHandler *Handler) getUTCFromBeidouTime(timestamp uint) (time.Time, error) {
 
 	// The Beidou week starts at midnight at the start of Sunday

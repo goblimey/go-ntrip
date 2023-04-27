@@ -783,7 +783,7 @@ That's because MSM messages contain a
 timestamp.
 Except for GLONASS messages it's a single integer value,
 milliseconds from the constellation's
-epoch, which rolls over every week.
+start of week.
 GLONASS
 uses a two-part integer timestamp containing a day of the week and
 a millisecond offset from the start of day.
@@ -802,8 +802,8 @@ timestamp rolls over to day zero, millisecond zero at midnight at
 the start of Sunday in the Moscow timezone, which is 21:00 on
 Saturday in UTC.  So, if the handler is processing a stream of
 messages which started at 20:45 on a Saturday in UTC, the GLONASS
-timestamp value will be quite large.  At 21:00 the epoch rolls
-over and the timestamps start again at (zero, zero).  Meanwhile
+timestamp value will be quite large.  At 21:00 the week rolls
+over and the timestamps will start again at (zero, zero).  Meanwhile
 the GPS timestamps will also be large and they will roll over to
 zero about three hours later, a few seconds after the next midnight UTC.
 

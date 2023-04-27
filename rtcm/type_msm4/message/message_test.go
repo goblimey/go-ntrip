@@ -18,7 +18,7 @@ const wantSignalMask = 7
 const wantCellMask = 1
 const wantMessageType = 1074
 const wantStationID = 1
-const wantEpochTime = 2
+const wantTimestamp = 2
 const wantMultipleMessage = true
 const wantIssue = 3
 const wantTransTime = 4
@@ -41,7 +41,7 @@ const wantWavelength = 16.0
 
 // createMessage is a helper function.  It creates a message with known contents.
 func createMessage() *Message {
-	h := header.New(wantMessageType, wantStationID, wantEpochTime, wantMultipleMessage,
+	h := header.New(wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator,
 		wantExternalClockSteeringIndicator, true, wantSmoothingInterval,
 		wantSatelliteMask, wantSignalMask, wantCellMask)
@@ -67,8 +67,8 @@ func TestNew(t *testing.T) {
 		t.Errorf("want %d got %d", wantStationID, gotMessage.Header.StationID)
 	}
 
-	if gotMessage.Header.Timestamp != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotMessage.Header.Timestamp)
+	if gotMessage.Header.Timestamp != wantTimestamp {
+		t.Errorf("want %d got %d", wantTimestamp, gotMessage.Header.Timestamp)
 	}
 
 	if !gotMessage.Header.MultipleMessage {
@@ -78,8 +78,8 @@ func TestNew(t *testing.T) {
 	if gotMessage.Header.IssueOfDataStation != wantIssue {
 		t.Errorf("want %d got %d", wantIssue, gotMessage.Header.IssueOfDataStation)
 	}
-	if gotMessage.Header.Timestamp != wantEpochTime {
-		t.Errorf("want %d got %d", wantEpochTime, gotMessage.Header.Timestamp)
+	if gotMessage.Header.Timestamp != wantTimestamp {
+		t.Errorf("want %d got %d", wantTimestamp, gotMessage.Header.Timestamp)
 	}
 
 	if gotMessage.Header.ClockSteeringIndicator != wantClockSteeringIndicator {

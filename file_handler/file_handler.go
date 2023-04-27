@@ -12,7 +12,6 @@ import (
 // interspersed with messages of other formats.  It's assumed that the file is no
 // longer being written to.  (To handle a file which is being written to, such as
 // a USB connection fed by an NTRIP source, see the serial line handler.)
-//
 type Handler struct {
 	RTCMHandler        *rtcm.Handler     // Handles RTCM3 messages ...
 	MessageChan        chan rtcm.Message // ... and issues them on this channel.
@@ -35,7 +34,6 @@ func New(messageChan chan rtcm.Message, retryIntervalOnEOF, eofTimeout time.Dura
 // Handle reads the file and sends the contents to an RTCM handler which extracts
 // RTCM messages and sends them to the message channel. If there is a read error
 // (typically EOF), it's returned.
-//
 func (handler *Handler) Handle(startTime time.Time, reader *bufio.Reader) error {
 
 	// An EOF on a read is not necessarily fatal.  It can just mean that there
@@ -78,7 +76,7 @@ func (handler *Handler) Handle(startTime time.Time, reader *bufio.Reader) error 
 	// Set up an RTCM handler connected to the input and output channels
 	// and start it running.
 	handler.RTCMHandler = rtcm.New(startTime)
-	go handler.RTCMHandler.HandleMessagesFromChannel(byteChan, handler.MessageChan)
+	go handler.RTCMHandler.HandleMessages(byteChan, handler.MessageChan)
 
 	// Read the file and send the data to the byte channel.
 	for {
