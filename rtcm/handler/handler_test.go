@@ -571,9 +571,9 @@ func TestPrepareForDisplayWithRealData(t *testing.T) {
 		return
 	}
 
-	if message.Signals[0][0].SatelliteID != 4 {
+	if message.Signals[0][0].Satellite.ID != 4 {
 		t.Errorf("expected satelliteID 4, got %d",
-			message.Signals[0][0].SatelliteID)
+			message.Signals[0][0].Satellite.ID)
 		return
 	}
 

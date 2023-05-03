@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	msmHeader "github.com/goblimey/go-ntrip/rtcm/header"
-	msm4satellite "github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
+	"github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
@@ -20,24 +20,24 @@ type Cell struct {
 	// (decode_msm4 function) plus other clues from the igs BNC application.
 
 	// SatelliteID is the ID of the satellite from which this signal was received: 1-64.
-	SatelliteID uint
+	// SatelliteID uint
 
-	// SignalID is the ID of the signal that was observed: 1-32.
-	SignalID uint
+	// ID is the ID of the signal that was observed: 1-32.
+	ID uint
 
 	// Wavelength is the wavelength of the signal
 	Wavelength float64
 
-	// RangeWholeMillisFromSatelliteCell is the RangeWholeMillis from the satellite cell -
+	// RangeWholeMillis from the satellite cell is
 	// Whole milliseconds of range 0-255. It's used to calculate the range and the phase
 	// range.  0xff indicates an invalid value, meaning that all range values should be
 	// ignored.
-	RangeWholeMillisFromSatelliteCell uint
+	// RangeWholeMillisFromSatelliteCell uint
 
 	// RangeFractionalMillisFromSatelliteCell is the RangeFractionalMillis value for the
 	// satellite cell.  The units are 1/1024 milliseconds.  The values is used to
 	// calculate the range and phase range.
-	RangeFractionalMillisFromSatelliteCell uint
+	// RangeFractionalMillisFromSatelliteCell uint
 
 	// RangeDelta - int15.  A scaled value representing a small signed delta to be added to
 	// the range values from the satellite to get the range as the transit time of the signal.
@@ -59,61 +59,72 @@ type Cell struct {
 
 	// CarrierToNoiseRatio - uint6.
 	CarrierToNoiseRatio uint
+
+	// The satellite that sent the signal.
+	Satellite *satellite.Cell
 }
 
 // New creates an MSM Signal Cell.
-func New(signalID uint, satelliteCell *msm4satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, wavelength float64) *Cell {
+func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, wavelength float64) *Cell {
 
 	// Default values if satellite is nil.
-	var satelliteID uint = 0
-	var rangeWhole uint = utils.InvalidRange
-	var rangeFractional uint = 0
+	// var satelliteID uint = 0
+	// var rangeWhole uint = utils.InvalidRange
+	// var rangeFractional uint = 0
 
-	if satelliteCell != nil {
-		satelliteID = satelliteCell.SatelliteID
-		rangeWhole = satelliteCell.RangeWholeMillis
-		rangeFractional = satelliteCell.RangeFractionalMillis
-	}
+	// if satelliteCell != nil {
+	// 	satelliteID = satelliteCell.SatelliteID
+	// 	rangeWhole = satelliteCell.RangeWholeMillis
+	// 	rangeFractional = satelliteCell.RangeFractionalMillis
+	// }
 
 	cell := Cell{
-		SatelliteID:                            satelliteID,
-		SignalID:                               signalID,
-		Wavelength:                             wavelength,
-		RangeWholeMillisFromSatelliteCell:      rangeWhole,
-		RangeFractionalMillisFromSatelliteCell: rangeFractional,
-		RangeDelta:                             rangeDelta,
-		PhaseRangeDelta:                        phaseRangeDelta,
-		LockTimeIndicator:                      lockTimeIndicator,
-		HalfCycleAmbiguity:                     halfCycleAmbiguity,
-		CarrierToNoiseRatio:                    cnr}
+		// SatelliteID:                            satelliteID,
+		ID:         signalID,
+		Wavelength: wavelength,
+		// RangeWholeMillisFromSatelliteCell:      rangeWhole,
+		// RangeFractionalMillisFromSatelliteCell: rangeFractional,
+		RangeDelta:          rangeDelta,
+		PhaseRangeDelta:     phaseRangeDelta,
+		LockTimeIndicator:   lockTimeIndicator,
+		HalfCycleAmbiguity:  halfCycleAmbiguity,
+		CarrierToNoiseRatio: cnr,
+		Satellite:           satelliteCell}
 
 	return &cell
 }
 
 // String returns a readable version of a signal cell.
 func (cell *Cell) String() string {
+
+	var satID string
+	if cell.Satellite == nil {
+		satID = "<nil>"
+	} else {
+		satID = fmt.Sprintf("%2d", cell.Satellite.ID)
+	}
 	var rangeM string
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite == nil || cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		rangeM = "invalid"
 	} else {
 		r := cell.RangeInMetres()
 		rangeM = fmt.Sprintf("%.3f", r)
 	}
 	var phaseRange string
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite == nil || cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		phaseRange = "invalid"
 	} else {
 		pr := cell.PhaseRange()
 		phaseRange = fmt.Sprintf("%.3f", pr)
 	}
-	return fmt.Sprintf("%2d %2d {%s, %s, %d, %v, %d}",
-		cell.SatelliteID, cell.SignalID, rangeM, phaseRange,
+	return fmt.Sprintf("%s %2d {%s, %s, %d, %v, %d}",
+		satID, cell.ID, rangeM, phaseRange,
 		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
 		cell.CarrierToNoiseRatio)
 }
 
 // GetSignalCells gets the data from the signal cells of an MSM4 message.
-func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader.Header, satCells []msm4satellite.Cell) ([][]Cell, error) {
+func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader.Header, satCells []satellite.Cell) ([][]Cell, error) {
 	// The third part of the message bit stream is the signal data.  Each satellite can
 	// send many signals, each on a different frequency.  For example, if we observe one
 	// signal from satellite 2, two from satellite 3 and 2 from satellite 15, there will
@@ -272,14 +283,18 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 // This is a helper function for RangeInMetres, exposed for unit testing.
 func (cell *Cell) GetAggregateRange() uint64 {
 
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite == nil {
+		return 0
+	}
+
+	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		return 0
 	}
 
 	if cell.RangeDelta == utils.InvalidRangeDelta {
 		// The range is valid but the delta is not.
-		return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
-			cell.RangeFractionalMillisFromSatelliteCell, 0)
+		return utils.GetScaledRange(cell.Satellite.RangeWholeMillis,
+			cell.Satellite.RangeFractionalMillis, 0)
 	}
 
 	// The delta value is valid.
@@ -290,8 +305,8 @@ func (cell *Cell) GetAggregateRange() uint64 {
 	// using it.  The value may be negative, so multiply rather than shifting bits.
 	delta := cell.RangeDelta * 32
 
-	return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
-		cell.RangeFractionalMillisFromSatelliteCell, delta)
+	return utils.GetScaledRange(cell.Satellite.RangeWholeMillis,
+		cell.Satellite.RangeFractionalMillis, delta)
 }
 
 // GetAggregatePhaseRange takes a header, satellite cell and signal cell, extracts
@@ -304,7 +319,11 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 	// range value in the signal cell is merged with the range values from the
 	// satellite cell.
 
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite == nil {
+		return 0
+	}
+
+	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		return 0
 	}
 
@@ -324,8 +343,8 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 	}
 
 	scaledPhaseRange := utils.GetScaledPhaseRange(
-		cell.RangeWholeMillisFromSatelliteCell,
-		cell.RangeFractionalMillisFromSatelliteCell,
+		cell.Satellite.RangeWholeMillis,
+		cell.Satellite.RangeFractionalMillis,
 		delta,
 	)
 

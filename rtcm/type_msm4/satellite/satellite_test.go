@@ -23,10 +23,10 @@ func TestNew(t *testing.T) {
 		Want             Cell
 	}{
 		{"MSM4, all valid", 1, rangeWhole, rangeFractional,
-			Cell{SatelliteID: 1,
+			Cell{ID: 1,
 				RangeWholeMillis: 1, RangeFractionalMillis: 2}},
 		{"MSM4 with invalid range", 2, utils.InvalidRange, rangeFractional,
-			Cell{SatelliteID: 2,
+			Cell{ID: 2,
 				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional}},
 	}
 	for _, td := range testData {
@@ -53,9 +53,9 @@ func TestGetSatelliteCells(t *testing.T) {
 	const startPosition = 16
 
 	want := []Cell{
-		Cell{SatelliteID: satelliteID1,
+		Cell{ID: satelliteID1,
 			RangeWholeMillis: 0x81, RangeFractionalMillis: 0},
-		Cell{SatelliteID: satelliteID2,
+		Cell{ID: satelliteID2,
 			RangeWholeMillis: 1, RangeFractionalMillis: 1023},
 	}
 

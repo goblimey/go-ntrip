@@ -112,9 +112,9 @@ func TestNew(t *testing.T) {
 		t.Errorf("want 1 satellite, got %d", len(gotMessage.Satellites))
 	}
 
-	if gotMessage.Satellites[0].SatelliteID != wantSatelliteID {
+	if gotMessage.Satellites[0].ID != wantSatelliteID {
 		t.Errorf("want satelliteID %d, got %d",
-			wantSatelliteID, gotMessage.Satellites[0].SatelliteID)
+			wantSatelliteID, gotMessage.Satellites[0].ID)
 	}
 
 	if gotMessage.Satellites[0].RangeWholeMillis != wantRangeWhole {
@@ -137,29 +137,29 @@ func TestNew(t *testing.T) {
 		t.Errorf("want 1 signal, got %d", len(gotMessage.Signals[0]))
 	}
 
-	if gotMessage.Signals[0][0].SatelliteID != wantSatelliteID {
+	if gotMessage.Signals[0][0].Satellite.ID != wantSatelliteID {
 		t.Errorf("want satelliteID %d, got %d",
-			wantSatelliteID, gotMessage.Signals[0][0].SatelliteID)
+			wantSatelliteID, gotMessage.Signals[0][0].Satellite.ID)
 	}
 
-	if gotMessage.Signals[0][0].SignalID != wantSignalID {
+	if gotMessage.Signals[0][0].ID != wantSignalID {
 		t.Errorf("want signalID %d, got %d",
-			wantSignalID, gotMessage.Signals[0][0].SignalID)
+			wantSignalID, gotMessage.Signals[0][0].ID)
 	}
 
-	if gotMessage.Signals[0][0].SignalID != wantSignalID {
+	if gotMessage.Signals[0][0].ID != wantSignalID {
 		t.Errorf("want signalID %d, got %d",
-			wantSignalID, gotMessage.Signals[0][0].SignalID)
+			wantSignalID, gotMessage.Signals[0][0].ID)
 	}
 
-	if gotMessage.Signals[0][0].RangeWholeMillisFromSatelliteCell != wantRangeWhole {
+	if gotMessage.Signals[0][0].Satellite.RangeWholeMillis != wantRangeWhole {
 		t.Errorf("want range whole %d, got %d",
-			wantRangeWhole, gotMessage.Signals[0][0].RangeWholeMillisFromSatelliteCell)
+			wantRangeWhole, gotMessage.Signals[0][0].Satellite.RangeWholeMillis)
 	}
 
-	if int(gotMessage.Signals[0][0].RangeFractionalMillisFromSatelliteCell) != int(wantRangeFractional) {
+	if int(gotMessage.Signals[0][0].Satellite.RangeFractionalMillis) != int(wantRangeFractional) {
 		t.Errorf("want range fractional %d, got %d",
-			wantRangeFractional, gotMessage.Signals[0][0].RangeFractionalMillisFromSatelliteCell)
+			wantRangeFractional, gotMessage.Signals[0][0].Satellite.RangeFractionalMillis)
 	}
 
 	if gotMessage.Signals[0][0].RangeDelta != wantRangeDelta {
@@ -309,9 +309,9 @@ func TestGetMessage(t *testing.T) {
 		t.Errorf("want 1 satellite bit got %d", len(message.Satellites))
 	}
 
-	if message.Satellites[0].SatelliteID != 4 {
+	if message.Satellites[0].ID != 4 {
 		t.Errorf("want satellite ID 4 got %d",
-			message.Satellites[0].SatelliteID)
+			message.Satellites[0].ID)
 	}
 
 	if message.Satellites[0].RangeWholeMillis != wantWholeMillis {
@@ -333,40 +333,40 @@ func TestGetMessage(t *testing.T) {
 		t.Errorf("want 2 got %d", len(message.Signals[0]))
 	}
 
-	if message.Signals[0][0].SatelliteID != 4 {
-		t.Errorf("want 4 got %d", message.Signals[0][0].SatelliteID)
+	if message.Signals[0][0].Satellite.ID != 4 {
+		t.Errorf("want 4 got %d", message.Signals[0][0].Satellite.ID)
 	}
 
-	if message.Signals[0][0].SignalID != 2 {
-		t.Errorf("want 2 got %d", message.Signals[0][0].SignalID)
+	if message.Signals[0][0].ID != 2 {
+		t.Errorf("want 2 got %d", message.Signals[0][0].ID)
 	}
 
-	if message.Signals[0][1].SatelliteID != 4 {
-		t.Errorf("want 4 got %d", message.Signals[0][1].SatelliteID)
+	if message.Signals[0][1].Satellite.ID != 4 {
+		t.Errorf("want 4 got %d", message.Signals[0][1].Satellite.ID)
 	}
 
-	if message.Signals[0][1].SignalID != 16 {
-		t.Errorf("want 16 got %d", message.Signals[0][1].SignalID)
+	if message.Signals[0][1].ID != 16 {
+		t.Errorf("want 16 got %d", message.Signals[0][1].ID)
 	}
 
-	if message.Signals[0][0].RangeWholeMillisFromSatelliteCell != wantWholeMillis {
+	if message.Signals[0][0].Satellite.RangeWholeMillis != wantWholeMillis {
 		t.Errorf("want %d got %d",
-			wantWholeMillis, message.Signals[0][0].RangeWholeMillisFromSatelliteCell)
+			wantWholeMillis, message.Signals[0][0].Satellite.RangeWholeMillis)
 	}
 
-	if message.Signals[0][0].RangeFractionalMillisFromSatelliteCell != wantFractionalMillis {
+	if message.Signals[0][0].Satellite.RangeFractionalMillis != wantFractionalMillis {
 		t.Errorf("want %d got %d",
-			wantFractionalMillis, message.Signals[0][0].RangeFractionalMillisFromSatelliteCell)
+			wantFractionalMillis, message.Signals[0][0].Satellite.RangeFractionalMillis)
 	}
 
-	if message.Signals[0][1].RangeWholeMillisFromSatelliteCell != wantWholeMillis {
+	if message.Signals[0][1].Satellite.RangeWholeMillis != wantWholeMillis {
 		t.Errorf("want 0x%x got 0x%x",
-			wantWholeMillis, message.Signals[0][0].RangeWholeMillisFromSatelliteCell)
+			wantWholeMillis, message.Signals[0][0].Satellite.RangeWholeMillis)
 	}
 
-	if message.Signals[0][1].RangeFractionalMillisFromSatelliteCell != wantFractionalMillis {
+	if message.Signals[0][1].Satellite.RangeFractionalMillis != wantFractionalMillis {
 		t.Errorf("want %d got %d",
-			wantFractionalMillis, message.Signals[0][1].RangeFractionalMillisFromSatelliteCell)
+			wantFractionalMillis, message.Signals[0][1].Satellite.RangeFractionalMillis)
 	}
 
 	if message.Signals[0][0].RangeDelta != 1024 {

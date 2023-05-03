@@ -4,17 +4,16 @@
 // approximate (rough) range, the extended satellite information and the
 // rough phase range rate. The rough range is expressed in light milliseconds,
 // ie the  approximate transit time of the signals from the satellite to the
-// GPS device in whole milliseconds and fractional milliseconds.  The 
+// GPS device in whole milliseconds and fractional milliseconds.  The
 // fractional value is ten bits and is in units of 1/1024 seconds.
 //
-// The real transit time of each signal can be slightly different due to factors 
-// such as ionospheric distortion.  Each signal cell contains a small delta which 
+// The real transit time of each signal can be slightly different due to factors
+// such as ionospheric distortion.  Each signal cell contains a small delta which
 // is added to the rough value given here to give the transit time of that signal.
-// The satellite cell also contains two other delta values.  The phase range 
+// The satellite cell also contains two other delta values.  The phase range
 // delta is combined with the satellite range value in a similar way to the range
-// delta.  The signal data also contains a phase range rate delta value which is 
+// delta.  The signal data also contains a phase range rate delta value which is
 // used to correct the rough phase rang rate value.
-//
 package satellite
 
 import (
@@ -42,13 +41,12 @@ const CellLengthInBits = lenWholeMillis + lenExtendedInfo + lenFractionalMillis 
 
 // Cell holds the data from one satellite cell from a type 7 Multiple Signal Message.
 // (Message type 1077, 1087 ...).
-//
 type Cell struct {
 	// The field names, types and sizes and invalid values are shown in comments
 	// in rtklib rtcm3.c - see the function decode_msm7().
 
-	// SatelliteID is the satellite ID, 1-64.
-	SatelliteID uint
+	// ID is the satellite ID, 1-64.
+	ID uint
 
 	// RangeWholeMillis - uint8 - the number of integer milliseconds in the
 	// GNSS Satellite range (ie the transit time of the signals).  0xff
@@ -76,7 +74,7 @@ type Cell struct {
 func New(id, wholeMillis, fractionalMillis, extendedInfo uint, phaseRangeRate int) *Cell {
 
 	cell := Cell{
-		SatelliteID:           id,
+		ID:                    id,
 		RangeWholeMillis:      wholeMillis,
 		RangeFractionalMillis: fractionalMillis,
 		ExtendedInfo:          extendedInfo,
@@ -105,13 +103,12 @@ func (cell *Cell) String() string {
 		phaseRangeRate = fmt.Sprintf("%d", cell.PhaseRangeRate)
 	}
 	return fmt.Sprintf("%2d {%s, %d, %s}",
-		cell.SatelliteID, approxRange, cell.ExtendedInfo, phaseRangeRate)
+		cell.ID, approxRange, cell.ExtendedInfo, phaseRangeRate)
 }
 
 // GetSatelliteCells extracts the satellite cell data from an MSM7 message.
 // It returns a slice of cell data.  If the bitstream is not long enough to
 // contain the message, it returns an error.
-//
 func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites []uint) ([]Cell, error) {
 	// The bitStream contains the variable length header, the satellite cells and
 	// then the signal cells.  startOfSatelliteData gives the bit position of the

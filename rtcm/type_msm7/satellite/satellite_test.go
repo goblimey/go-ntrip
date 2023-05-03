@@ -30,15 +30,15 @@ func TestNew(t *testing.T) {
 		Want             Cell // expected result
 	}{
 		{"MSM7 all valid", 3, rangeWhole, rangeFractional, extendedInfo, phaseRangeRate,
-			Cell{SatelliteID: 3,
+			Cell{ID: 3,
 				RangeWholeMillis: rangeWhole, RangeFractionalMillis: rangeFractional,
 				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate}},
 		{"MSM7 with invalid range", 4, utils.InvalidRange, rangeFractional, extendedInfo, phaseRangeRate,
-			Cell{SatelliteID: 4,
+			Cell{ID: 4,
 				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional,
 				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate}},
 		{"MSM7 with invalid range and phase range rate", 5, utils.InvalidRange, rangeFractional, extendedInfo, invalidPhaseRangeRate,
-			Cell{SatelliteID: 5,
+			Cell{ID: 5,
 				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional,
 				ExtendedInfo: extendedInfo, PhaseRangeRate: invalidPhaseRangeRate}},
 	}
@@ -72,10 +72,10 @@ func TestGetSatelliteCells(t *testing.T) {
 	const startPosition = 32 // byte 4.
 
 	want := []Cell{
-		Cell{SatelliteID: satelliteID1,
+		Cell{ID: satelliteID1,
 			RangeWholeMillis: 0x81, RangeFractionalMillis: 0x201,
 			ExtendedInfo: 9, PhaseRangeRate: -1},
-		Cell{SatelliteID: satelliteID2,
+		Cell{ID: satelliteID2,
 			RangeWholeMillis: 1, RangeFractionalMillis: 1,
 			ExtendedInfo: 6, PhaseRangeRate: 4097},
 	}

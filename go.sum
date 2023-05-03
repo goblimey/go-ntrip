@@ -4,5 +4,7 @@ github.com/goblimey/go-ntrip/rtcm v0.0.0-20210805101218-5225a154e8da h1:uqEFIHDC
 github.com/goblimey/go-ntrip/rtcm v0.0.0-20210805101218-5225a154e8da/go.mod h1:eLdBuX4QQlZNvXeuwcZL+KjXaDTxSys2Nym3DALFFUg=
 github.com/goblimey/go-tools v0.0.10 h1:uB625XRmYT/Pkov7XQCfYN7J6sfsHdGdngZ0sHnbjY8=
 github.com/goblimey/go-tools v0.0.10/go.mod h1:xj+Lwg218Sy2BpQs1+S3k/7XUBBl0s8b3L1OwfNFRHw=
+github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=
+github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=

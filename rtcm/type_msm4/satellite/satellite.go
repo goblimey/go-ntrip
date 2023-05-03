@@ -27,13 +27,12 @@ const CellLengthInBits = lenWholeMillis + lenFractionalMillis
 
 // Cell holds the data for one satellite from an MSM message,
 // type MSM4 (message type 1074, 1084 ...).
-//
 type Cell struct {
 	// The field names, types and sizes and invalid values are shown in comments
 	// in rtklib rtcm3.c - see the function decode_msm7().
 
-	// SatelliteID is the satellite ID, 1-64.
-	SatelliteID uint
+	// ID is the satellite ID, 1-64.
+	ID uint
 
 	// RangeWholeMillis - uint8 - the number of integer milliseconds in the
 	// GNSS Satellite range (ie the transit time of the signals).  0xff
@@ -50,7 +49,7 @@ type Cell struct {
 func New(id, wholeMillis, fractionalMillis uint) *Cell {
 
 	cell := Cell{
-		SatelliteID:           id,
+		ID:                    id,
 		RangeWholeMillis:      wholeMillis,
 		RangeFractionalMillis: fractionalMillis,
 	}
@@ -69,13 +68,12 @@ func (cell *Cell) String() string {
 		approxRange = fmt.Sprintf("%.3f", rangeMillis)
 	}
 
-	return fmt.Sprintf("%2d {%s}", cell.SatelliteID, approxRange)
+	return fmt.Sprintf("%2d {%s}", cell.ID, approxRange)
 }
 
 // GetSatelliteCells extracts the satellite cell data from an MSM4 message.
 // It returns a slice of cell data.  If the bitstream is not long enough to
 // contain the message, it returns an error.
-//
 func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites []uint) ([]Cell, error) {
 	// The bitStream contains the variable length header, the satellite cells and
 	// then the signal cells.  startOfSatelliteData gives the bit position of the

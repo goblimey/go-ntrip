@@ -48,33 +48,11 @@ type Cell struct {
 	// Field names, sizes, invalid values etc are derived from rtklib rtcm3.c
 	// (decode_msm7 function) plus other clues from the igs BNC application.
 
-	// SatelliteID is the satellite ID, 1-64.
-	SatelliteID uint
-
-	// SignalID is the ID of the signal, 1-32.
-	SignalID uint
+	// ID is the ID of the signal, 1-32.
+	ID uint
 
 	// Wavelength is the wavelength of the signal
 	Wavelength float64
-
-	// RangeWholeMillisFromSatelliteCell is the RangeWholeMillis from the satellite cell -
-	// Whole milliseconds of range 0-255. It's used to calculate the range and the phase
-	// range.  0xff indicates an invalid value, meaning that all range values should be
-	// ignored.
-	RangeWholeMillisFromSatelliteCell uint
-
-	// RangeFractionalMillisFromSatelliteCell is the RangeFractionalMillis value for the
-	// satellite cell.  The units are 1/1024 milliseconds.  The values is used to
-	// calculate the range and phase range.
-	RangeFractionalMillisFromSatelliteCell uint
-
-	// PhaseRangeRateFromSatelliteCell is the PhaseRangeRate value copied from the satellite
-	// cell.  An int14 value in units of one millisecond.  Invalid if the top bit is set and
-	// the other bits are zero (-8192).  Combining this with the signal's PhaseRangeRateDelta
-	// value gives the phase range rate in light milliseconds.  According to Blewitt's paper,
-	// the phase range rate is the velocity at which the satellite is moving towards (if
-	// positive) or away from (if negative) the receiving GPS device.
-	PhaseRangeRateFromSatelliteCell int
 
 	// RangeDelta - int20.  A scaled value representing a small signed delta to be added to
 	// the range values from the satellite to get the range as the transit time of the signal.
@@ -102,37 +80,23 @@ type Cell struct {
 	// signal's phase range rate is derived by scaling this (positive or negative) delta and
 	// adding it to the approximate value from the satellite cell.
 	PhaseRangeRateDelta int
+
+	Satellite *satellite.Cell
 }
 
 // New creates an MSM7 Signal Cell.
 func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, phaseRangeRateDelta int, wavelength float64) *Cell {
 
-	// Default values if satellite is nil.
-	var satelliteID uint = 0
-	var rangeWhole uint = utils.InvalidRange
-	var rangeFractional uint = 0
-	var phaseRangeRate int = InvalidPhaseRangeRate
-
-	if satelliteCell != nil {
-		satelliteID = satelliteCell.SatelliteID
-		rangeWhole = satelliteCell.RangeWholeMillis
-		rangeFractional = satelliteCell.RangeFractionalMillis
-		phaseRangeRate = satelliteCell.PhaseRangeRate
-	}
-
 	cell := Cell{
-		SatelliteID:                            satelliteID,
-		SignalID:                               signalID,
-		Wavelength:                             wavelength,
-		RangeWholeMillisFromSatelliteCell:      rangeWhole,
-		RangeFractionalMillisFromSatelliteCell: rangeFractional,
-		PhaseRangeRateFromSatelliteCell:        phaseRangeRate,
-		RangeDelta:                             rangeDelta,
-		PhaseRangeDelta:                        phaseRangeDelta,
-		LockTimeIndicator:                      lockTimeIndicator,
-		HalfCycleAmbiguity:                     halfCycleAmbiguity,
-		CarrierToNoiseRatio:                    cnr,
-		PhaseRangeRateDelta:                    phaseRangeRateDelta,
+		ID:                  signalID,
+		Wavelength:          wavelength,
+		RangeDelta:          rangeDelta,
+		PhaseRangeDelta:     phaseRangeDelta,
+		LockTimeIndicator:   lockTimeIndicator,
+		HalfCycleAmbiguity:  halfCycleAmbiguity,
+		CarrierToNoiseRatio: cnr,
+		PhaseRangeRateDelta: phaseRangeRateDelta,
+		Satellite:           satelliteCell,
 	}
 
 	return &cell
@@ -142,7 +106,7 @@ func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDel
 func (cell *Cell) String() string {
 	var rangeMillisecs string
 	var phaseRangeMillisecs string
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		rangeMillisecs = "invalid"
 		phaseRangeMillisecs = "invalid"
 	} else {
@@ -151,14 +115,14 @@ func (cell *Cell) String() string {
 	}
 
 	var phaseRangeRateMillisecs string
-	if cell.PhaseRangeRateFromSatelliteCell == InvalidPhaseRangeRate {
+	if cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate {
 		phaseRangeRateMillisecs = "invalid"
 	} else {
 		phaseRangeRateMillisecs = fmt.Sprintf("%.3f", cell.PhaseRangeRate())
 	}
 
 	return fmt.Sprintf("%2d %2d {%s, %s, %d, %v, %d, %s}",
-		cell.SatelliteID, cell.SignalID, rangeMillisecs, phaseRangeMillisecs,
+		cell.Satellite.ID, cell.ID, rangeMillisecs, phaseRangeMillisecs,
 		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
 		cell.CarrierToNoiseRatio, phaseRangeRateMillisecs)
 }
@@ -175,19 +139,23 @@ func (cell *Cell) String() string {
 // This is a helper function for RangeInMetres, exposed for unit testing.
 func (cell *Cell) GetAggregateRange() uint64 {
 
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite == nil {
+		return 0
+	}
+
+	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		return 0
 	}
 
 	if cell.RangeDelta == InvalidRangeDelta {
 		// The range is valid but the delta is not.
-		return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
-			cell.RangeFractionalMillisFromSatelliteCell, 0)
+		return utils.GetScaledRange(cell.Satellite.RangeWholeMillis,
+			cell.Satellite.RangeFractionalMillis, 0)
 	}
 
 	// The delta value is valid.
-	return utils.GetScaledRange(cell.RangeWholeMillisFromSatelliteCell,
-		cell.RangeFractionalMillisFromSatelliteCell, cell.RangeDelta)
+	return utils.GetScaledRange(cell.Satellite.RangeWholeMillis,
+		cell.Satellite.RangeFractionalMillis, cell.RangeDelta)
 }
 
 // RangeInMetres gives the distance from the satellite to the GPS device derived from
@@ -214,7 +182,6 @@ func (cell *Cell) RangeInMetres() float64 {
 // PhaseRange combines the range and the phase range from an MSM7
 // message and returns the result in cycles. It returns zero if the input
 // measurements are invalid and an error if the signal is not in use.
-//
 func (cell *Cell) PhaseRange() float64 {
 
 	// In the RTKLIB, the decode_msm7 function uses the range from the
@@ -254,7 +221,6 @@ func (cell *Cell) PhaseRange() float64 {
 // value in the satellite cell is invalid, the result is zero.  If the delta
 // in the signal cell is invalid, the result is based on the rate value in the
 // satellite.
-//
 func (cell *Cell) PhaseRangeRate() float64 {
 
 	// Blewitt's paper says that the phase range rate is the rate at which the
@@ -296,7 +262,11 @@ func (cell *Cell) GetAggregatePhaseRangeRate() int64 {
 
 	// This is similar to getAggregateRange  but for the phase range rate.
 
-	if cell.PhaseRangeRateFromSatelliteCell == InvalidPhaseRangeRate {
+	if cell.Satellite == nil {
+		return 0
+	}
+
+	if cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate {
 		return 0
 	}
 
@@ -306,7 +276,7 @@ func (cell *Cell) GetAggregatePhaseRangeRate() int64 {
 		delta = cell.PhaseRangeRateDelta
 	}
 
-	return utils.GetScaledPhaseRangeRate(cell.PhaseRangeRateFromSatelliteCell, delta)
+	return utils.GetScaledPhaseRangeRate(cell.Satellite.PhaseRangeRate, delta)
 }
 
 // GetSignalCells gets the data from the signal cells of an MSM7 message.
@@ -456,7 +426,7 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 	// range value in the signal cell is merged with the range values fromthe
 	// satellite cell.
 
-	if cell.RangeWholeMillisFromSatelliteCell == utils.InvalidRange {
+	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		return 0
 	}
 
@@ -471,8 +441,8 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 	}
 
 	scaledPhaseRange := utils.GetScaledPhaseRange(
-		cell.RangeWholeMillisFromSatelliteCell,
-		cell.RangeFractionalMillisFromSatelliteCell,
+		cell.Satellite.RangeWholeMillis,
+		cell.Satellite.RangeFractionalMillis,
 		delta,
 	)
 
