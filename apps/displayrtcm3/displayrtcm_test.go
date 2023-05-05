@@ -135,6 +135,7 @@ message type 1230, frame length 14
 00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
 
 (Message type 1230 - GLONASS code-phase biases - don't know how to decode this)
+
 `
 
 	reader := bytes.NewReader(testdata.Fake1230)
