@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
@@ -97,15 +96,23 @@ var gpsTimeOffset time.Duration = time.Duration(-1*gpsLeapSeconds) * time.Second
 var glonassTimeOffset = time.Duration(-1*3) * time.Hour
 
 // beidouTimeOffset is the offset to convert a BeiDou time value to
-// UTC.  Currently (Jan 2020) Beidou is 14 seconds behind UTC.
-var beidouLeapSeconds = 14
+// UTC.  UTC is based on International Atomic Time (TAI):
+// https://www.timeanddate.com/time/international-atomic-time.html.
+//
+// This reference from November 2013 compares Beidout Time (BDT) with
+// TAI: https://www.unoosa.org/pdf/icg/2016/Beidou-Timescale2016.pdf.
+//
+// "BDT is a uniform scale and is 33 seconds behind TAI"
+//
+// HOWEVER the rtklib software (decode_msm_header) says that BDT is
+// 14 seconds ahead of GPS time, which is 18 seconds behind UTC,
+// meaning that BDT is 4 seconds behind UTC.  Analysis of real data
+// confirms that.
+var beidouLeapSeconds = -4
 var beidouTimeOffset = time.Duration(beidouLeapSeconds) * time.Second
 
 // Handler is the object used to fetch and analyse RTCM3 messages.
 type Handler struct {
-
-	// logger is the logger (supplied via New).
-	logger *log.Logger
 
 	// These dates are used to interpret the timestamps in RTCM3
 	// messages.
@@ -125,6 +132,10 @@ type Handler struct {
 	// startOfThisGPSWeek is the time in UTC of the start of
 	// this GPS week.
 	startOfBeidouWeek time.Time
+
+	// These dates are used to detect the timestamp rolling over into the
+	// next period.  (The strategy assumes that the time gap between
+	// messages is short.)
 
 	// timestampFromPreviousGPSMessage is the timestamp of the previous GPS
 	// multiple signal message (MSM).
@@ -201,10 +212,7 @@ func New(startTime time.Time) *Handler {
 		timestampFromPreviousGalileoMessage: timestampFromPreviousGalileoMessage,
 	}
 
-	// Beidou.
-	// Get the start of this Beidou week.  Despite
-	// https://www.unoosa.org/pdf/icg/2016/Beidou-Timescale2016.pdf
-	// the correct offset appears to be +14 seconds!!!
+	// Get the start of this Beidou week.
 
 	handler.startOfBeidouWeek = startOfWeekUTC.Add(beidouTimeOffset)
 
@@ -720,7 +728,7 @@ func (rtcmHandler *Handler) getUTCFromGlonassTime(timestamp uint) (time.Time, er
 
 }
 
-// GetUTCFromGalileoTime converts a Galileo time to UTC, using the 
+// GetUTCFromGalileoTime converts a Galileo time to UTC, using the
 // start time to find the start time of the current week.
 func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, error) {
 	// Galileo follows GPS time, but we keep separate state variables.
@@ -748,7 +756,7 @@ func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, er
 	return timeFromTimestamp, nil
 }
 
-// GetUTCFromBeidouTime converts a Baidou time to UTC, using the 
+// GetUTCFromBeidouTime converts a Baidou time to UTC, using the
 // start time to find the time of the start of the current week.
 func (rtcmHandler *Handler) getUTCFromBeidouTime(timestamp uint) (time.Time, error) {
 

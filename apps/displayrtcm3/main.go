@@ -243,7 +243,7 @@ func DisplayMessages(messageChan chan rtcm.Message, writer io.Writer) error {
 			return nil
 		}
 		// Decode the message.  (The result is very verbose!)
-		display := message.String()
+		display := message.String() + "\n"
 		_, writeError := writer.Write([]byte(display))
 		if writeError != nil {
 			return writeError
