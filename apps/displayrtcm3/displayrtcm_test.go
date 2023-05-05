@@ -89,6 +89,7 @@ message type 1005 - Base Station Information
 stationID 2, ITRF realisation year 3, ignored 0xf,
 x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
 ECEF coords in metres (12.3456, 23.4567, 34.5678)
+
 `
 
 	rtcmHandler := rtcm.New(time.Now())
