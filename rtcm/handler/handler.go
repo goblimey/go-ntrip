@@ -86,10 +86,10 @@ const glonassDayBitMask = 0x38000000 // 0011 1000 0000 0000 0000 0000 0000 0000
 // in seconds, correct from the start of 2017/01/01.  An extra leap
 // second may be added every four years.  The start of 2021 was a
 // candidate for adding another leap second but it was not necessary.
-const gpsLeapSeconds = 18
+const gpsLeapSeconds = -18
 
 // gpsTimeOffset is the offset to convert a GPS time to UTC.
-var gpsTimeOffset time.Duration = time.Duration(-1*gpsLeapSeconds) * time.Second
+var gpsTimeOffset time.Duration = time.Duration(gpsLeapSeconds) * time.Second
 
 // glonassTimeOffset is the offset to convert Glonass time to UTC.
 // Glonass is currently 3 hours ahead of UTC.
@@ -158,72 +158,87 @@ type Handler struct {
 // identify which week the times in the messages refer to.
 func New(startTime time.Time) *Handler {
 
+	// GPS, Galileo and Beidou.  The week for each starts a few leap seconds
+	// before midnight at the end of Saturday in UTC so most of Saturday UTC
+	// is the end of one GPS week but the last few seconds are the beginning
+	// of the next.
+
+	// Get midnight at the start of last Sunday, Sunday next and the Sunday
+	// before.  The start of each week is an offset from one of these.
+	// Note:  the last few seconds of Saturday are, in effect, Sunday
+	// according to GPS and Beidou.
+
 	// Convert the start date to UTC.
 	startTime = startTime.In(utils.LocationUTC)
 
-	// Get the start of last Sunday in UTC. (If today is Sunday, the start
-	// of today.)
+	// Shift the start time forward by the number of leap seconds (so if it's
+	// in the last few seconds of Saturday we get a time in Sunday).
+	gpsShift := time.Duration(-1*gpsLeapSeconds) * time.Second
+	gpsShiftedStartTime := startTime.Add(gpsShift)
+	beidouShift := time.Duration(-1*beidouLeapSeconds) * time.Second
+	beidouShiftedStartTime := startTime.Add(beidouShift)
 
-	startOfWeekUTC := getStartOfLastSundayUTC(startTime)
+	// Find last Sunday from the shifted start time (which may be the same day).
+	gpsMidnightLastSunday := getStartOfLastSundayUTC(gpsShiftedStartTime)
+	beidouMidnightLastSunday := getStartOfLastSundayUTC(beidouShiftedStartTime)
 
-	// GPS.  The GPS week starts gpsLeapSeconds before midnight at the
-	// start of Sunday in UTC, ie on Saturday just before midnight.  So
-	// most of Saturday UTC is the end of one GPS week but the last few
-	// seconds are the beginning of the next.
-	//
-	var startOfGalileoWeek time.Time
-	var startOfGPSWeek time.Time
-	if startTime.Weekday() == time.Saturday {
-		// This is saturday, either in the old GPS week or the new one.
-		// Get the time when the new GPS week starts (or started).
-		sunday := startTime.AddDate(0, 0, 1)
-		midnightNextSunday := getStartOfLastSundayUTC(sunday)
-		gpsWeekStart := midnightNextSunday.Add(gpsTimeOffset)
-		if startTime.Equal(gpsWeekStart) || startTime.After(gpsWeekStart) {
-			// It's Saturday in the first few seconds of a new GPS week
-			startOfGPSWeek = gpsWeekStart
-			// Galileo keeps GPS time.
-			startOfGalileoWeek = gpsWeekStart
+	// Crank back a few seconds to get the start of the GPS and Beidou weeks.
+	startOfGPSWeek := gpsMidnightLastSunday.Add(gpsTimeOffset)
+	// gpsMidnightNextSunday := gpsStartOfWeek.AddDate(0, 0, 7)
+	startOfBeidouWeek := beidouMidnightLastSunday.Add(beidouTimeOffset)
+	// beidouMidnightNextSunday := beidouMidnightLastSunday.AddDate(0, 0, 7)
 
-		} else {
-			// It's Saturday at the end of a GPS week.
-			midnightLastSunday := getStartOfLastSundayUTC(startTime)
-			startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
-			// Galileo keeps GPS time.
-			startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
-		}
-	} else {
-		// It's not Saturday.  The GPS week started just before midnight
-		// at the end of last Saturday.
-		midnightLastSunday := getStartOfLastSundayUTC(startTime)
-		startOfGPSWeek = midnightLastSunday.Add(gpsTimeOffset)
-		// Galileo keeps GPS time
-		startOfGalileoWeek = midnightLastSunday.Add(gpsTimeOffset)
-	}
+	// midnightTheSundayBefore := gpsStartOfWeek.AddDate(0, 0, -7)
 
-	timestampFromPreviousGPSMessage := (uint(startTime.Sub(startOfGPSWeek).Milliseconds()))
+	// var startOfGalileoWeek time.Time
+	// var startOfGPSWeek time.Time
+	// var startOfBeidouWeek time.Time
+
+	// if startTime.Weekday() == time.Saturday {
+	// 	// This is Saturday so we may be in the old week or the new one.
+
+	// 	if startTime.Before(gpsMidnightNextSunday) {
+	// 		// It's Saturday just before the end of a GPS week.
+	// 		startOfGPSWeek = gpsStartOfWeek
+	// 	} else {
+	// 		// It's the end of Saturday in the first few seconds of a new
+	// 		// GPS week
+	// 		startOfGPSWeek = gpsMidnightNextSunday
+	// 	}
+
+	// 	// The logic for Beidou is similar to that for GPS but with a different
+	// 	// time offset.
+	// 	if !startTime.Before(beidouMidnightNextSunday) {
+	// 		// It's the end of Saturday in the first few seconds of a new
+	// 		// Beidou week
+	// 		startOfBeidouWeek = beidouMidnightNextSunday
+	// 	} else {
+	// 		// It's Saturday just before the end of the Beidou week.
+	// 		startOfBeidouWeek = beidouMidnightLastSunday
+	// 	}
+	// } else {
+	// 	// It's not Saturday, so the start of week times are offsets from the start
+	// 	// of last week.
+	// 	startOfGPSWeek = gpsStartOfWeek
+	// 	startOfBeidouWeek = beidouMidnightLastSunday
+	// }
+
 	// Galileo keeps GPS time.
+	startOfGalileoWeek := startOfGPSWeek
+
+	// Set the stored timestamps to match the start time.
+	timestampFromPreviousGPSMessage := (uint(startTime.Sub(startOfGPSWeek).Milliseconds()))
 	timestampFromPreviousGalileoMessage := timestampFromPreviousGPSMessage
+	timestampFromPreviousBeidouMessage := (uint(startTime.Sub(startOfBeidouWeek).Milliseconds()))
 
 	handler := Handler{
 		startOfGPSWeek:                      startOfGPSWeek,
-		timestampFromPreviousGPSMessage:     timestampFromPreviousGPSMessage,
 		startOfGalileoWeek:                  startOfGalileoWeek,
+		startOfBeidouWeek:                   startOfBeidouWeek,
+		timestampFromPreviousGPSMessage:     timestampFromPreviousGPSMessage,
 		timestampFromPreviousGalileoMessage: timestampFromPreviousGalileoMessage,
+		timestampFromPreviousBeidouMessage:  timestampFromPreviousBeidouMessage,
 	}
-
-	// Get the start of this Beidou week.
-
-	handler.startOfBeidouWeek = startOfWeekUTC.Add(beidouTimeOffset)
-
-	if startTime.Before(handler.startOfBeidouWeek) {
-		// The given start date is in the previous Beidou week.  (This
-		// happens if it's within the first few seconds of Sunday UTC.)
-		handler.startOfBeidouWeek = handler.startOfBeidouWeek.AddDate(0, 0, -7)
-	}
-
-	handler.timestampFromPreviousBeidouMessage =
-		(uint(startTime.Sub(handler.startOfBeidouWeek).Milliseconds()))
 
 	// Glonass.  Set the Glonass day number and the start of this
 	// Glonass day.  The day is 0: Sunday, 1: Monday and so on, but in
@@ -761,12 +776,12 @@ func (rtcmHandler *Handler) getUTCFromGalileoTime(timestamp uint) (time.Time, er
 func (rtcmHandler *Handler) getUTCFromBeidouTime(timestamp uint) (time.Time, error) {
 
 	// The Beidou week starts at midnight at the start of Sunday
-	// but Beidou time is behind UTC by a few seconds, so in UTC
-	// terms the week starts a few seconds after Saturday/Sunday
-	// midnight.
+	// but Beidou time is ahead of UTC by a few seconds, so in UTC
+	// terms the week starts a few seconds before midnight at the
+	// end of Saturday.
 	//
 	// Note: we have to be careful when the start time is Saturday
-	// and just after midnight, because that is within the new Beidou
+	// and just before midnight, because that is within the new Beidou
 	// week.  If create a handler around then, we have to specify
 	// the start time carefully.
 
