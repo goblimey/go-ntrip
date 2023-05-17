@@ -2090,8 +2090,6 @@ extern int decode_rtcm3(rtcm_t *rtcm)
         tow=time2gpst(utc2gpst(timeget()),&week);
         rtcm->time=gpst2time(week,floor(tow));
     }
-
-    rtcm->outtype = type;
     switch (type) {
         case 1001: ret=decode_type1001(rtcm); break; /* not supported */
         case 1002: ret=decode_type1002(rtcm); break;

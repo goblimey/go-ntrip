@@ -279,7 +279,7 @@ extern int input_rtcm3(rtcm_t *rtcm, unsigned char data)
     /* check parity */
     if (rtk_crc24q(rtcm->buff,rtcm->len)!=getbitu(rtcm->buff,rtcm->len*8,24)) {
         trace(2,"rtcm3 parity error: len=%d\n",rtcm->len);
-        return -2;
+        return 0;
     }
     /* decode rtcm3 message */
     return decode_rtcm3(rtcm);
