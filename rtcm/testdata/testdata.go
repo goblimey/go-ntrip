@@ -95,7 +95,7 @@ var MessageFrameType1077 = []byte{
 	//
 	// RTCM message type 1077 - signals from GPS satellites:
 	//         |-- multiple message flag
-	//         | |-- sequence number
+	//         | |-- issue of data station
 	//         v v
 	// 0110 00|1|0 00|00 0000
 	//
@@ -343,7 +343,9 @@ var MessageFrame1077 = []byte{
 }
 
 // This is real data collected on the 13th November 2020 with some junk added
-// to check that junk is handled properly as well as good data.
+// to check that junk is handled properly as well as good data.  The first 
+// message is type 1077 - GPS MSM7.  It has a timestamp of 
+// 2020/11/13 00:00:05 UTC and that GPS week starts at 2020/11/07 23:59:42 UTC.
 var MessageBatchWithJunk = []byte{
 
 	// message 1: type 1077 - GPS.  Converted to RINEX, this gives:

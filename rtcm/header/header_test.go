@@ -3,6 +3,7 @@ package header
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 
@@ -19,7 +20,7 @@ func TestNew(t *testing.T) {
 	const wantCellMask = 1
 	const wantMessageType = 1074
 	const wantStationID = 1
-	const wantTimestamp = 2
+	const wantTimestamp = 2 * 1000 // 2 seconds.
 	const wantMultipleMessage = true
 	const wantIssue = 3
 	const wantTransTime = 4
@@ -28,7 +29,8 @@ func TestNew(t *testing.T) {
 	const wantSmoothing = true
 	const wantSmoothingInterval = 7
 
-	gotHeader := New(wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
+	gotHeader := New(wantMessageType, wantStationID, wantTimestamp,
+		wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator,
 		wantExternalClockSteeringIndicator, true, wantSmoothingInterval,
 		wantSatelliteMask, wantSignalMask, wantCellMask)
@@ -644,89 +646,249 @@ func TestGetMSMHeaderWithCellMaskTooLong(t *testing.T) {
 // TestGetTitle checks that getTitle return the correct title for display.
 func TestGetTitle(t *testing.T) {
 
-	const titleError = "unknown constellation"
-
 	var testData = []struct {
 		messageType int
 		want        string
 	}{
-		{0, titleError},
-		{1137, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-
-		{1074, "GPS Full Pseudoranges and PhaseRanges plus CNR"},
-		{1084, "Glonass Full Pseudoranges and PhaseRanges plus CNR"},
-		{1094, "Galileo Full Pseudoranges and PhaseRanges plus CNR"},
-		{1104, "SBAS Full Pseudoranges and PhaseRanges plus CNR"},
-		{1114, "QZSS Full Pseudoranges and PhaseRanges plus CNR"},
-		{1124, "Beidou Full Pseudoranges and PhaseRanges plus CNR"},
-		{1134, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR"},
-		{1077, "GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1087, "Glonass Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1097, "Galileo Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1107, "SBAS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1117, "QZSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1127, "Beidou Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
-		{1137, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus CNR (high resolution)"},
+		{1074, "GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1084, "GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1094, "Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1104, "SBAS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1114, "QZSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1124, "BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1134, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio"},
+		{1077, "GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
+		{1087, "GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
+		{1097, "Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
+		{1107, "SBAS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
+		{1117, "QZSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
+		{1127, "BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
+		{1137, "NavIC/IRNSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)"},
 
 		// These message numbers are not for MSM messages
-		{0, titleError},
-		{1, titleError},
-		{1073, titleError},
-		{1075, titleError},
-		{1076, titleError},
-		{1138, titleError},
-		{1023, titleError},
-		{utils.MaxMessageType, titleError},
+		{0, "message type 0 is not known"},
+		{1, "message type 1 is not known"},
+		{utils.MaxMessageType, "Assigned to: Ashtech"},
 	}
 	for _, td := range testData {
 
 		header := Header{MessageType: td.messageType}
 
-		got := header.getTitle()
+		got := header.GetTitle()
 		if got != td.want {
-			t.Errorf("%d: want title %s, got %s",
+			t.Errorf("%d: want title \"%s\", got \"%s\"",
 				td.messageType, td.want, got)
 		}
 	}
 }
 
-// TestString checks that String() works.
-func TestStringSingle(t *testing.T) {
+// TestString checks the String function.
+func TestString(t *testing.T) {
+
+	const wantSatelliteMask = 3
+	const wantSignalMask = 7
+	const wantCellMask = 1
+	const wantMessageType = 1074
+	const wantStationID = 1
+	const wantGPSTimestamp = 2 * 1000                          // 2 seconds.
+	const wantGlonassTimestamp = uint(1<<27) + (2 * 60 * 1000) // One day and two minutes.
+	const wantIllegalGlonassTimestamp = uint(7 << 27)
+	const wantMultipleMessage = true
+	const wantIssue = 3
+	const wantTransTime = 4
+	const wantClockSteeringIndicator = 5
+	const wantExternalClockSteeringIndicator = 6
+	const wantSmoothing = true
+	const wantSmoothingInterval = 7
+	wantStartOfGPSWeek := time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
+	wantUTCTimeFromGPSTimestamp := time.Date(2023, time.May, 13, 23, 59, 44, 0, utils.LocationUTC)
+	wantStartOfGlonassWeek := time.Date(2023, time.May, 14, 0, 0, 0, 0, utils.LocationMoscow)
+	wantUTCTimeFromGlonassTimestamp := time.Date(2023, time.May, 15, 0, 0, 2, 0, utils.LocationMoscow)
+
+	const wantGPSDisplay = `Sent at 2023-05-13 23:59:44 +0000 UTC
+Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 2000 (0d 0h 0m 2s 0ms)
+stationID 1, multiple message, issue of data station 3
+session transmit time 4, clock steering 5, external clock 6
+divergence free smoothing true, smoothing interval 7
+2 satellites, 3 signal types, 6 signals
+`
+
+	const wantGlonassDisplay = `Sent at 2023-05-15 00:00:02 +0300 MSK
+Start of GPS week 2023-05-14 00:00:00 +0300 MSK plus timestamp 2000 (0d 0h 0m 2s 0ms)
+stationID 1, multiple message, issue of data station 3
+session transmit time 4, clock steering 5, external clock 6
+divergence free smoothing true, smoothing interval 7
+2 satellites, 3 signal types, 6 signals
+`
+
+	const wantGlonassDisplayIllegalDay = `Sent at 2023-05-14 00:00:00 +0300 MSK
+Start of GPS week 2023-05-14 00:00:00 +0300 MSK plus timestamp 2000 (0d 0h 0m 2s 0ms)
+stationID 1, multiple message, issue of data station 3
+session transmit time 4, clock steering 5, external clock 6
+divergence free smoothing true, smoothing interval 7
+2 satellites, 3 signal types, 6 signals
+`
+
+	var testData = []struct {
+		description          string
+		MessageType          int
+		timestamp            uint
+		startOfWeek          time.Time
+		utcTimeFromTimestamp time.Time
+		wantDisplay          string
+	}{
+		{"GPS", 1074, wantGPSTimestamp, wantStartOfGPSWeek, wantUTCTimeFromGPSTimestamp, wantGPSDisplay},
+		{"legal Glonass", 1084, wantGlonassTimestamp, wantStartOfGlonassWeek, wantUTCTimeFromGlonassTimestamp, wantGlonassDisplay},
+		// Glonass timestamp with illegal day.  The resulting UTC time is ignored.
+		{"illegal Glonass", 1084, wantIllegalGlonassTimestamp, wantStartOfGlonassWeek, wantStartOfGlonassWeek, wantGlonassDisplayIllegalDay},
+	}
+	for _, td := range testData {
+		header := New(wantMessageType, wantStationID, wantGPSTimestamp,
+			wantMultipleMessage,
+			wantIssue, wantTransTime, wantClockSteeringIndicator,
+			wantExternalClockSteeringIndicator, wantSmoothing, wantSmoothingInterval,
+			wantSatelliteMask, wantSignalMask, wantCellMask)
+
+		header.StartOfWeek = td.startOfWeek
+		header.UTCTimeFromTimestamp = td.utcTimeFromTimestamp
+
+		gotDisplay := header.String()
+
+		if td.wantDisplay != gotDisplay {
+			t.Errorf("%s: %s", td.description, diff.Diff(td.wantDisplay, gotDisplay))
+		}
+	}
+}
+
+// TestStringMultipleFlag checks that String() correctly handles the multiple message flag.
+func TestStringMultipleFlag(t *testing.T) {
 	const satMask = 3
 	const sigMask = 7
 	const cellMask = 1
+	wantStartOfWeek := time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
+	wantUTCTimeFromTimestamp := time.Date(2023, time.May, 13, 23, 59, 45, 0, utils.LocationUTC)
 
 	// The result contains "single message" or "multiple message", depending
 	// on the multiple message flag.
-	resultTemplate := `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-stationID 2, timestamp 3, %s message, sequence number 1
+	resultTemplate := `Sent at 2023-05-13 23:59:45 +0000 UTC
+Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 3 (0d 0h 0m 0s 3ms)
+stationID 2, %s, issue of data station 1
 session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
 2 satellites, 3 signal types, 6 signals
 `
 
 	var testData = []struct {
-		hdr  *Header
-		want string
+		hdr                  *Header
+		startOfWeek          time.Time
+		utcTimeFromTimestamp time.Time
+		want                 string
 	}{
 		{
-			New(1074, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			fmt.Sprintf(resultTemplate, "single"),
+			New(1074, 2, 3,
+				false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			wantStartOfWeek,
+			wantUTCTimeFromTimestamp,
+			fmt.Sprintf(resultTemplate, "single message"),
 		},
 
 		{
 			New(1074, 2, 3, true, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			fmt.Sprintf(resultTemplate, "multiple"),
+			wantStartOfWeek,
+			wantUTCTimeFromTimestamp,
+			fmt.Sprintf(resultTemplate, "multiple message"),
 		},
 	}
 
 	for _, td := range testData {
+		td.hdr.StartOfWeek = td.startOfWeek
+		td.hdr.UTCTimeFromTimestamp = td.utcTimeFromTimestamp
+
 		got := td.hdr.String()
 
 		if td.want != got {
 			t.Errorf(diff.Diff(td.want, got))
 		}
 
+	}
+}
+
+// TestTimestampInString checks that String()correctly interprets the timestamp
+// in an MSM.
+func TestTimestampInString(t *testing.T) {
+	const satMask = 3
+	const sigMask = 7
+	const cellMask = 1
+	const wantGPSTimestamp = 2 * 1000                          // 2 seconds.
+	const wantGlonassTimestamp = uint(1<<27) + (2 * 60 * 1000) // One day and two minutes.
+	const wantIllegalGlonassTimestamp = uint(7 << 27)
+	wantStartOfGPSWeek := time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
+	wantUTCTimeFromGPSTimestamp := time.Date(2023, time.May, 13, 23, 59, 44, 0, utils.LocationUTC)
+	wantStartOfGlonassWeek := time.Date(2023, time.May, 14, 0, 0, 0, 0, utils.LocationMoscow).In(utils.LocationUTC)
+	wantUTCTimeFromGlonassTimestamp := time.Date(2023, time.May, 15, 0, 0, 2, 0, utils.LocationMoscow).In(utils.LocationUTC)
+
+	wantGPSDisplay := `Sent at 2023-05-13 23:59:44 +0000 UTC
+Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 2000 (0d 0h 0m 2s 0ms)
+stationID 2, single message, issue of data station 1
+session transmit time 5, clock steering 6, external clock 7
+divergence free smoothing true, smoothing interval 9
+2 satellites, 3 signal types, 6 signals
+`
+
+	wantGlonassDisplay := `Sent at 2023-05-14 21:00:02 +0000 UTC
+Start of Glonass week 2023-05-13 21:00:00 +0000 UTC plus timestamp 134337728 (1d 0h 2m 0s 0ms)
+stationID 2, single message, issue of data station 1
+session transmit time 5, clock steering 6, external clock 7
+divergence free smoothing true, smoothing interval 9
+2 satellites, 3 signal types, 6 signals
+`
+
+	wantGlonassDisplayWithIllegalDay := `Sent at 2023-05-14 21:00:02 +0000 UTC
+timestamp 939524096 - illegal Glonass day
+stationID 2, single message, issue of data station 1
+session transmit time 5, clock steering 6, external clock 7
+divergence free smoothing true, smoothing interval 9
+2 satellites, 3 signal types, 6 signals
+`
+
+	var testData = []struct {
+		hdr                  *Header
+		startOfWeek          time.Time
+		utcTimeFromTimestamp time.Time
+		want                 string
+	}{
+		{
+			New(1074, 2, wantGPSTimestamp, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			wantStartOfGPSWeek,
+			wantUTCTimeFromGPSTimestamp,
+			wantGPSDisplay,
+		},
+
+		{
+			New(1084, 2, wantGlonassTimestamp, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			wantStartOfGlonassWeek,
+			wantUTCTimeFromGlonassTimestamp,
+			wantGlonassDisplay,
+		},
+
+		{
+			New(1084, 2, wantIllegalGlonassTimestamp, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			wantStartOfGlonassWeek,
+			wantUTCTimeFromGlonassTimestamp, // placeholder - ignored.
+			wantGlonassDisplayWithIllegalDay,
+		},
+	}
+
+	for _, td := range testData {
+
+		td.hdr.StartOfWeek = td.startOfWeek
+		td.hdr.UTCTimeFromTimestamp = td.utcTimeFromTimestamp
+
+		got := td.hdr.String()
+
+		if td.want != got {
+			t.Errorf(diff.Diff(td.want, got))
+		}
 	}
 }
 

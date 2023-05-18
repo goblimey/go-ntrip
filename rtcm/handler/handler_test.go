@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"log"
 	"math"
 	"testing"
 	"time"
@@ -19,8 +18,6 @@ import (
 	msm4signal "github.com/goblimey/go-ntrip/rtcm/type_msm4/signal"
 	msm7message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
-
-	"github.com/goblimey/go-tools/switchwriter"
 
 	"github.com/kylelemons/godebug/diff"
 )
@@ -60,13 +57,6 @@ var lenValidMessageInBits = len(validMessageFrame) * 8
 // timestampAtEndOfWeek is the value of a GPS, Galileo and Beidou
 // timestamp at the end of the week, just before it rolls over.
 const timestampAtEndOfWeek uint = (7 * 24 * 3600 * 1000) - 1
-
-var logger *log.Logger
-
-func init() {
-	writer := switchwriter.New()
-	logger = log.New(writer, "rtcm_test", 0)
-}
 
 // TestHandleMessagesFromChannel tests the HandleMessagesFromChannel method.
 func TestHandleMessagesFromChannel(t *testing.T) {
@@ -419,16 +409,13 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 		wantWarning string
 	}{
 
-		{"illegal", messageFrameWithIllegalGlonassDay,
-			"invalid day", "invalid day"},
-
 		// GetMessage should return a nil message and an error.
 		{"very short", messageFrame1077NoTimestamp,
 			"incomplete message frame", ""},
 
 		// GetMessage should return an error AND a message with the warning set.
 		{"illegal", messageFrameWithIllegalGlonassDay,
-			"invalid day", "invalid day"},
+			"illegal Glonass day", "illegal Glonass day"},
 
 		// GetMessage calls GetMessageLengthAndType.  That returns an error because the
 		// bit stream is too short.  GetMessage should return the error message AND a
@@ -465,7 +452,8 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 			}
 
 			if td.wantWarning != gotMessage.ErrorMessage {
-				t.Errorf("want warning - %s, got %s", td.wantWarning, gotMessage.ErrorMessage)
+				t.Errorf("%s: want warning - %s, got %s",
+					td.description, td.wantWarning, gotMessage.ErrorMessage)
 			}
 		}
 	}
@@ -660,23 +648,23 @@ func TestStartTimes(t *testing.T) {
 			//just before 1am BST is just before midnight UTC.
 			"Sunday 2020/08/02 BST, just before the end of the week.", "GPS", 1077,
 			time.Date(2020, time.August, 9, 00, 59, 41, int(999*time.Millisecond), utils.LocationLondon),
-			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(gpsTimeOffset),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.GPSTimeOffset),
 		},
 		{
 			"Saturday 2nd August, start of week", "GPS", 1077,
 			time.Date(2020, time.August, 2, 0, 59, 42, 0, utils.LocationLondon),
-			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(gpsTimeOffset),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.GPSTimeOffset),
 		},
 		{
 			"Wednesday 2020/08/05", "GPS", 1077,
 			time.Date(2020, time.August, 5, 12, 0, 0, 0, utils.LocationLondon),
-			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(gpsTimeOffset),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.GPSTimeOffset),
 		},
 		{
 			//just before 1am BST is just before midnight UTC.
 			"Sunday 2020/08/02 BST, just before the end of the week.", "GPS", 1077,
 			time.Date(2020, time.August, 9, 00, 59, 41, int(999*time.Millisecond), utils.LocationLondon),
-			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(gpsTimeOffset),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.GPSTimeOffset),
 		},
 		{
 			"Sunday 2020/09/02 CET, at the start of the next week", "GPS", 1077,
@@ -719,36 +707,36 @@ func TestStartTimes(t *testing.T) {
 			// This start time should be at the end of the previous week ...
 			"Saturday 8th August, end of week", "Beidou", 1127,
 			time.Date(2020, time.August, 8, 23, 59, 55, int(999*time.Millisecond), utils.LocationUTC),
-			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
 		},
 		{
 			// ... and this one too.
 			"Sunday 9th Aug", "Beidou", 1127,
 			time.Date(2020, time.August, 9, 1, 0, 0, 0, utils.LocationUTC),
-			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset),
+			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
 		},
 		{
 			// Saturday 15th, just before rollover.
 			"4", "Beidou", 1127,
 			time.Date(2020, time.August, 15, 23, 59, 55, int(999*time.Millisecond), utils.LocationUTC),
-			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset),
+			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
 		},
 		{
 			"start of next week", "Beidou", 1127,
 			time.Date(2020, time.August, 15, 23, 59, 56, 0, utils.LocationUTC),
-			time.Date(2020, time.August, 16, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset),
+			time.Date(2020, time.August, 16, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
 		},
 		{
 			"one second after the start of the next week", "Beidou", 1127,
 			time.Date(2020, time.August, 15, 23, 59, 57, 0, utils.LocationUTC),
-			time.Date(2020, time.August, 16, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset),
+			time.Date(2020, time.August, 16, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
 		},
 	}
 
 	for _, td := range testData {
 
 		handler := New(td.startTime)
-		startOfWeek := getStartOfPeriod(td.messageType, handler)
+		startOfWeek := getStartOfWeek(td.messageType, handler)
 
 		if !td.wantStartOfWeek.Equal(startOfWeek) {
 			t.Errorf("%s %s: want %s got %s\n",
@@ -764,44 +752,102 @@ func TestStartTimes(t *testing.T) {
 func TestGlonassStartTimes(t *testing.T) {
 
 	var testData = []struct {
-		description     string
-		startTime       time.Time
-		wantDay         uint
-		wantStartOfWeek time.Time
+		description            string
+		startTime              time.Time
+		wantStartOfWeek        time.Time
+		timestamp1             uint
+		wantTimeFromTimestamp1 time.Time
+		wantDay1               uint
+		timestamp2             uint
+		wantTimeFromTimestamp2 time.Time
+		wantDay2               uint
 	}{
-
 		{
-			"21:00 on Monday 3rd August",
+			"21:00 on Monday 3rd August UTC, 00:00 on the 4th in Moscow",
 			time.Date(2020, time.August, 2, 5, 0, 0, 0, utils.LocationUTC),
-			0,
 			time.Date(2020, time.August, 1, 21, 0, 0, 0, utils.LocationUTC),
-		},
-		{
-			"just before 11pm on Tuesday 3rd August in Paris",
-			time.Date(2020, time.August, 3, 22, 59, 59, 999999999, utils.LocationParis),
+			// One day and four hours.
+			uint((1 << 27) + (4 * 3600 * 1000)),
+			time.Date(2020, time.August, 3, 1, 0, 0, 0, utils.LocationUTC),
 			1,
-			time.Date(2020, time.August, 2, 21, 0, 0, 0, utils.LocationUTC),
+			// Start of day 2.
+			uint(2 << 27),
+			time.Date(2020, time.August, 3, 21, 0, 0, 0, utils.LocationUTC),
+			2,
 		},
 		{
-			"just after 11pm on Tuesday 3rd August in Paris",
-			time.Date(2020, time.August, 3, 23, 00, 00, 0, utils.LocationParis),
+			"22:59 on Monday 3rd August in Paris, 20:59 UTC, 23:59 on Sunday 2nd Moscow",
+			time.Date(2020, time.August, 3, 22, 59, 59, 999999999, utils.LocationParis),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationMoscow),
+			// Two days and five hours.
+			uint((2 << 27) + (5 * 3600 * 1000)),
+			time.Date(2020, time.August, 4, 2, 00, 0, 0, utils.LocationUTC),
 			2,
-			time.Date(2020, time.August, 3, 21, 0, 0, 0, utils.LocationUTC),
+			// Day 3, 23:00.
+			uint((3 << 27) + (23 * 3600 * 1000)),
+			time.Date(2020, time.August, 5, 23, 0, 0, 0, utils.LocationMoscow),
+			3,
+		},
+		{
+			"11pm on Monday 3rd August in Paris, 00:00 on Tuesday 4th in Moscow",
+			time.Date(2020, time.August, 3, 23, 00, 00, 0, utils.LocationParis),
+			time.Date(2020, time.August, 1, 21, 0, 0, 0, utils.LocationUTC),
+			// Day 3 11:00.
+			uint((3 << 27) + (11 * 3600 * 1000)),
+			time.Date(2020, time.August, 5, 8, 0, 0, 0, utils.LocationUTC),
+			3,
+			// Day 2 11:00 - roll over to week commencing 9th in Moscow.
+			uint((2 << 27) + (11 * 3600 * 1000)),
+			time.Date(2020, time.August, 11, 8, 0, 0, 0, utils.LocationUTC),
+			2,
 		},
 	}
 
 	for _, td := range testData {
+
 		handler := New(td.startTime)
-		if td.wantStartOfWeek != handler.startOfGlonassDay {
-			t.Errorf("%s: want %s got %s\n",
+
+		if !td.wantStartOfWeek.Equal(handler.startOfGlonassWeek) {
+			t.Errorf("start - %s: want %s got %s\n",
 				td.description,
 				td.wantStartOfWeek.Format(time.RFC3339Nano),
-				handler.startOfGlonassDay.Format(time.RFC3339Nano))
+				handler.startOfGlonassWeek.Format(time.RFC3339Nano))
 		}
-		if td.wantDay != handler.glonassDayFromPreviousMessage {
-			t.Errorf("%s: want %d got %d\n",
+
+		timeFromTimestamp, err := handler.getUTCFromGlonassTime(td.timestamp1)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if !td.wantTimeFromTimestamp1.Equal(timeFromTimestamp) {
+			t.Errorf("time1 - %s: want %s got %s\n",
 				td.description,
-				td.wantDay, handler.glonassDayFromPreviousMessage)
+				td.wantTimeFromTimestamp1.Format(time.RFC3339Nano),
+				timeFromTimestamp.Format(time.RFC3339Nano))
+		}
+
+		if td.wantDay1 != handler.glonassDayFromPreviousMessage {
+			t.Errorf("day1 - %s: want %d got %d\n",
+				td.description,
+				td.wantDay1, handler.glonassDayFromPreviousMessage)
+		}
+
+		timeFromTimestamp2, err := handler.getUTCFromGlonassTime(td.timestamp2)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if !td.wantTimeFromTimestamp2.Equal(timeFromTimestamp2) {
+			t.Errorf("time2 - %s: want %s got %s\n",
+				td.description,
+				td.wantTimeFromTimestamp2.Format(time.RFC3339Nano),
+				timeFromTimestamp2.Format(time.RFC3339Nano))
+		}
+
+		if td.wantDay2 != handler.glonassDayFromPreviousMessage {
+			t.Errorf("day2 - %s: want %d got %d\n",
+				td.description,
+				td.wantDay2, handler.glonassDayFromPreviousMessage)
 		}
 	}
 }
@@ -920,26 +966,32 @@ func TestAnalyseWith1230(t *testing.T) {
 // TestDisplayMessage checks DisplayMessage.
 func TestDisplayMessage(t *testing.T) {
 
-	const resultForNotRTCM = `message type -1, frame length 4
+	const resultForNotRTCM = `Message type -1 Non-RTCM data
+Data which is not in RTCM3 format, for example NMEA messages.
+Frame length 4 bytes:
 00000000  6a 75 6e 6b                                       |junk|
 
 `
 
-	const resultForIncomplete = `message type 1127, frame length 6
+	const resultForIncomplete = `Message type 1127 BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for China’s BeiDou system.
+Frame length 6 bytes:
 00000000  d3 00 aa 46 70 00                                 |...Fp.|
 
 bitstream is too short for an MSM header - got 0 bits, expected at least 169
 `
 
 	// The hex dump includes a ` so we have to create this string by glueing parts together.
-	const resultForMSM4 = `message type 1074, frame length 42
+	const resultForMSM4 = `Message type 1074 GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
+The type 4 Multiple Signal Message format for the American GPS system.
+Frame length 42 bytes:
 00000000  d3 00 24 43 20 01 00 00  00 04 00 00 08 00 00 00  |..$C ...........|
-` +
-		"00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...`(.@....|" + `
+00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 83  f7 4b                    |.@..h....K|
 
-type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-stationID 1, timestamp 1, single message, sequence number 0
+Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 1 (0d 0h 0m 0s 1ms)
+stationID 1, single message, issue of data station 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 1 satellites, 2 signal types, 2 signals
@@ -952,7 +1004,9 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
  4 16 {374777.168, 1534500.000, 4, true, 16}
 `
 
-	const resultForMSM7 = `message type 1077, frame length 841
+	const resultForMSM7 = `Message type 1077 GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for the USA’s GPS system.
+Frame length 841 bytes:
 00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1007,8 +1061,9 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
 00000330  ff bc a0 00 00 00 04 00  26 18 00 00 00 20 02 00  |........&.... ..|
 00000340  00 75 53 fa 82 42 62 9a  80                       |.uS..Bb..|
 
-type 1077 GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)
-stationID 0, timestamp 432023000, multiple message, sequence number 0
+Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)
+stationID 0, multiple message, issue of data station 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 8 satellites, 2 signal types, 16 signals
@@ -1038,13 +1093,17 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 31 16 {21670767.783, 88736342.592, 779, false, 876, -441.969}
 `
 
-	const resultForUnhandledMessageType = `message type 1024, frame length 14
+	const resultForUnhandledMessageType = `Message type 1024 Residuals, Plane Grid Representation
+A coordinate transformation message.  Not often found in actual use.
+Frame length 14 bytes:
 00000000  d3 00 08 40 00 00 8a 00  00 00 00 4f 5e e7        |...@.......O^.|
 
 message type 1024 currently cannot be displayed
 `
 
-	const resultFor1005 = `message type 1005, frame length 25
+	const resultFor1005 = `Message type 1005 Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 25 bytes:
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
 00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
@@ -1060,10 +1119,12 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 		messageType int
 		want        string
 	}{
+
+		{"msm4", testdata.MessageFrameType1074_2, 1074, resultForMSM4},
+
 		{"not RTCM", testdata.AllJunk, utils.NonRTCMMessage, resultForNotRTCM},
 		{"incomplete", testdata.IncompleteMessage, 1127, resultForIncomplete},
 		{"1005", testdata.MessageFrameType1005, 1005, resultFor1005},
-		{"msm4", testdata.MessageFrameType1074_2, 1074, resultForMSM4},
 		{"msm7", testdata.MessageBatchWithJunk, 1077, resultForMSM7},
 		{"1024", testdata.UnhandledMessageType1024, 1024, resultForUnhandledMessageType},
 	}
@@ -1092,14 +1153,18 @@ func TestDisplayMessageWithErrors(t *testing.T) {
 	fakeMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
 	fakeMSM7 := NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074_2)
 	// Expected results.
-	resultForMessageWithWarning := `message type 1005, frame length 25
+	resultForMessageWithWarning := `Message type 1005 Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 25 bytes:
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
 00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
 an error message
 `
 
-	resultForFake1005 := `message type 1005, frame length 226
+	resultForFake1005 := `Message type 1005 Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 226 bytes:
 00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1119,7 +1184,9 @@ an error message
 expected message type 1005 got 1077
 `
 
-	const resultForFakeMSM4 = `message type 1124, frame length 226
+	const resultForFakeMSM4 = `Message type 1124 BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
+The type 4 Multiple Signal Message format for China’s BeiDou system.
+Frame length 226 bytes:
 00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1139,7 +1206,9 @@ expected message type 1005 got 1077
 message type 1077 is not an MSM4
 `
 
-	const resultForFakeMSM7 = `message type 1087, frame length 42
+	const resultForFakeMSM7 = `Message type 1087 GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for the Russian GLONASS system.
+Frame length 42 bytes:
 00000000  d3 00 24 43 20 01 00 00  00 04 00 00 08 00 00 00  |..$C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 83  f7 4b                    |.@..h....K|
@@ -1196,14 +1265,14 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 		wantTimeFromTimestamp2 time.Time // The time from timestamp2.
 		timestamp3             uint      // Third timestamp, smaller than 2 to provoke rollover.
 		wantStartOfWeek2       time.Time // The start of week after the rollover.
-		wantTimeFromTimestamp  time.Time // The time from timestamp3.
+		wantTimeFromTimestamp3 time.Time // The time from timestamp3.
 	}{
 
 		{
 			"Beidou",
 			// midnight Sunday 9th August - 8th just before midnight in Beidou time,
 			// start of the Beidou week.  Stored timestamp is zero.
-			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(beidouTimeOffset),
+			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
 			utils.MessageTypeMSM7Beidou,
 			// wantStartOfWeek1
 			time.Date(2020, time.August, 8, 23, 59, 56, 0, utils.LocationUTC),
@@ -1241,23 +1310,25 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 		},
 		{
 			"Glonass",
-			// 23:00:00 on Monday 10th August Paris is midnight on the Tuesday
+			// StartTime - 22:00:00 on Monday 10th August Paris is midnight on the Tuesday
 			// 11th in Russia - start of Glonass day 2.
-			time.Date(2020, time.August, 10, 23, 0, 0, 0, utils.LocationParis),
+			time.Date(2020, time.August, 10, 22, 0, 0, 0, utils.LocationParis),
 			utils.MessageTypeMSM7Glonass,
-			time.Date(2020, time.August, 11, 0, 0, 0, 0, utils.LocationMoscow),
-			// Day = 2, glonassTime = (4*3600*1000), which is 2 am on Russian Tuesday,
-			// which is 11pm on Monday 10th UTC.
+			// wantStartOfWeek1 - 9th August 00:00 in Moscow, 8th August 21:00 UTC.
+			time.Date(2020, time.August, 9, 0, 0, 0, 0, utils.LocationMoscow),
+			// timestamp1 - Day = 2, hour = 4, which is 4am on Russian Tuesday,
+			// which is 1am on Tuesday 11th UTC.
 			2<<27 | (2 * 3600 * 1000),
-			time.Date(2020, time.August, 12, 23, 0, 0, 0, utils.LocationUTC),
-			2<<27 | (5 * 3600 * 1000), // later that day in Moscow, 2am the next day in UTC.
-			time.Date(2020, time.August, 13, 2, 0, 0, 0, utils.LocationUTC),
-			3<<27 | (18 * 3600 * 1000), // rolled over to the next day
-			// 3pm Tuesday 11th August Paris - 4pm in Russia.
-			time.Date(2020, time.August, 11, 0, 0, 0, 0, utils.LocationMoscow).AddDate(0, 0, 1),
-			// Day = 3, glonassTime = (18*3600*1000), which is 6pm on Russian Wednesday,
-			// which is 3pm on Wednesday 12th UTC, 5pm CET.
-			time.Date(2020, time.August, 12, 17, 0, 0, 0, utils.LocationParis),
+			// timeFromTimestamp1
+			time.Date(2020, time.August, 10, 23, 0, 0, 0, utils.LocationUTC),
+			3<<27 | (5 * 3600 * 1000), // 5am next day in Moscow, 2am the next day in UTC.
+			time.Date(2020, time.August, 11, 2, 0, 0, 0, utils.LocationUTC),
+			1<<27 | (18 * 3600 * 1000), // rolled over to the next week
+			// wantStartOfWeek2 - midnight 16th Aug in Moscow.
+			time.Date(2020, time.August, 16, 0, 0, 0, 0, utils.LocationMoscow),
+			// wantTimeFromTimestamp3 - Day = 1, hour = 18, which is 6pm on Russian
+			// Monday, 17:00 Monday CET.
+			time.Date(2020, time.August, 17, 17, 0, 0, 0, utils.LocationParis),
 		},
 		{
 			"Galileo",
@@ -1267,14 +1338,14 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 			time.Date(2020, time.August, 8, 23, 59, 42, 0, utils.LocationUTC),
 			(((52*3600)+1800)*1000 + 300), // 2 days, 4.5 hours  plus 300 ms in ms.
 			time.Date(2020, time.August, 10, 04, 29, 42, int(300*time.Millisecond), utils.LocationUTC).
-				Add(gpsTimeOffset),
+				Add(utils.GPSTimeOffset),
 			(((74*3600)+30)*1000 + 700), // 3 days 2 hours 30 secondsand 400 ms.
 			time.Date(2020, time.August, 12, 23, 59, 30, int(700*time.Millisecond), utils.LocationUTC),
 			((2 * 3600 * 1000) + 4), // rolled over to the next day
 			// 2020-08-08 23:59:42.
 
 			time.Date(2020, time.August, 16, 00, 00, 00, 0, utils.LocationUTC).
-				Add(gpsTimeOffset),
+				Add(utils.GPSTimeOffset),
 			time.Date(2020, time.August, 16, 1, 59, 42, int(4*time.Millisecond), utils.LocationUTC),
 		},
 	}
@@ -1290,7 +1361,7 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 
 		// Get the start of the week for this message, or the
 		// start of day if Glonass.
-		startOfPeriod1 := getStartOfPeriod(td.messageType, handler)
+		startOfPeriod1 := getStartOfWeek(td.messageType, handler)
 
 		if !td.wantStartOfWeek1.Equal(startOfPeriod1) {
 			t.Errorf("%s: startOfWeek1 want %s got %s",
@@ -1323,7 +1394,7 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 
 		// Get the start of the week for this message, or the
 		// start of day if Glonass.
-		startOfWeek2 := getStartOfPeriod(td.messageType, handler)
+		startOfWeek2 := getStartOfWeek(td.messageType, handler)
 
 		if !td.wantStartOfWeek2.Equal(startOfWeek2) {
 			t.Errorf("%s: startOfWeek2 want %s got %s",
@@ -1332,33 +1403,32 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 		}
 
 		// ... and so we should get this time from the timestamp.
-		if !td.wantTimeFromTimestamp.Equal(timeFromTimestamp) {
+		if !td.wantTimeFromTimestamp3.Equal(timeFromTimestamp) {
 			t.Errorf("%s: timeFromTimestamp want %s got %s",
-				td.description, td.wantTimeFromTimestamp.Format(utils.DateLayout), timeFromTimestamp.Format(utils.DateLayout))
+				td.description, td.wantTimeFromTimestamp3.Format(utils.DateLayout), timeFromTimestamp.Format(utils.DateLayout))
 		}
 	}
 }
 
-// getStartOfPeriod is a helper function.   It gets the start of the constellation's
+// getStartOfWeek is a helper function.   It gets the start of the constellation's
 // current period. (For Glonass the start of the current day.  For the rest, the start
 // of the current week.)
-func getStartOfPeriod(messageType int, handler *Handler) time.Time {
-	// Get the start of the week for this message, or the
-	// start of day if Glonass.
+func getStartOfWeek(messageType int, handler *Handler) time.Time {
+	// Get the start of the week for this constellation.
 	constellation := utils.GetConstellation(messageType)
-	var startOfPeriod time.Time
 	switch constellation {
 	case "GPS":
-		startOfPeriod = handler.startOfGPSWeek
+		return handler.startOfGPSWeek
 	case "Galileo":
-		startOfPeriod = handler.startOfGalileoWeek
+		return handler.startOfGalileoWeek
 	case "Glonass":
-		startOfPeriod = handler.startOfGlonassDay
+		return handler.startOfGlonassWeek
 	case "Beidou":
-		startOfPeriod = handler.startOfBeidouWeek
+		return handler.startOfBeidouWeek
 	}
 
-	return startOfPeriod
+	var zeroTime time.Time
+	return zeroTime
 }
 
 // TestGetTimeFromTimeStampWithError checks that getTimeFromTimeStampWithError when
@@ -1377,18 +1447,18 @@ func TestGetTimeFromTimeStampWithError(t *testing.T) {
 		hdr         *header.Header
 		wantError   string
 	}{
-		{"4 0", createHeader(utils.MessageTypeMSM4Glonass, (7 << 27)), "invalid day"},
-		{"7 1", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | 1)), "invalid day"},
-		{"7 max", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | (1 << 25))), "invalid day"},
+		{"4 0", createHeader(utils.MessageTypeMSM4Glonass, (7 << 27)), "illegal Glonass day"},
+		{"7 1", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | 1)), "illegal Glonass day"},
+		{"7 max", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | (1 << 25))), "illegal Glonass day"},
 		// This timestamp is an int, which is 32 bits on some machines, 64 on others.  For safety, only
 		// set the timestamp to the max value of an int32.
 		{"max int32", createHeader(utils.MessageTypeMSM4Glonass, math.MaxInt32), "out of range"},
 		// Try all of the other constellations with a value bigger than 30 bits.
-		{"GPS MSM4", createHeader(utils.MessageTypeMSM4GPS, maxTimestamp+1), "out of range"},
+		{"GPS MSM4", createHeader(utils.MessageTypeMSM4GPS, utils.MaxTimestamp+1), "out of range"},
 		{"GPS MSM7", createHeader(utils.MessageTypeMSM7GPS, math.MaxInt32), "out of range"},
-		{"Galileo MSM4", createHeader(utils.MessageTypeMSM4Galileo, maxTimestamp+1), "out of range"},
+		{"Galileo MSM4", createHeader(utils.MessageTypeMSM4Galileo, utils.MaxTimestamp+1), "out of range"},
 		{"Galileo MSM7", createHeader(utils.MessageTypeMSM7Galileo, math.MaxInt32/2+1), "out of range"},
-		{"Beidou MSM4", createHeader(utils.MessageTypeMSM4Beidou, maxTimestamp+2), "out of range"},
+		{"Beidou MSM4", createHeader(utils.MessageTypeMSM4Beidou, utils.MaxTimestamp+2), "out of range"},
 		{"Beidou MSM7", createHeader(utils.MessageTypeMSM7Beidou, 0x40000000), "out of range"},
 		{"SBAS MSM7", createHeader(utils.MessageTypeMSM7SBAS, 0x40000000), "unknown message type"},
 	}
@@ -1424,7 +1494,7 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 
 	const illegal1 = 0x3c000000 // 11 1100 0000 0000 0000 0000 0000 0000
 	const illegal2 = 0x3c000000 // 11 1100 0000 0000 0000 0000 0000 0000
-	const want = "invalid day"
+	const want = "illegal Glonass day"
 
 	var zeroTimeValue time.Time // utcTime should be set to this.
 
@@ -1453,105 +1523,6 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 		if want != err.Error() {
 			t.Errorf("want error %s got %s", want, err.Error())
 		}
-	}
-}
-
-// TestParseGlonassStartTime tests ParseGlonassTimestap
-func TestParseGlonassStartTime(t *testing.T) {
-	// Maximum expected millis - twenty four hours of millis, less 1.
-	const maxMillis = (24 * 3600 * 1000) - 1
-
-	// Day = 0, millis = 0
-	const expectedDay1 uint = 0
-	const expectedMillis1 = 0
-	const timestamp1 = 0
-
-	day1, millis1, err1 := ParseGlonassTimeStamp(uint(timestamp1))
-
-	if err1 != nil {
-		t.Error(err1)
-	}
-
-	if expectedDay1 != day1 {
-		t.Errorf("expected day %d result %d", expectedDay1, day1)
-	}
-	if expectedMillis1 != millis1 {
-		t.Errorf("expected millis %d result %d", maxMillis, millis1)
-	}
-
-	// Day = 0, millis = max
-	const expectedDay2 uint = 0
-	const timestamp2 = maxMillis
-
-	day2, millis2, err2 := ParseGlonassTimeStamp(uint(timestamp2))
-
-	if err2 != nil {
-		t.Error(err2)
-	}
-
-	if expectedDay2 != day2 {
-		t.Errorf("expected day %d result %d", expectedDay2, day2)
-	}
-	if maxMillis != millis2 {
-		t.Errorf("expected millis %d result %d", maxMillis, millis2)
-
-	}
-
-	// Day = max, millis = 0
-	const expectedDay3 uint = 6
-	const expectedMillis3 uint = 0
-	const timestamp3 = 6 << 27
-
-	day3, millis3, err3 := ParseGlonassTimeStamp(uint(timestamp3))
-
-	if err3 != nil {
-		t.Error(err3)
-	}
-
-	if expectedDay3 != day3 {
-		t.Errorf("expected day %d result %d", expectedDay3, day3)
-	}
-	if expectedMillis3 != millis3 {
-		t.Errorf("expected millis %d result %d", expectedMillis3, millis3)
-	}
-
-	// Day = max, mills = max..
-	const expectedDay4 uint = 6
-
-	const timestamp4 = 6<<27 | uint(maxMillis)
-
-	day4, millis4, err4 := ParseGlonassTimeStamp(uint(timestamp4))
-
-	if err4 != nil {
-		t.Error(err4)
-	}
-
-	if expectedDay4 != day4 {
-		t.Errorf("expected day %d result %d", expectedDay4, day4)
-	}
-	if maxMillis != millis4 {
-		t.Errorf("expected millis %d result %d", maxMillis, millis4)
-	}
-
-	// These values can't actually happen in a Glonass week - the day can only
-	// be up to 6 and the millis only run up to 24hours minus 1 milli.  However.
-	// we'll test the logic anyway.
-	const expectedDay5 uint = 7
-	const expectedMillis5 uint = 0x7ffffff
-
-	const timestamp5 uint = 0x3fffffff // 11 1111 1111 ... (30 bits).
-
-	day5, millis5, err5 := ParseGlonassTimeStamp(uint(timestamp5))
-
-	if err5 != nil {
-		t.Error(err5)
-	}
-
-	if expectedDay5 != day5 {
-		t.Errorf("expected day %d result %d", expectedDay5, day5)
-	}
-	if expectedMillis5 != millis5 {
-		t.Errorf("expected millis %x result %x", expectedMillis5, millis5)
 	}
 }
 
@@ -1657,7 +1628,7 @@ func createMSM4() *msm4message.Message {
 func createRTCMWithMSM4(msm4 *msm4message.Message, utcTime time.Time) *Message {
 	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	message.Readable = msm4
-	message.UTCTime = &utcTime
+	message.UTCTimeFromTimestamp = utcTime
 
 	return message
 }
@@ -1668,10 +1639,6 @@ func TestNew(t *testing.T) {
 	const wantType = utils.MessageTypeMSM4QZSS
 	const wantWarning = "a warning"
 	wantBitstream := testdata.UnhandledMessageType1024
-	const wantValid = false
-	const wantComplete = false
-	const wantCRCValid = false
-	var wantUTCTime *time.Time = nil
 	var wantReadable interface{} = nil
 
 	message := NewMessage(wantType, wantWarning, wantBitstream)
@@ -1693,8 +1660,8 @@ func TestNew(t *testing.T) {
 
 	// Check the fields that should never be set by New
 
-	if wantUTCTime != message.UTCTime {
-		t.Errorf("want %v got %v", wantUTCTime, message.UTCTime)
+	if !message.UTCTimeFromTimestamp.IsZero() {
+		t.Errorf("want time zero got %v", message.UTCTimeFromTimestamp)
 	}
 
 	if wantReadable != message.Readable {
@@ -1708,7 +1675,6 @@ func TestNewNonRTCM(t *testing.T) {
 	const wantType = utils.NonRTCMMessage
 	const wantWarning = ""
 	var wantBitstream = []byte{'j', 'u', 'n', 'k'}
-	var wantUTCTime *time.Time = nil
 	var wantReadable interface{} = nil
 
 	message := NewNonRTCM(wantBitstream)
@@ -1730,8 +1696,8 @@ func TestNewNonRTCM(t *testing.T) {
 
 	// Check the fields that should never be set by NewNonRTCM
 
-	if wantUTCTime != message.UTCTime {
-		t.Errorf("want %v got %v", wantUTCTime, message.UTCTime)
+	if !message.UTCTimeFromTimestamp.IsZero() {
+		t.Errorf("want time zero got %v", message.UTCTimeFromTimestamp)
 	}
 
 	if wantReadable != message.Readable {
@@ -1742,24 +1708,32 @@ func TestNewNonRTCM(t *testing.T) {
 // TestString checks the message.String method for various message types.
 func TestString(t *testing.T) {
 
-	const wantNonRTCM = `message type -1, frame length 4
+	const wantNonRTCM = `Message type -1, Non-RTCM data
+Data which is not in RTCM3 format, for example NMEA messages.
+Frame length 4 bytes:
 00000000  6a 75 6e 6b                                       |junk|
 
 `
 
-	const wantShortFrame = `message type 1005, frame length 7
+	const wantShortFrame = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 7 bytes:
 00000000  d3 00 13 3e d0 02 0f                              |...>...|
 
 overrun - expected 152 bits in a message type 1005, got 8
 `
 
-	const want1024 = `message type 1024, frame length 14
+	const want1024 = `Message type 1024, Residuals, Plane Grid Representation
+A coordinate transformation message.  Not often found in actual use.
+Frame length 14 bytes:
 00000000  d3 00 08 40 00 00 8a 00  00 00 00 4f 5e e7        |...@.......O^.|
 
 message type 1024 currently cannot be displayed
 `
 
-	const want1005 = `message type 1005, frame length 25
+	const want1005 = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 25 bytes:
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
 00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
@@ -1768,14 +1742,16 @@ stationID 2, ITRF realisation year 3, ignored 0xf,
 x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
 ECEF coords in metres (12.3456, 23.4567, 34.5678)
 `
-	const resultTemplateMSM4Complete = `2023-02-14 01:02:03.004 +0000 UTC
-message type 1074, frame length 42
+	const resultTemplateMSM4Complete = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
+The type 4 Multiple Signal Message format for the American GPS system.
+Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
-type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-stationID 1, timestamp 2, multiple message, sequence number 3
+Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
+stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
 2 satellites, 3 signal types, 6 signals
@@ -1787,13 +1763,16 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
  8 11 {%.3f, %.3f, 14, true, 15}
 `
 
-	const wantIncompleteMSM4 = `message type 1074, frame length 42
+	const wantIncompleteMSM4 = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
+The type 4 Multiple Signal Message format for the American GPS system.
+Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
-type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-stationID 1, timestamp 2, multiple message, sequence number 3
+Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
+stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
 2 satellites, 3 signal types, 6 signals
@@ -1802,8 +1781,9 @@ No Signals
 `
 
 	// This result is copied from rtcm_test.go.
-	const wantMSM7 = `2023-02-14 01:02:03.004 +0000 UTC
-message type 1077, frame length 838
+	const wantMSM7 = `Message type 1077, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for the USA’s GPS system.
+Frame length 838 bytes:
 00000000  43 50 00 67 00 97 62 00  00 08 40 a0 65 00 00 00  |CP.g..b...@.e...|
 00000010  00 20 00 80 00 6d ff a8  aa 26 23 a6 a2 23 24 00  |. ...m...&#..#$.|
 00000020  00 00 00 36 68 cb 83 7a  6f 9d 7c 04 92 fe f2 05  |...6h..zo.|.....|
@@ -1858,8 +1838,9 @@ message type 1077, frame length 838
 00000330  00 00 00 04 00 26 18 00  00 00 20 02 00 00 75 53  |.....&.... ...uS|
 00000340  fa 82 42 62 9a 80                                 |..Bb..|
 
-type 1077 GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)
-stationID 0, timestamp 432023000, multiple message, sequence number 0
+Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)
+stationID 0, multiple message, issue of data station 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 8 satellites, 2 signal types, 16 signals
@@ -1889,7 +1870,9 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 31 16 {21670767.783, 88736342.592, 779, false, 876, -441.969}
 `
 
-	const wantCrazy1005 = `message type 1005, frame length 225
+	const wantCrazy1005 = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 225 bytes:
 00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1908,7 +1891,9 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 
 expected message type 1005 got 1077
 `
-	const wantCrazyMSM4 = `message type 1124, frame length 225
+	const wantCrazyMSM4 = `Message type 1124, BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
+The type 4 Multiple Signal Message format for China’s BeiDou system.
+Frame length 225 bytes:
 00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
 00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
@@ -1928,7 +1913,9 @@ expected message type 1005 got 1077
 message type 1077 is not an MSM4
 `
 
-	const wantCrazyMSM7 = `message type 1097, frame length 42
+	const wantCrazyMSM7 = `Message type 1097, Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for Europe’s Galileo system.
+Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
@@ -1997,7 +1984,7 @@ message type 1074 is not an MSM7
 
 	completeMSM7Message := NewMessage(msm7.Header.MessageType, "", testdata.MessageBatchWithJunk[3:841])
 	completeMSM7Message.Readable = msm7
-	completeMSM7Message.UTCTime = &utcTime
+	completeMSM7Message.UTCTimeFromTimestamp = utcTime
 
 	// These messages have the wrong message type, which
 	// String() treats as special cases.
@@ -2057,7 +2044,7 @@ func TestCopy(t *testing.T) {
 	const wantValid = false
 	const wantComplete = false
 	const wantCRCValid = false
-	var wantUTCTime *time.Time = nil
+	const wantUTCTime = 0
 	var wantReadable interface{} = nil
 	wantBitstream := testdata.UnhandledMessageType1024
 
@@ -2082,8 +2069,8 @@ func TestCopy(t *testing.T) {
 
 	// Check the fields that should never be set by Copy
 
-	if wantUTCTime != message.UTCTime {
-		t.Errorf("want %v got %v", wantUTCTime, message.UTCTime)
+	if !message.UTCTimeFromTimestamp.IsZero() {
+		t.Errorf("want %v got %v", wantUTCTime, message.UTCTimeFromTimestamp)
 	}
 
 	if wantReadable != message.Readable {

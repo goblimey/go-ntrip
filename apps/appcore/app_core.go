@@ -35,7 +35,7 @@ func New(conf *jsonconfig.Config, channels []chan rtcm.Message) *AppCore {
 // the one use last time.  The config should specify all the possible device
 // file names.  If the device is connected using an RS/232 serial line then
 // the config just needs to specify one name, the name of that device.
-func (appCore *AppCore) HandleMessages() {
+func (appCore *AppCore) HandleMessages(startTime time.Time) {
 
 	// Loop forever:  find and consume input files, read the data from them,
 	// convert them to messages and send the messages to the given channel.
@@ -51,7 +51,7 @@ func (appCore *AppCore) HandleMessages() {
 		r := appCore.Conf.WaitAndConnectToInput()
 		reader := bufio.NewReader(r)
 
-		continueFlag := appCore.HandleMessagesUntilEOF(reader)
+		continueFlag := appCore.HandleMessagesUntilEOF(startTime, reader)
 
 		if continueFlag == 1 {
 			// Stop processing.  This is to allow a unit test to run this function.
@@ -73,7 +73,7 @@ func (appCore *AppCore) HandleMessages() {
 // returned value may be 1 (stop).  If a caller that would normally run
 // indefinitely receives a stop return, it should stop.  This is to allow
 // unit testing of processes that would normally never terminate.
-func (appCore *AppCore) HandleMessagesUntilEOF(reader *bufio.Reader) int {
+func (appCore *AppCore) HandleMessagesUntilEOF(startTime time.Time, reader *bufio.Reader) int {
 
 	// Create a message channel.
 	messageChan := make(chan rtcm.Message)
@@ -91,7 +91,7 @@ func (appCore *AppCore) HandleMessagesUntilEOF(reader *bufio.Reader) int {
 	// Significant time may have elapsed in WaitAndConnectToInput, maybe
 	// days so the time we got on the previous trip may be stale.  Reset the
 	// handler's time and therefore the meaning of any MSM timestamps.
-	go fh.Handle(time.Now(), reader)
+	go fh.Handle(startTime, reader)
 
 	// Fetch the messages and send them to the processing channels.
 	for {

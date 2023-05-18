@@ -137,6 +137,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	AppCore "github.com/goblimey/go-ntrip/apps/appcore"
 	"github.com/goblimey/go-ntrip/jsonconfig"
@@ -238,7 +239,7 @@ func processMessages(config *jsonconfig.Config) {
 	// Start a handler.  The resulting messages will emerge from the
 	// message channel.
 	appCore := AppCore.New(config, channels)
-	go appCore.HandleMessages()
+	go appCore.HandleMessages(time.Now())
 
 	// HandleMessages runs until it's forcibly shut down. To keep the goroutines
 	// running, loop forever.

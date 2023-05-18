@@ -190,8 +190,9 @@ func TestNew(t *testing.T) {
 
 // TstString checks the String method.
 func TestString(t *testing.T) {
-	const resultTemplateComplete = `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-stationID 1, timestamp 2, multiple message, sequence number 3
+	const resultTemplateComplete = `Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
+stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
 2 satellites, 3 signal types, 6 signals
@@ -203,8 +204,9 @@ Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise
  8 11 {%.3f, %.3f, 14, true, 15}
 `
 
-	const wantIncomplete = `type 1074 GPS Full Pseudoranges and PhaseRanges plus CNR
-stationID 1, timestamp 2, multiple message, sequence number 3
+	const wantIncomplete = `Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
+stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
 2 satellites, 3 signal types, 6 signals
@@ -242,7 +244,7 @@ No Signals
 		got := td.message.String()
 
 		if td.want != got {
-			t.Error(diff.Diff(td.want, got))
+			t.Errorf("%s: %s", td.description, diff.Diff(td.want, got))
 		}
 	}
 }

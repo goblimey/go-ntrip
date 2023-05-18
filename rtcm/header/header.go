@@ -4,6 +4,7 @@ package header
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
@@ -72,6 +73,18 @@ type Header struct {
 	// milliseconds from the start of the day in the Moscow time zone.
 	//
 	Timestamp uint
+
+	// StartOfWeek is the start of the GNSS week in which the timestamp
+	// occurs.  Each constellation's week start around midnight at the end of
+	// but each constellations has a different offset.  For example in 2023
+	// the GPS "timezone" is 18 seconds ahead of UTC so the last few seconds
+	// of Saturday UTC is Sunday for GPS.
+	StartOfWeek time.Time
+
+	// UTCTimeFromTimestamp is the time in UTC derived from the timestamp.
+	// The header doesn't contain sufficient information to figure this
+	// out.  Something else has to set it.
+	UTCTimeFromTimestamp time.Time
 
 	// MultipleMessage - bit(1) - true if more MSMs follow for this
 	// constellation, station and timestamp.
@@ -205,16 +218,45 @@ func New(
 // String return a text version of the MSMHeader.
 func (header *Header) String() string {
 
-	title := header.getTitle()
+	line := "Sent at " + header.UTCTimeFromTimestamp.Format(utils.DateLayout) + "\n"
 
-	line := fmt.Sprintf("type %d %s\n", header.MessageType, title)
+	startTimeDisplay := header.StartOfWeek.Format(utils.DateLayout)
 
-	mode := "single"
-	if header.MultipleMessage {
-		mode = "multiple"
+	constellation := utils.GetConstellation(header.MessageType)
+	if constellation == "Glonass" {
+
+		// A Glonass timestamp is 3 bits day, 27 bit milliseconds.  A day
+		// value of 7 provokes an error.
+		day, millis, err := utils.ParseGlonassTimestamp(header.Timestamp)
+
+		if err != nil {
+			line += fmt.Sprintf("timestamp %d - %s\n",
+				header.Timestamp, err.Error())
+		} else {
+			_, hours, minutes, seconds, millis :=
+				utils.ParseMilliseconds(millis)
+
+			line += fmt.Sprintf("Start of Glonass week %s plus timestamp %d (%dd %dh %dm %ds %dms)\n",
+				startTimeDisplay, header.Timestamp, day, hours, minutes, seconds, millis)
+		}
+	} else {
+
+		// The timestamp is milliseconds from the start of this
+		// constellation's GNSS week.
+		days, hours, minutes, seconds, millis :=
+			utils.ParseMilliseconds(header.Timestamp)
+
+		line += fmt.Sprintf("Start of %s week %s plus timestamp %d (%dd %dh %dm %ds %dms)\n",
+			constellation, startTimeDisplay, header.Timestamp,
+			days, hours, minutes, seconds, millis)
 	}
-	line += fmt.Sprintf("stationID %d, timestamp %d, %s message, sequence number %d\n",
-		header.StationID, header.Timestamp, mode, header.IssueOfDataStation)
+
+	mode := "single message"
+	if header.MultipleMessage {
+		mode = "multiple message"
+	}
+	line += fmt.Sprintf("stationID %d, %s, issue of data station %d\n",
+		header.StationID, mode, header.IssueOfDataStation)
 	line += fmt.Sprintf("session transmit time %d, clock steering %d, external clock %d\n",
 		header.SessionTransmissionTime, header.ClockSteeringIndicator,
 		header.ExternalClockSteeringIndicator)
@@ -226,54 +268,17 @@ func (header *Header) String() string {
 	return line
 }
 
-// getTitle is a helper for Display.  It gets the title for the display.
-func (header *Header) getTitle() string {
+// getTitle gets the title of the MSM.
+func (header *Header) GetTitle() string {
 
-	const titleMSM4 = " Full Pseudoranges and PhaseRanges plus CNR"
-	const titleMSM7 = " Full Pseudoranges and PhaseRanges plus CNR (high resolution)"
-
-	constellation := utils.GetConstellation(header.MessageType)
-
-	switch header.MessageType {
-	case utils.MessageTypeMSM4GPS:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7GPS:
-		return constellation + titleMSM7
-	case utils.MessageTypeMSM4Glonass:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7Glonass:
-		return constellation + titleMSM7
-	case utils.MessageTypeMSM4Galileo:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7Galileo:
-		return constellation + titleMSM7
-	case utils.MessageTypeMSM4SBAS:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7SBAS:
-		return constellation + titleMSM7
-	case utils.MessageTypeMSM4QZSS:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7QZSS:
-		return constellation + titleMSM7
-	case utils.MessageTypeMSM4Beidou:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7Beidou:
-		return constellation + titleMSM7
-	case utils.MessageTypeMSM4NavicIrnss:
-		return constellation + titleMSM4
-	case utils.MessageTypeMSM7NavicIrnss:
-		return constellation + titleMSM7
-	default:
-		// In this case constellation is set to "unknown constellation"
-		return constellation
-	}
+	tc := utils.GetTitleAndComment(header.MessageType)
+	return tc.Title
 }
 
 // GetMSMHeader extracts the header from an MSM message (MSM4 or MSM7).
 // It returns the header data and the bit position of the start of the
 // satellite data (which comes next in the bit stream).  If the bit stream
 // is not long enough to hold the header, an error is returned.
-//
 func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 
 	// The bit stream contains a 3-byte leader, a Multiple Signal Message and a
@@ -388,13 +393,6 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 	// If signals were observed from satellites 3, 7 and 9, the slice will
 	// contain {3, 7, 9}.  (Note, we then expect to see 3 signal cells later
 	// in the message.)
-	// header.Satellites = make([]uint, 0)
-	// for satNum := 1; satNum <= lenSatelliteMaskBits; satNum++ {
-	// 	if utils.GetBitsAsUint64(bitStream, pos, 1) == 1 {
-	// 		header.Satellites = append(header.Satellites, uint(satNum))
-	// 	}
-	// 	pos++
-	// }
 
 	satellites := getSatellites(satelliteMask)
 
@@ -460,7 +458,6 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 // GetMSMType is a helper function for GetMSHeader.  It extracts the message type from the bit stream
 // and returns it, plus the number of bits consumed.  An error is returned if the message is too short
 // or not an MSM4 or an MSM7.
-//
 func getMSMType(bitStream []byte) (int, uint, error) {
 
 	// The bit stream contains a 3-byte leader, an embedded message and a 3-byte CRC.

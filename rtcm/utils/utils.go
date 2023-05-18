@@ -2,13 +2,11 @@
 package utils
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"time"
 )
-
-// dateLayout defines the layout of dates when they are displayed.  It
-// produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone".
-const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
 
 // StartOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
 const StartOfMessageFrame byte = 0xd3
@@ -45,9 +43,76 @@ const MessageTypeMSM7Beidou = 1127
 const MessageTypeMSM4NavicIrnss = 1134
 const MessageTypeMSM7NavicIrnss = 1137
 
-// These are used to idntify MSM messages - values are filled in by init.
+// These are used to identify MSM messages - values are filled in by init.
 var MSM4MessageTypes map[int]interface{}
 var MSM7MessageTypes map[int]interface{}
+
+// Handling of timestamps and the equivalent times.
+
+// Multiple Signal Messages contain a thirty-bit timestamp which is the time
+// since the start of some period. For Glonass the timestamp is a three-bit
+// day and a twentyseven-bit value, milliseconds since the start of the day
+// in Moscow time.  Day 0 is Sunday and day 7 is an illegal value.  For all
+// the other constellations the timestamp is milliseconds since the start of
+// the week, which starts a few leap seconds away from midnight at the start
+// of Sunday UTC, a different number of leap seconds for each constellation.
+// For example in 2023 the GPS week starts on Saturday 18 seconds before
+// midnight UTC, so the last few seconds of Saturday UTC are, in the GPS
+// "timezone", the start of Sunday.
+
+// MaxTimestamp is the maximum timestamp value.  The timestamp is 30 bits
+// giving milliseconds since the start of the day.
+const MaxTimestamp = 0x3fffffff // 0011 1111 1111 1111 1111 1111 1111 1111
+
+// GPSLeapSeconds is the duration that GPS time is ahead of UTC
+// in seconds, correct from the start of 2017/01/01.  An extra leap
+// second may be added every four years.  The start of 2021 was a
+// candidate for adding another leap second but it was not necessary.
+const GPSLeapSeconds = -18
+
+// GPSTimeOffset is the offset to convert a GPS time to UTC.
+var GPSTimeOffset time.Duration = time.Duration(GPSLeapSeconds) * time.Second
+
+// GlonassTimeOffset is the offset to convert Glonass time to UTC.
+// Glonass keeps Moscow time which is 3 hours ahead of UTC.
+var GlonassTimeOffset = time.Duration(-1*3) * time.Hour
+
+// GlonassInvalidDay is the invalid value for the day part of the timestamp.
+const GlonassInvalidDay = 7
+
+// GlonassDayBitMask is used to extract the Glonass day from the timestamp
+// in an MSM7 message.  The 30 bit time value is a 3 bit day (0 is Sunday)
+// followed by a 27 bit value giving milliseconds since the start of the
+// day.
+const GlonassDayBitMask = 0x38000000 // 0011 1000 0000 0000 0000 0000 0000 0000
+
+// beidouTimeOffset is the offset to convert a BeiDou time value to
+// UTC.  UTC is based on International Atomic Time (TAI):
+// https://www.timeanddate.com/time/international-atomic-time.html.
+//
+// This reference from November 2013 compares Beidout Time (BDT) with
+// TAI: https://www.unoosa.org/pdf/icg/2016/Beidou-Timescale2016.pdf.
+//
+// "BDT is a uniform scale and is 33 seconds behind TAI"
+//
+// HOWEVER the rtklib software (decode_msm_header) says that BDT is
+// 14 seconds ahead of GPS time, which is 18 seconds behind UTC,
+// meaning that BDT is 4 seconds behind UTC.  Analysis of real data
+// confirms that.
+var BeidouLeapSeconds = -4
+var BeidouTimeOffset = time.Duration(BeidouLeapSeconds) * time.Second
+
+// DateLayout defines the layout of dates when they are displayed.  It
+// produces "yyyy-mm-dd hh:mm:ss.ms timeshift timezone", for example
+// "2023-05-12 00:00:05 +0000 UTC"
+const DateLayout = "2006-01-02 15:04:05.999 -0700 MST"
+
+// Locations (timezones) - set up by the init function.
+var LocationUTC *time.Location
+var LocationGMT *time.Location
+var LocationLondon *time.Location
+var LocationMoscow *time.Location
+var LocationParis *time.Location
 
 // invalidRange is the invalid value for the whole millis range in an MSM4
 // or MSM7 satellite cell.
@@ -135,13 +200,6 @@ const CRCLengthBytes = 3
 // CRCLengthBits is the length of the Cyclic Redundancy check value in bits.
 const CRCLengthBits = CRCLengthBytes * 8
 
-// Locations (timezones) - set up by the init function.
-var LocationUTC *time.Location
-var LocationGMT *time.Location
-var LocationLondon *time.Location
-var LocationMoscow *time.Location
-var LocationParis *time.Location
-
 func init() {
 	LocationUTC, _ = time.LoadLocation("UTC")
 	LocationGMT, _ = time.LoadLocation("GMT")
@@ -167,6 +225,41 @@ func init() {
 	MSM7MessageTypes[MessageTypeMSM7QZSS] = nil
 	MSM7MessageTypes[MessageTypeMSM7Beidou] = nil
 	MSM7MessageTypes[MessageTypeMSM7NavicIrnss] = nil
+}
+
+// ParseGlonassTimestamp separates out the two parts of a Glonass
+// timestamp -3/27 day/milliseconds from start of day.
+func ParseGlonassTimestamp(timestamp uint) (uint, uint, error) {
+
+	// The timestamp must fit into 30 bits.
+	if timestamp > MaxTimestamp {
+		return 0, 0, errors.New("out of range")
+	}
+
+	day := timestamp >> 27
+	if day == GlonassInvalidDay {
+		return 0, 0, errors.New("illegal Glonass day")
+	}
+	millis := timestamp &^ GlonassDayBitMask
+	return day, millis, nil
+}
+
+// ParseMilliseconds breaks a millisecond timestamp down into days, hours etc.
+func ParseMilliseconds(timestamp uint) (days, hours, minutes, seconds, milliseconds uint) {
+	milliseconds = timestamp % 1000
+	// Get the number of seconds.
+	totalSeconds := timestamp / 1000
+	seconds = totalSeconds % 60
+	// Get the number of minutes.
+	totalMinutes := totalSeconds / 60
+	minutes = totalMinutes % 60
+	// Get the number of hours.
+	totalHours := totalMinutes / 60
+	hours = totalHours % 24
+	// Get the number of days.
+	days = totalHours / 24
+
+	return // days, hours, minutes, seconds, milliseconds
 }
 
 // GetPhaseRangeLightMilliseconds gets the phase range of the signal in
@@ -409,6 +502,344 @@ func GetConstellation(messageType int) string {
 	}
 
 	return constellation
+}
+
+// TitleAndComment is used to derive a title and comment from a message type.
+// See GetTitleAndComment.  The data are taken mostly from
+// https://www.use-snip.com/kb/knowledge-base/rtcm-3-message-list/?gclid=Cj0KCQjwpPKiBhDvARIsACn-gzC4jCabJSzgB6WgHJv3QF2a26alPfUjrSqSHMQPsUHU6sMIS_3SJP4aAoPVEALw_wcB
+type TitleAndComment struct {
+	// Title is the title of the message.
+	Title string
+	// Comment is a comment about the message type.
+	Comment string
+}
+
+func GetTitleAndComment(messageType int) *TitleAndComment {
+
+	titleComment := map[int]TitleAndComment{
+		NonRTCMMessage: {
+			Title:   "Non-RTCM data",
+			Comment: "Data which is not in RTCM3 format, for example NMEA messages.",
+		},
+		1001: {"L1-Only GPS RTK Observables",
+			"This GPS message type is not generally used or supported; type 1004 is to be preferred."},
+		1002: {"Extended L1-Only GPS RTK Observables",
+			"This GPS message type is used when only L1 data is present and bandwidth is very tight, often 1004 is used in such cases (even when no L2 data is present)."},
+		1003: {"L1&L2 GPS RTK Observables",
+			"This GPS message type is not generally used or supported; type 1004 is to be preferred."},
+		1004: {"Extended L1&L2 GPS RTK Observables",
+			"This GPS message type is the most common observational message type, with L1/L2/SNR content. This is the most common legacy message found."},
+		1005: {"Stationary RTK Reference Station Antenna Reference Point (ARP)",
+			"Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value."},
+		1006: {"Stationary RTK Reference Station ARP with Antenna Height",
+			"Commonly called the Station Description this message includes the ECEF location of the antenna (the antenna reference point (ARP) not the phase center) and also the quarter phase alignment details.  The height about the ARP value is also provided. The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1005 and 1032. The 1005 message does not convey the height about the ARP value."},
+		1007: {"Antenna Descriptor",
+			"A textual description of the antenna “descriptor” which is used as a model number. Also has station ID (a number). The descriptor can be used to look up model specific details of that antenna.   See 1008 as well.  Search for ADVNULLANTENNA for additional articles on controlling this setting."},
+		1008: {"Antenna Descriptor and Serial Number",
+			"A textual description of the antenna “descriptor” which is used as a model number, and a (presumed unique) antenna serial number (text). Also has station ID (a number). The descriptor can be used to look up model specific details of that antenna.   See 1007 as well. Search for ADVNULLANTENNA for additional articles on controlling this setting."},
+		1009: {"L1-Only GLONASS RTK Observables",
+			"This GLONASS message type is not generally used or supported; type 1012 is to be preferred."},
+		1010: {"Extended L1-Only GLONASS RTK Observables",
+			"This GLONASS message type is used when only L1 data is present and bandwidth is very tight, often 1012 is used in such cases."},
+		1011: {"L1&L2 GLONASS RTK Observables",
+			"This GLONASS message type is not generally used or supported; type 1012 is to be preferred."},
+		1012: {"Extended L1&L2 GLONASS RTK Observables",
+			"This GLONASS message type is the most common observational message type, with L1/L2/SNR content.  This is one of the most common legacy messages found."},
+		1013: {"System Parameters",
+			"This message provides a table of what message types are sent at what rates.  This is the same information you find in the Caster Table (this message predates NTRIP).  SNIP infers this information by observing the data stream, and creates Caster Table entries when required.  This message is also notable in that it contains the number of leap seconds then in effect.  Not many NTRIP devices send this message."},
+		1014: {"Network Auxiliary Station Data",
+			"Contains a summary of the number of stations that are part of a Network RTK system, along with the relative location of the auxiliary reference stations from the master station."},
+		1015: {"GPS Ionospheric Correction Differences",
+			"Contains a short message with ionospheric carrier phase correction information for a single auxiliary reference station for the GPS GNSS type.  See also message 1017."},
+		1016: {"GPS Geometric Correction Differences",
+			"Contains a short message with geometric carrier phase correction information for a single auxiliary reference station for the GPS GNSS type.  See also message 1017."},
+		1017: {"GPS Combined Geometric and Ionospheric Correction Differences",
+			"Contains a short message with both ionospheric and geometric carrier phase correction information for a single auxiliary reference station for the GPS GNSS type.  See also messages 1015 and 1016."},
+		1018: {"RESERVED for Alternative Ionospheric Correction Difference Message",
+			"This message has not been developed or released by SC-104 at this time."},
+		1019: {"GPS Ephemerides",
+			"Sets of these messages (one per SV) are used to send the broadcast orbits for GPS in a Kepler format."},
+		1020: {"GLONASS Ephemerides",
+			"Sets of these messages (one per SV) are used to send the broadcast orbits for GLONASS in a XYZ dot product format."},
+		1021: {"Helmert / Abridged Molodenski Transformation Parameters",
+			"A classical Helmert 7-parameter coordinate transformation message.  Not often found in actual use."},
+		1022: {"Molodenski-Badekas Transformation Parameters",
+			"A coordinate transformation message using the Molodenski-Badekas method (translates through an arbitrary point rather than the origin)   Not often found in actual use."},
+		1023: {"Residuals, Ellipsoidal Grid Representation",
+			"A coordinate transformation message.  Not often found in actual use."},
+		1024: {"Residuals, Plane Grid Representation",
+			"A coordinate transformation message.  Not often found in actual use."},
+		1025: {"Projection Parameters, Projection Types other than Lambert Conic Conformal",
+			"A coordinate projection message.  Not often found in actual use."},
+		1026: {"Projection Parameters, Projection Type LCC2SP (Lambert Conic Conformal",
+			"A coordinate projection message.  Not often found in actual use."},
+		1027: {"Projection Parameters, Projection Type OM (Oblique Mercator)",
+			"A coordinate projection message.  Not often found in actual use."},
+		1028: {"Reserved for Global to Plate-Fixed Transformation",
+			"This message has not been developed or released by SC-104 at this time."},
+		1029: {"Unicode Text String",
+			"A message which provides a simple way to send short textual strings within the RTCM message set. About ~128 UTF-8 encoded characters are allowed."},
+		1030: {"GPS Network RTK Residual Message",
+			"This message provides per-SV non-dispersive interpolation residual data for the SVs used in a GPS network RTK system.  Not often found in actual use."},
+		1031: {"GLONASS Network RTK Residual",
+			"This message provides per-SV non-dispersive interpolation residual data for the SVs used in a GLONASS network RTK system.  Not often found in actual use."},
+		1032: {"Physical Reference Station Position",
+			"This message provides the ECEF location of the physical antenna used.  See message types 1005 and 1006.  Depending on the deployment needs, 1005, 1006, and 1032 are all commonly found."},
+		1033: {"Receiver and Antenna Descriptors",
+			"A message which provides short textual strings about the GNSS device and the Antenna device.  These strings can be used to obtain additional phase bias calibration information. This message is often sent along with either MT1007 or MT1008."},
+		1034: {"GPS Network FKP Gradient",
+			"A message which provides Network RTK Area Correction Parameters using a method of localized horizontal gradients for the GPS GNSS system."},
+		1035: {"GLONASS Network FKP Gradient",
+			"A message which provides Network RTK Area Correction Parameters using a method of localized horizontal gradients for the GLONASS GNSS system."},
+		1036: {"Not defined at this time",
+			"This message has not been developed or released by SC-104 at this time."},
+		1037: {"GLONASS Ionospheric Correction Differences",
+			"Contains a short message with ionospheric carrier phase correction information for a single auxiliary reference station for the GLONASS GNSS type.  See also message 1039."},
+		1038: {"GLONASS Geometric Correction Differences",
+			"Contains a short message with geometric carrier phase correction information for a single auxiliary reference station for the GLONASS GNSS type.  See also message 1039."},
+		1039: {"GLONASS Combined Geometric and Ionospheric Correction Differences",
+			"Contains a short message with both ionospheric and geometric carrier phase correction information for a single auxiliary reference station for the GLONASS GNSS type.  See also messages 1037 and 1037."},
+		1042: {"BDS Satellite Ephemeris Data",
+			"Sets of these messages (one per SV) are used to send the broadcast orbits for the BeiDou (Compass) system."},
+		1043: {"Not defined at this time",
+			"This message has not been developed or released by SC-104 at this time."},
+		1044: {"QZSS Ephemerides",
+			"Sets of these messages (one per SV) are used to send the broadcast orbits for QZSS in a Kepler format."},
+		1045: {"Galileo F/NAV Satellite Ephemeris Data",
+			"Sets of these messages (one per SV) are used to send the Galileo F/NAV orbital data."},
+		1046: {"Galileo I/NAV Satellite Ephemeris Data",
+			"Sets of these messages (one per SV) are used to send the Galileo I/NAV orbital data."},
+		1057: {"SSR GPS Orbit Correction",
+			"A state space representation message which provides per-SV data.  It contains orbital error / deviation from the current broadcast information for GPS GNSS types."},
+		1058: {"SSR GPS Clock Correction",
+			"A state space representation message which provides per-SV data.  It contains SV clock error / deviation from the current broadcast information for GPS GNSS types."},
+		1059: {"SSR GPS Code Bias",
+			"A state space representation message which provides per-SV data.  It contains code bias errors for GPS GNSS types."},
+		1060: {"SSR GPS Combined Orbit and Clock Correction",
+			"A state space representation message which provides per-SV data.  It contains both the orbital errors and the clock errors from the current broadcast information for GPS GNSS types. Note these are given as offsets from the current broadcast data."},
+		1061: {"SSR GPS URA",
+			"A state space representation message which provides per-SV data.  It contains User Range Accuracy (URA) for GPS GNSS types."},
+		1062: {"SSR GPS High Rate Clock Correction",
+			"A state space representation message which provides a higher update rate than message 1058.  It provides more precise data on the per-SV clock error / deviation from the current broadcast information for GPS GNSS types."},
+		1063: {"SSR GLONASS Orbit Correction",
+			"A state space representation message which provides per-SV data.  It contains orbital error / deviation from the current broadcast information for GLONASS GNSS types."},
+		1064: {"SSR GLONASS Clock Correction",
+			"A state space representation message which provides per-SV data.  It contains SV clock error / deviation from the current broadcast information for GLONASS GNSS types."},
+		1065: {"SSR GLONASS Code Bias",
+			"A state space representation message which provides per-SV data.  It contains code bias errors for GLONASS GNSS types."},
+		1066: {"SSR GLONASS Combined Orbit and Clock Corrections",
+			"A state space representation message which provides per-SV data.  It contains both the orbital errors and the clock errors from the current broadcast information for GLONASS GNSS types."},
+		1067: {"SSR GLONASS URA",
+			"A state space representation message which provides per-SV data.  It contains User Range Accuracy (URA) data for GLONASS GNSS types."},
+		1068: {"SSR GLONASS High Rate Clock Correction",
+			"A state space representation message which provides a higher update rate than message 1064.  It provides more precise data on the per-SV clock error / deviation from the current broadcast information for GLONASS GNSS types."},
+		1070: {"Reserved for MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1071: {"GPS MSM1",
+			"The type 1 Multiple Signal Message format for the USA’s GPS system."},
+		1072: {"GPS MSM2",
+			"The type 2 Multiple Signal Message format for the USA’s GPS system."},
+		1073: {"GPS MSM3",
+			"The type 3 Multiple Signal Message format for the USA’s GPS system."},
+		1074: {"GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for the American GPS system."},
+		1075: {"GPS MSM5",
+			"The type 5 Multiple Signal Message format for the USA’s GPS system."},
+		1076: {"GPS MSM6",
+			"The type 6 Multiple Signal Message format for the USA’s GPS system."},
+		1077: {"GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for the USA’s GPS system."},
+		1078: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1079: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1080: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1081: {"GLONASS MSM1",
+			"The type 1 Multiple Signal Message format for the Russian GLONASS system."},
+		1082: {"GLONASS MSM2",
+			"The type 2 Multiple Signal Message format for the Russian GLONASS system."},
+		1083: {"GLONASS MSM3",
+			"The type 3 Multiple Signal Message format for the Russian GLONASS system."},
+		1084: {"GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for the Russian GLONASS system."},
+		1085: {"GLONASS MSM5",
+			"The type 5 Multiple Signal Message format for the Russian GLONASS system."},
+		1086: {"GLONASS MSM6",
+			"The type 6 Multiple Signal Message format for the Russian GLONASS system."},
+		1087: {"GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for the Russian GLONASS system."},
+		1088: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1089: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1090: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1091: {"Galileo MSM1",
+			"The type 1 Multiple Signal Message format for Europe’s Galileo system."},
+		1092: {"Galileo MSM2",
+			"The type 2 Multiple Signal Message format for Europe’s Galileo system."},
+		1093: {"Galileo MSM3",
+			"The type 3 Multiple Signal Message format for Europe’s Galileo system."},
+		1094: {"Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for Europe’s Galileo system."},
+		1095: {"Galileo MSM5",
+			"The type 5 Multiple Signal Message format for Europe’s Galileo system."},
+		1096: {"Galileo MSM6",
+			"The type 6 Multiple Signal Message format for Europe’s Galileo system."},
+		1097: {"Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for Europe’s Galileo system."},
+		1098: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1099: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1100: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1101: {"SBAS MSM1",
+			"The type 1 Multiple Signal Message format for SBAS/WAAS systems."},
+		1102: {"SBAS MSM2",
+			"The type 2 Multiple Signal Message format for SBAS/WAAS systems."},
+		1103: {"SBAS MSM3",
+			"The type 3 Multiple Signal Message format for SBAS/WAAS systems."},
+		1104: {"SBAS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for SBAS/WAAS systems."},
+		1105: {"SBAS MSM5",
+			"The type 5 Multiple Signal Message format for SBAS/WAAS systems."},
+		1106: {"SBAS MSM6",
+			"The type 6 Multiple Signal Message format for SBAS/WAAS systems."},
+		1107: {"SBAS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for SBAS/WAAS systems."},
+		1108: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1109: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1110: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1111: {"QZSS MSM1",
+			"The type 1 Multiple Signal Message format for Japan’s QZSS system."},
+		1112: {"QZSS MSM2",
+			"The type 2 Multiple Signal Message format for Japan’s QZSS system."},
+		1113: {"QZSS MSM3",
+			"The type 3 Multiple Signal Message format for Japan’s QZSS system."},
+		1114: {"QZSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for Japan’s QZSS system."},
+		1115: {"QZSS MSM5",
+			"The type 5 Multiple Signal Message format for Japan’s QZSS system."},
+		1116: {"QZSS MSM6",
+			"The type 6 Multiple Signal Message format for Japan’s QZSS system."},
+		1117: {"QZSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for Japan’s QZSS system."},
+		1118: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1119: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1120: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1121: {"BeiDou MSM1",
+			"The type 1 Multiple Signal Message format for China’s BeiDou system."},
+		1122: {"BeiDou MSM2",
+			"The type 2 Multiple Signal Message format for China’s BeiDou system."},
+		1123: {"BeiDou MSM3",
+			"The type 3 Multiple Signal Message format for China’s BeiDou system."},
+		1124: {"BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for China’s BeiDou system."},
+		1125: {"BeiDou MSM5",
+			"The type 5 Multiple Signal Message format for China’s BeiDou system."},
+		1126: {"BeiDou MSM6",
+			"The type 6 Multiple Signal Message format for China’s BeiDou system."},
+		1127: {"BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for China’s BeiDou system."},
+		1128: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1134: {"NavIC/IRNSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+			"The type 4 Multiple Signal Message format for the NavIC/IRNSS systems."},
+		1137: {
+			"NavIC/IRNSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+			"The type 7 Multiple Signal Message format for the NavIC/IRNSS systems."},
+		1229: {"Reserved MSM",
+			"This Multiple Signal Message type has not yet been assigned for use."},
+		1230: {"GLONASS L1 and L2 Code-Phase Biases",
+			"This message provides corrections for the inter-frequency bias caused by the different FDMA frequencies (k, from -7 to 6) used."},
+		4095: {"Assigned to: Ashtech",
+			"The content and format of this message is defined by its owner."},
+		4094: {"Assigned to: Trimble Navigation Ltd.",
+			"The content and format of this message is defined by its owner."},
+		4093: {"Assigned to: NovAtel Inc.",
+			"The content and format of this message is defined by its owner."},
+		4092: {"Assigned to: Leica Geosystems",
+			"The content and format of this message is defined by its owner."},
+		4091: {"Assigned to: Topcon Positioning Systems",
+			"The content and format of this message is defined by its owner."},
+		4090: {"Assigned to: Geo++",
+			"The content and format of this message is defined by its owner."},
+		4089: {"Assigned to: Septentrio Satellite Navigation",
+			"The content and format of this message is defined by its owner."},
+		4088: {"Assigned to: IfEN GmbH",
+			"The content and format of this message is defined by its owner."},
+		4087: {"Assigned to:  Fugro",
+			"The content and format of this message is defined by its owner."},
+		4086: {"Assigned to: inPosition GmbH",
+			"The content and format of this message is defined by its owner."},
+		4085: {"Assigned to: European GNSS Supervisory Authority",
+			"The content and format of this message is defined by its owner."},
+		4084: {"Assigned to: Geodetics, Inc.",
+			"The content and format of this message is defined by its owner."},
+		4083: {"Assigned to: German Aerospace Center, (DLR)",
+			"The content and format of this message is defined by its owner."},
+		4082: {"Assigned to: Cooperative Research Centre for Spatial Information",
+			"The content and format of this message is defined by its owner."},
+		4081: {"Assigned to: Seoul National University GNSS Lab",
+			"The content and format of this message is defined by its owner."},
+		4080: {"Assigned to: NavCom Technology, Inc.",
+			"The content and format of this message is defined by its owner."},
+		4079: {"Assigned to: SubCarrier Systems Corp. (SCSC) The makers of SNIP",
+			"The content and format of this message is defined by its owner."},
+		4078: {"Assigned to: ComNav Technology Ltd.",
+			"The content and format of this message is defined by its owner."},
+		4077: {"Assigned to: Hemisphere GNSS Inc.",
+			"The content and format of this message is defined by its owner."},
+		4076: {"Assigned to: International GNSS Service (IGS)",
+			"The content and format of this message is defined by its owner."},
+		4075: {"Assigned to: Alberding GmbH",
+			"The content and format of this message is defined by its owner."},
+		4074: {"Assigned to: Unicore Communications Inc.",
+			"The content and format of this message is defined by its owner."},
+		4073: {"Assigned to: Mitsubishi Electric Corp.",
+			"The content and format of this message is defined by its owner."},
+		4072: {"Assigned to: u-blox AG",
+			"The content and format of this message is defined by its owner."},
+		4071: {"Assigned to: Wuhan Navigation and LBS",
+			"The content and format of this message is defined by its owner."},
+		4070: {"Assigned to: Wuhan MengXin Technology",
+			"The content and format of this message is defined by its owner."},
+		4069: {"Assigned to: VERIPOS Ltd",
+			"The content and format of this message is defined by its owner."},
+		4068: {"Assigned to: Qianxun Location Networks Co. Ltd",
+			"The content and format of this message is defined by its owner."},
+		4067: {"Assigned to: China Transport telecommunications & Information Center",
+			"The content and format of this message is defined by its owner."},
+		4066: {"Assigned to: Lantmateriet",
+			"The content and format of this message is defined by its owner."},
+		4065: {"Assigned to: Allystar Technology (Shenzhen) Co. Ltd.",
+			"The content and format of this message is defined by its owner."},
+		4064: {"Assigned to: NTLab",
+			"The content and format of this message is defined by its owner."},
+		4063: {"Assigned to: CHC Navigation (CHCNAV)",
+			"The content and format of this message is defined by its owner."},
+		4062: {"Assigned to: SwiftNav Inc.",
+			"The content and format of this message is defined by its owner."},
+		4061: {"Assigned to: Geely",
+			"The content and format of this message is defined by its owner."},
+	}
+
+	tc := titleComment[messageType]
+	if len(tc.Title) == 0 {
+		title := fmt.Sprintf("message type %d is not known", messageType)
+		result := TitleAndComment{title, ""}
+		return &result
+	}
+
+	return &tc
 }
 
 // getSignalFrequencyGPS returns the frequency of each GPS signal, 0 if

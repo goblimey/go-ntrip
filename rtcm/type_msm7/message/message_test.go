@@ -69,8 +69,9 @@ func TestString(t *testing.T) {
 	signalRow2 := []signal.Cell{*signalCell2, *signalCell3}
 	signals := [][]signal.Cell{signalRow1, signalRow2}
 
-	resultTemplate := `type 1077 GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)
-stationID 2, timestamp 3, single message, sequence number 1
+	resultTemplate := `Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 3 (0d 0h 0m 0s 3ms)
+stationID 2, single message, issue of data station 1
 session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
 2 satellites, 2 signal types, 4 signals
@@ -209,8 +210,9 @@ func TestGetMessageFromRealData(t *testing.T) {
 	// the rest of the tests exercise the code properly, it's assumed
 	// that this result is correct.  The purpose of the test is to
 	// detect any future changes that break it.
-	const want = `type 1077 GPS Full Pseudoranges and PhaseRanges plus CNR (high resolution)
-stationID 0, timestamp 432023000, multiple message, sequence number 0
+	const want = `Sent at 0001-01-01 00:00:00 +0000 UTC
+Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)
+stationID 0, multiple message, issue of data station 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 8 satellites, 2 signal types, 16 signals

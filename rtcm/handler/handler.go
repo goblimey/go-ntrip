@@ -69,48 +69,6 @@ import (
 // defined ready to support emerging equipment that's expected to give
 // better accuracy in the future.
 
-// glonassInvalidDay is the invalid value for the day part of the timestamp.
-const glonassInvalidDay = 7
-
-// maxTimestamp is the maximum timestamp value.  The timestamp is 30 bits
-// giving milliseconds since the start of the day.
-const maxTimestamp = 0x3fffffff // 0011 1111 1111 1111 1111 1111 1111 1111
-
-// glonassDayBitMask is used to extract the Glonass day from the timestamp
-// in an MSM7 message.  The 30 bit time value is a 3 bit day (0 is Sunday)
-// followed by a 27 bit value giving milliseconds since the start of the
-// day.
-const glonassDayBitMask = 0x38000000 // 0011 1000 0000 0000 0000 0000 0000 0000
-
-// gpsLeapSeconds is the duration that GPS time is ahead of UTC
-// in seconds, correct from the start of 2017/01/01.  An extra leap
-// second may be added every four years.  The start of 2021 was a
-// candidate for adding another leap second but it was not necessary.
-const gpsLeapSeconds = -18
-
-// gpsTimeOffset is the offset to convert a GPS time to UTC.
-var gpsTimeOffset time.Duration = time.Duration(gpsLeapSeconds) * time.Second
-
-// glonassTimeOffset is the offset to convert Glonass time to UTC.
-// Glonass is currently 3 hours ahead of UTC.
-var glonassTimeOffset = time.Duration(-1*3) * time.Hour
-
-// beidouTimeOffset is the offset to convert a BeiDou time value to
-// UTC.  UTC is based on International Atomic Time (TAI):
-// https://www.timeanddate.com/time/international-atomic-time.html.
-//
-// This reference from November 2013 compares Beidout Time (BDT) with
-// TAI: https://www.unoosa.org/pdf/icg/2016/Beidou-Timescale2016.pdf.
-//
-// "BDT is a uniform scale and is 33 seconds behind TAI"
-//
-// HOWEVER the rtklib software (decode_msm_header) says that BDT is
-// 14 seconds ahead of GPS time, which is 18 seconds behind UTC,
-// meaning that BDT is 4 seconds behind UTC.  Analysis of real data
-// confirms that.
-var beidouLeapSeconds = -4
-var beidouTimeOffset = time.Duration(beidouLeapSeconds) * time.Second
-
 // Handler is the object used to fetch and analyse RTCM3 messages.
 type Handler struct {
 
@@ -125,12 +83,12 @@ type Handler struct {
 	// this Galileo week.
 	startOfGalileoWeek time.Time
 
-	// startOfThisGlonassWeek is the time in UTC of the start of
+	// startOfGlonassWeek is the time in UTC of the start of
 	// this Glonass week.
-	startOfGlonassDay time.Time
+	startOfGlonassWeek time.Time
 
-	// startOfThisGPSWeek is the time in UTC of the start of
-	// this GPS week.
+	// startOfBeidouWeek is the time in UTC of the start of
+	// this Beidou week.
 	startOfBeidouWeek time.Time
 
 	// These dates are used to detect the timestamp rolling over into the
@@ -173,55 +131,22 @@ func New(startTime time.Time) *Handler {
 
 	// Shift the start time forward by the number of leap seconds (so if it's
 	// in the last few seconds of Saturday we get a time in Sunday).
-	gpsShift := time.Duration(-1*gpsLeapSeconds) * time.Second
+	gpsShift := time.Duration(-1*utils.GPSLeapSeconds) * time.Second
 	gpsShiftedStartTime := startTime.Add(gpsShift)
-	beidouShift := time.Duration(-1*beidouLeapSeconds) * time.Second
+	beidouShift := time.Duration(-1*utils.BeidouLeapSeconds) * time.Second
 	beidouShiftedStartTime := startTime.Add(beidouShift)
+	glonassShift := time.Duration(-1 * int(utils.GlonassTimeOffset))
+	glonassShiftedStartOfWeek := startTime.Add(glonassShift)
 
 	// Find last Sunday from the shifted start time (which may be the same day).
 	gpsMidnightLastSunday := getStartOfLastSundayUTC(gpsShiftedStartTime)
 	beidouMidnightLastSunday := getStartOfLastSundayUTC(beidouShiftedStartTime)
+	glonassMidnightLastSunday := getStartOfLastSundayUTC(glonassShiftedStartOfWeek)
 
 	// Crank back a few seconds to get the start of the GPS and Beidou weeks.
-	startOfGPSWeek := gpsMidnightLastSunday.Add(gpsTimeOffset)
-	// gpsMidnightNextSunday := gpsStartOfWeek.AddDate(0, 0, 7)
-	startOfBeidouWeek := beidouMidnightLastSunday.Add(beidouTimeOffset)
-	// beidouMidnightNextSunday := beidouMidnightLastSunday.AddDate(0, 0, 7)
-
-	// midnightTheSundayBefore := gpsStartOfWeek.AddDate(0, 0, -7)
-
-	// var startOfGalileoWeek time.Time
-	// var startOfGPSWeek time.Time
-	// var startOfBeidouWeek time.Time
-
-	// if startTime.Weekday() == time.Saturday {
-	// 	// This is Saturday so we may be in the old week or the new one.
-
-	// 	if startTime.Before(gpsMidnightNextSunday) {
-	// 		// It's Saturday just before the end of a GPS week.
-	// 		startOfGPSWeek = gpsStartOfWeek
-	// 	} else {
-	// 		// It's the end of Saturday in the first few seconds of a new
-	// 		// GPS week
-	// 		startOfGPSWeek = gpsMidnightNextSunday
-	// 	}
-
-	// 	// The logic for Beidou is similar to that for GPS but with a different
-	// 	// time offset.
-	// 	if !startTime.Before(beidouMidnightNextSunday) {
-	// 		// It's the end of Saturday in the first few seconds of a new
-	// 		// Beidou week
-	// 		startOfBeidouWeek = beidouMidnightNextSunday
-	// 	} else {
-	// 		// It's Saturday just before the end of the Beidou week.
-	// 		startOfBeidouWeek = beidouMidnightLastSunday
-	// 	}
-	// } else {
-	// 	// It's not Saturday, so the start of week times are offsets from the start
-	// 	// of last week.
-	// 	startOfGPSWeek = gpsStartOfWeek
-	// 	startOfBeidouWeek = beidouMidnightLastSunday
-	// }
+	startOfGPSWeek := gpsMidnightLastSunday.Add(utils.GPSTimeOffset)
+	startOfBeidouWeek := beidouMidnightLastSunday.Add(utils.BeidouTimeOffset)
+	startOfGlonassWeek := glonassMidnightLastSunday.Add(utils.GlonassTimeOffset)
 
 	// Galileo keeps GPS time.
 	startOfGalileoWeek := startOfGPSWeek
@@ -235,28 +160,11 @@ func New(startTime time.Time) *Handler {
 		startOfGPSWeek:                      startOfGPSWeek,
 		startOfGalileoWeek:                  startOfGalileoWeek,
 		startOfBeidouWeek:                   startOfBeidouWeek,
+		startOfGlonassWeek:                  startOfGlonassWeek,
 		timestampFromPreviousGPSMessage:     timestampFromPreviousGPSMessage,
 		timestampFromPreviousGalileoMessage: timestampFromPreviousGalileoMessage,
 		timestampFromPreviousBeidouMessage:  timestampFromPreviousBeidouMessage,
 	}
-
-	// Glonass.  Set the Glonass day number and the start of this
-	// Glonass day.  The day is 0: Sunday, 1: Monday and so on, but in
-	// Moscow time which is three hours ahead of UTC, so the day value
-	// rolls over at 21:00 UTC the day before.
-
-	// Unlike GPS, we have a real timezone to work with - Moscow.
-	startTimeMoscow := startTime.In(utils.LocationMoscow)
-	startOfDayMoscow := time.Date(startTimeMoscow.Year(), startTimeMoscow.Month(),
-		startTimeMoscow.Day(), 0, 0, 0, 0, utils.LocationMoscow)
-
-	handler.startOfGlonassDay = startOfDayMoscow.In(utils.LocationUTC)
-
-	// Set the Glonass day from the previous message to the day in Moscow
-	// at the given start time - Sunday is 0, Monday is 1 and so on.  This
-	// will be reset when the first Glonass Multiple Signal message (MSM)
-	// arrives.
-	handler.glonassDayFromPreviousMessage = uint(startOfDayMoscow.Weekday())
 
 	return &handler
 }
@@ -530,17 +438,18 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 
 		// The message is an MSM so get the timestamp and set the UTCTime.  The
 		// message frame starts with 3 bytes of leader, a 12-bit message type, a
-		// 12-bit station ID and the 30-bit timestamp.
+		// 12-bit station ID and the 30-bit timestamp.  The timestamp is relative
+		// to the start of period, a different time for each constellation.
 
 		const firstBit = 48 // Leader plus 24 bits.
 		const timestampLength = 30
 
 		timestamp := uint(utils.GetBitsAsUint64(bitStream, firstBit, timestampLength))
 
-		// Get the time from the timestamp.  This has to be done by the handler
-		// because it depends on knowing which week we are in at the start and
-		// then keeping track of time over many messages.  Only the handler lives
-		// long enough to do that.
+		// Get the time from the timestamp (for display).  This has to be done by
+		// the handler because it depends on knowing which GNSS period that we are in,
+		// which involves keeping track of time over many messages.  Only the handler
+		// lives long enough to do that.
 		utcTime, timeError :=
 			rtcmHandler.getTimeFromTimeStamp(message.MessageType, timestamp)
 
@@ -549,7 +458,21 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 			return message, timeError
 		}
 
-		message.UTCTime = &utcTime
+		message.UTCTimeFromTimestamp = utcTime
+
+		// Set the start time of the period (for display).  This must be done
+		// after we get the timestamp, as that might move us onto the next
+		// period.
+		switch utils.GetConstellation(message.MessageType) {
+		case "GPS":
+			message.StartOfWeek = rtcmHandler.startOfGPSWeek
+		case "Glonass":
+			message.StartOfWeek = rtcmHandler.startOfGlonassWeek
+		case "Galileo":
+			message.StartOfWeek = rtcmHandler.startOfGalileoWeek
+		case "Beidou":
+			message.StartOfWeek = rtcmHandler.startOfBeidouWeek
+		}
 
 		return message, nil
 	}
@@ -584,12 +507,17 @@ func Analyse(message *Message) {
 
 func analyseMSM4(messageBitStream []byte, message *Message) {
 	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
+
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
 		return
 	}
 
+	msm4Message.Header.StartOfWeek = message.StartOfWeek
+
 	message.Readable = msm4Message
+
+	msm4Message.Header.UTCTimeFromTimestamp = message.UTCTimeFromTimestamp
 }
 
 func analyseMSM7(messageBitStream []byte, message *Message) {
@@ -598,6 +526,10 @@ func analyseMSM7(messageBitStream []byte, message *Message) {
 		message.ErrorMessage = msm7Error.Error()
 		return
 	}
+
+	msm7Message.Header.UTCTimeFromTimestamp = message.UTCTimeFromTimestamp
+
+	msm7Message.Header.StartOfWeek = message.StartOfWeek
 
 	message.Readable = msm7Message
 }
@@ -709,35 +641,36 @@ func (rtcmHandler *Handler) getUTCFromGlonassTime(timestamp uint) (time.Time, er
 	// will be producing RTCM3 messages something like once per second, so
 	// this assumption is safe.)
 
-	day, millis, err := ParseGlonassTimeStamp(timestamp)
+	day, millis, err := utils.ParseGlonassTimestamp(timestamp)
 
 	if err != nil {
 		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
-		return zeroTimeValue, errors.New("out of range")
-	}
-
-	if day == glonassInvalidDay {
-		// The day value indicates an invalid time stamp.
-		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
-		return zeroTimeValue, errors.New("invalid day")
+		return zeroTimeValue, err
 	}
 
 	// The timestamp is valid.  We have day (1, 2 ... or 6) and milliseconds
 	// since the start of day.
 
-	// Set the start of day if different.
+	// Check for the day rolling over.
 	if day != rtcmHandler.glonassDayFromPreviousMessage {
-		// The day has rolled over.
-		rtcmHandler.startOfGlonassDay =
-			rtcmHandler.startOfGlonassDay.AddDate(0, 0, 1)
+		// The day has rolled over.  Check for that causing the week
+		// to roll over.
+		if day < rtcmHandler.glonassDayFromPreviousMessage {
+			// The week has rolled over too.
+			rtcmHandler.startOfGlonassWeek =
+				rtcmHandler.startOfGlonassWeek.AddDate(0, 0, 7)
+		}
 	}
+
+	// Add the day offset from the timestamp.
+	timeFromTimestamp := rtcmHandler.startOfGlonassWeek.AddDate(0, 0, int(day))
 
 	// Add the millisecond offset from the timestamp
 	offset := time.Duration(millis) * time.Millisecond
-	timeFromTimestamp := rtcmHandler.startOfGlonassDay.Add(offset)
+	timeFromTimestamp = timeFromTimestamp.Add(offset)
 
 	// Set the day ready for next time.
-	rtcmHandler.glonassDayFromPreviousMessage = uint(timeFromTimestamp.Weekday())
+	rtcmHandler.glonassDayFromPreviousMessage = day
 
 	return timeFromTimestamp, nil
 
@@ -823,8 +756,16 @@ func getStartOfLastSundayUTC(now time.Time) time.Time {
 // as a readable string.
 func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
 
-	display := fmt.Sprintf("message type %d, frame length %d\n",
-		message.MessageType, len(message.RawData))
+	titleAndComment := utils.GetTitleAndComment(message.MessageType)
+
+	display := fmt.Sprintf("Message type %d %s\n",
+		message.MessageType, titleAndComment.Title)
+
+	if len(titleAndComment.Comment) > 0 {
+		display += titleAndComment.Comment + "\n"
+	}
+
+	display += fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
 
 	display += hex.Dump(message.RawData) + "\n"
 
@@ -888,10 +829,15 @@ type Message struct {
 	//including the header and the CRC.
 	RawData []byte
 
-	// If the message is an MSM, UTCTime points to a Time value containing
-	// the time in UTC from the message timestamp.
-	// If the message is not an MSM, the value is nil.
-	UTCTime *time.Time
+	// StartOfWeek is the start of the period in which a Multiple Signal Message
+	// is sent - this constellation's GNSS week.  If the message is not an MSM,
+	// the value is not useful.
+	StartOfWeek time.Time
+
+	// UTCTimeFromTimestamp points to a Time value containing the time in UTC from
+	// the message timestamp.  Only a Multiple Signal Message (MSM) has a timestamp
+	// field.  If the message is not an MSM, the value is not useful.
+	UTCTimeFromTimestamp time.Time
 
 	// Readable is a broken out version of the RTCM message.  It's accessed
 	// via the Readable method.
@@ -947,17 +893,10 @@ func (message *Message) String() string {
 		PrepareForDisplay(message)
 	}
 
-	display := ""
-
-	if message.UTCTime != nil {
-		// If the time is set (which should only happen if the message is an MSM),
-		// display it.
-		display += message.UTCTime.Format(utils.DateLayout) + "\n"
-	}
-
-	display += fmt.Sprintf("message type %d, frame length %d\n",
-		message.MessageType, len(message.RawData))
-
+	tc := utils.GetTitleAndComment(message.MessageType)
+	display := fmt.Sprintf("Message type %d, %s\n", message.MessageType, tc.Title)
+	display += tc.Comment + "\n"
+	display += fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
 	display += hex.Dump(message.RawData) + "\n"
 
 	if len(message.ErrorMessage) > 0 {
@@ -1054,20 +993,6 @@ func CheckCRC(frame []byte) bool {
 	return true
 }
 
-// ParseGlonassTimeStamp separates out the two parts of a Glonass
-// timestamp -3/27 day/milliseconds from start of day.
-func ParseGlonassTimeStamp(timestamp uint) (uint, uint, error) {
-
-	// The timestamp must fit into 30 bits.
-	if timestamp > maxTimestamp {
-		return 0, 0, errors.New("out of range")
-	}
-
-	day := timestamp >> 27
-	millis := timestamp &^ glonassDayBitMask
-	return day, millis, nil
-}
-
 // getUTCFromTimestamp converts a GPS, Galileo or Beidou timestamp to UTC
 // using the given start time to find the correct week.  If the timestamp
 // has rolled over, The returned start time is the start of the next week.
@@ -1078,7 +1003,7 @@ func getUTCFromTimestamp(timestamp, timestampFromPreviousMessage uint, startOfWe
 	// is smaller than the one in the previous message, it's rolled over and
 	// we move to the next week.  The timestamp is 30 bits maximum.
 
-	if timestamp > maxTimestamp {
+	if timestamp > utils.MaxTimestamp {
 		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
 		rangeError = errors.New("out of range")
 		return zeroTimeValue, startOfWeek, rangeError
@@ -1098,13 +1023,3 @@ func getUTCFromTimestamp(timestamp, timestampFromPreviousMessage uint, startOfWe
 
 	return timeFromTimestamp, newStartOfWeek, nil
 }
-
-// // makeLogEntry writes a string to the logger.  If the logger is nil
-// // it writes to the default system log.
-// func (rtcmHandler *Handler) makeLogEntry(s string) {
-// 	if rtcmHandler.logger == nil {
-// 		log.Print(s)
-// 	} else {
-// 		rtcmHandler.logger.Print(s)
-// 	}
-// }

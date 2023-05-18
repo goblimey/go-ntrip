@@ -2,6 +2,8 @@ package utils
 
 import (
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // Signal frequencies.
@@ -18,6 +20,122 @@ const g2 = 1.246e9
 const b1 = 1.561098e9
 const b2a = 1.17645e9
 const b3i = 1.26852e9
+
+// TestParseGlonassTimestamp tests ParseGlonassTimestamp.
+func TestParseGlonassTimestamp(t *testing.T) {
+
+	// Maximum expected millis - twenty four hours of millis, less 1.
+	const maxMillis uint = (24 * 3600 * 1000) - 1
+
+	var testData = []struct {
+		timestamp  uint
+		wantDay    uint
+		wantMillis uint
+		wantError  string
+	}{
+
+		{maxMillis, 0, maxMillis, ""},
+		{6<<27 | maxMillis, 6, maxMillis, ""},
+
+		{0, 0, 0, ""},
+		{(2 << 27) + 42, 2, 42, ""},
+		// {maxMillis, 0, 0, ""},
+		{6 << 27, 6, 0, ""},
+		{6<<27 | maxMillis, 6, maxMillis, ""},
+
+		// Day 7 is illegal.
+		{7 << 27 /* 11 1111 1111 ... */, 0, 0, "illegal Glonass day"},
+		{0x3fffffff /* 11 1111 1111 ... */, 0, 0, "illegal Glonass day"},
+
+		// Greater than 30 bits is illegal and causes an error.
+		{0x80000000, 0, 0, "out of range"},
+	}
+
+	for _, td := range testData {
+		gotDay, gotMillis, err := ParseGlonassTimestamp(td.timestamp)
+
+		if len(td.wantError) > 0 {
+			// Expecting an error.
+			if err == nil {
+				t.Errorf("%d: expected an error", td.timestamp)
+				continue
+			}
+			if td.wantError != err.Error() {
+				t.Errorf("%d: %v", td.timestamp, err)
+				continue
+			}
+			continue
+		} else {
+			// Not expecting an error.
+			if err != nil {
+				t.Errorf("0x%x: %v", td.timestamp, err)
+				continue
+			}
+		}
+
+		if td.wantDay != gotDay {
+			t.Errorf("want day %d got %d", td.wantDay, gotDay)
+		}
+		if td.wantMillis != gotMillis {
+			t.Errorf("%d: want millis %d got %d", td.timestamp, td.wantMillis, gotMillis)
+		}
+	}
+}
+
+// TestParseMilliseconds checks that a milliscond timestamp is broken down
+// into components (days, hours etc) correctly.
+func TestParseMilliseconds(t *testing.T) {
+	var testData = []struct {
+		timestamp   uint
+		wantDays    uint
+		wantHours   uint
+		wantMinutes uint
+		wantSeconds uint
+		wantMillis  uint
+	}{
+		{0, 0, 0, 0, 0, 0},
+		// Days.  (The number of days in a timestamp should be 0-6.)
+		{(4 * 24 * 3600 * 1000), 4, 0, 0, 0, 0},
+		{6 * 24 * 3600 * 1000, 6, 0, 0, 0, 0},
+		// This will never happen but we'll try it anyway.
+		{100 * 24 * 3600 * 1000, 100, 0, 0, 0, 0},
+		// hours
+		{(2 * 3600 * 1000), 0, 2, 0, 0, 0},
+		{(23 * 3600 * 1000), 0, 23, 0, 0, 0},
+		// minutes
+		{(42 * 60 * 1000), 0, 0, 42, 0, 0},
+		{(59 * 60 * 1000), 0, 0, 59, 0, 0},
+		// Seconds
+		{(43 * 1000), 0, 0, 0, 43, 0},
+		{(59 * 1000), 0, 0, 0, 59, 0},
+		// Milliseconds
+		{44, 0, 0, 0, 0, 44},
+		{999, 0, 0, 0, 0, 999},
+
+		// THis timestamp sets every component.
+		{((((4 * 24 * 3600) + (2 * 3600) + (42 * 60) + 43) * 1000) + 999), 4, 2, 42, 43, 999},
+	}
+
+	for _, td := range testData {
+		gotDays, gotHours, gotMinutes, gotSeconds, gotMillis := ParseMilliseconds(td.timestamp)
+
+		if td.wantDays != gotDays {
+			t.Errorf("0x%x: want days %d got %d", td.timestamp, td.wantDays, gotDays)
+		}
+		if td.wantHours != gotHours {
+			t.Errorf("0x%x: want hours%d got %d", td.timestamp, td.wantHours, gotHours)
+		}
+		if td.wantMinutes != gotMinutes {
+			t.Errorf("0x%x: want minutes %d got %d", td.timestamp, td.wantMinutes, gotMinutes)
+		}
+		if td.wantSeconds != gotSeconds {
+			t.Errorf("0x%x: want seconds %d got %d", td.timestamp, td.wantSeconds, gotSeconds)
+		}
+		if td.wantMillis != gotMillis {
+			t.Errorf("0x%x: want millis %d got %d", td.timestamp, td.wantMillis, gotMillis)
+		}
+	}
+}
 
 // TestGetScaledRange checks GetScaledRange.
 func TestGetScaledRange(t *testing.T) {
@@ -949,6 +1067,107 @@ func TestGetConstellation(t *testing.T) {
 		if td.WantConstellation != constellation {
 			t.Errorf("%d: want %s, got %s",
 				td.MessageType, td.WantConstellation, constellation)
+		}
+	}
+}
+
+// TestGetTitleAndComment checks that GetTitleAndComment produces the correct
+// result including when the message type is invalid.
+func TestGetTitleAndComment(t *testing.T) {
+
+	var testData = []struct {
+		messageType int
+		want        TitleAndComment
+	}{
+		{
+			1005, TitleAndComment{
+				"Stationary RTK Reference Station Antenna Reference Point (ARP)",
+				"Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.",
+			},
+		},
+		{
+			1074, TitleAndComment{
+				"GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+				"The type 4 Multiple Signal Message format for the American GPS system.",
+			},
+		},
+		{
+			1077, TitleAndComment{
+				"GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+				"The type 7 Multiple Signal Message format for the USA’s GPS system."},
+		},
+		{
+			1084, TitleAndComment{
+				"GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+				"The type 4 Multiple Signal Message format for the Russian GLONASS system."},
+		},
+		{
+			1087, TitleAndComment{
+				"GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+				"The type 7 Multiple Signal Message format for the Russian GLONASS system."},
+		}, {
+			1094, TitleAndComment{
+				"Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+				"The type 4 Multiple Signal Message format for Europe’s Galileo system."},
+		}, {
+			1097, TitleAndComment{
+				"Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+				"The type 7 Multiple Signal Message format for Europe’s Galileo system."},
+		},
+		{
+			1104, TitleAndComment{
+				"SBAS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+				"The type 4 Multiple Signal Message format for SBAS/WAAS systems."},
+		}, {
+			1107, TitleAndComment{
+				"SBAS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+				"The type 7 Multiple Signal Message format for SBAS/WAAS systems."},
+		},
+		{
+			1114, TitleAndComment{
+				"QZSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+				"The type 4 Multiple Signal Message format for Japan’s QZSS system."},
+		}, {
+			1117, TitleAndComment{
+				"QZSS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+				"The type 7 Multiple Signal Message format for Japan’s QZSS system."},
+		}, {
+			1124, TitleAndComment{
+				"BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio",
+				"The type 4 Multiple Signal Message format for China’s BeiDou system."},
+		}, {
+			1127, TitleAndComment{
+				"BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)",
+				"The type 7 Multiple Signal Message format for China’s BeiDou system."},
+		},
+		{
+			// Special value for non-RTCM data.
+			NonRTCMMessage,
+			TitleAndComment{
+				"Non-RTCM data",
+				"Data which is not in RTCM3 format, for example NMEA messages.",
+			},
+		},
+		{
+			// No such message type - type 1001 is currently the first one defined.
+			4097,
+			TitleAndComment{
+				"message type 4097 is not known", "",
+			},
+		},
+		{
+			// Out of range - message types are 1-4095.
+			4097,
+			TitleAndComment{
+				"message type 4097 is not known", "",
+			},
+		},
+	}
+
+	for _, td := range testData {
+		got := GetTitleAndComment(td.messageType)
+		if !cmp.Equal(td.want, *got) {
+			t.Errorf("want %v got  %v", td.want, *got)
 		}
 	}
 }

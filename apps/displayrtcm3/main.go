@@ -228,7 +228,7 @@ func HandleMessages(startTime time.Time, reader io.Reader, writer io.Writer, con
 	channels := make([]chan rtcm.Message, 0)
 	channels = append(channels, messageChan)
 	appCore := AppCore.New(config, channels)
-	appCore.HandleMessagesUntilEOF(bufferedReader)
+	appCore.HandleMessagesUntilEOF(startTime, bufferedReader)
 
 	close(messageChan)
 }

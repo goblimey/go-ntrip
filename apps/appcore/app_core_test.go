@@ -73,7 +73,7 @@ func TestProcessMessages(t *testing.T) {
 
 	appCore := New(&config, channels)
 	// Run the handler.  It should read the messages from the reader and stop
-	appCore.HandleMessagesUntilEOF(reader)
+	appCore.HandleMessagesUntilEOF(time.Now(), reader)
 
 	// Pause to allow the channels to drain.
 	time.Sleep(time.Second)

@@ -81,7 +81,9 @@ func TestGetTime(t *testing.T) {
 // containing a single message.
 func TestDisplayMessages(t *testing.T) {
 
-	const want = `message type 1005, frame length 25
+	const want = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 25 bytes:
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
 00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
@@ -132,7 +134,9 @@ func TestHandleMessages(t *testing.T) {
 Note: times are in UTC.  RINEX format uses GPS time, which is currently (Jan 2021)
 18 seconds ahead of UTC
 
-message type 1230, frame length 14
+Message type 1230, GLONASS L1 and L2 Code-Phase Biases
+This message provides corrections for the inter-frequency bias caused by the different FDMA frequencies (k, from -7 to 6) used.
+Frame length 14 bytes:
 00000000  d3 00 08 4c e0 00 8a 00  00 00 00 a8 f7 2a        |...L.........*|
 
 (Message type 1230 - GLONASS code-phase biases - don't know how to decode this)
