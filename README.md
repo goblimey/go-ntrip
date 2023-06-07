@@ -1,6 +1,7 @@
 ## Go tools to support the NTRIP protocol
 
-This repository contains Go software to support Network Transport of RTCM over IP (NTRIP) messages.
+This repository contains Go software to support Network Transport
+of RTCM over IP (NTRIP) messages.
 
 The RTCM protocol is named after the organisation that defined it, the Radio Technical Commission for Maritime services or RTCM.  It's used to carry observations of global positioning satellites from fixed base stations to moving rovers to allow the rovers to better find their positions.
 
@@ -14,35 +15,56 @@ The latter requires the sender and the receiver to be connected to the network.
 The data requires little bandwidth - a few kilobytes per second which is
 low enough to be carried by a domestic broadband connection or a mobile phone's Internet connection.
 
-There are a number of networks ("constellations") of global positioning satellites.
-The American Global Positioning System (GPS),
-the European Galileo, the Chinese Beidou and the Russian GLONASS constellations all provide a global service - some satellites from each of those constellations should be visible from any point on the Earth's surface.
-Receivers are available that can use any and all of them.
+There are a number of networks ("constellations") of global positioning satellites,
+currently(2023):
 
-Strictly these constellations are called Global Navigation Satellite Systems (GNSS) rather than GPS, which is just the first and best known. 
+* GPS
+* Glonass
+* Galileo
+* Beidou
+* SBAS
+* QZSS
+* Navic/Irnss
+
+The American Global Positioning System (GPS),
+the European Galileo, the Chinese Beidou and the Russian GLONASS constellations
+each provide a global service - 
+some satellites from each of those constellations should be visible from any point on the Earth's surface.
+
+Strictly these constellations are called Global Navigation Satellite Systems (GNSS)
+rather than GPS, which is just the first and best known constellation.
+GNSS receivers are available that can use all satellites from those constellations,
+in any combination.
 
 A GNSS device's position can be expressed in all sorts of ways.
 This paper from the UK's mapping authority the Ordnance Survey
 gives an excellent introduction https://www.ordnancesurvey.co.uk/documents/resources/guide-coordinate-systems-great-britain.pdf
 
-Since the satellites are orbiting around the centre of the Earth,
+Since the satellites are orbiting around the Earth,
 ECEF format is a fairly natural way to represent a position.
 That uses cartesian coordinates measured in metres from the centre of the Earth.  As shown in the Ordnance Survey paper,
 the X axis runs from the North Pole to the South Pole, the Y axis runs from the point where zero latitude meets the Equator
 to the centre.  The Z axis is perpendicular to the other two.
 
-The Earth spins on its axis, which stretches it slightly at the Equator.
-Geographers have defined a perfect elipsoid that's close to its real shape.  A position in ECEF format can be converted to Longitude, latitude and the height above or below this elipsoid.
+The Earth is almost a sphere,
+but not quite.
+It spins on its axis, which stretches it slightly at the Equator,
+making it a slightly irregular elipsoid.
+Geographers have defined a perfect elipsoid that's close to the earth's real shape.
+A position in ECEF format can be converted to Longitude, Latitude and the Height above or below this elipsoid.
+
+There's another solid shape called the Geoid
+which also approximates to the shape of the Earth.
+("Geiod" is just Latin for "Earth-shaped".)
+The height of a position can be expressed as the geoidal height, the distance above or below the Geoid.
 
 A GNSS device on the ground receives signals from the satellites and uses trigonometry to find its position.  It needs signals from 4 satellites to do that.  A multi-constellation receiver can use signals from all of the constellation.  In good conditions a receiver can see upwards of twenty satellites at any time.  
 
-Given signals from four satellites a single receiver can find its position to within about 3 metres.
+Given signals from four satellites a single receiver can find its position to within a few metres.
+Seeing more satellites allow a faster fix but doesn't produce more accuracy.
 This is acceptable for vehicle navigation
 but other purposes such as land surveying
-require greater accuracy.  Seeing more satellites doesn't produce more accuracy,
-but it does allow a faster fix.
-
-
+require greater accuracy.  
 
 More accuracy is possible using two receivers within a few kilometers of each other.
 The signals from the positioning satellites suffer distortion, particularly as they pass through the ionosphere on their way to the Earth.
@@ -57,50 +79,94 @@ https://nbmg.unr.edu/staff/pdfs/blewitt%20basics%20of%20gps.pdf
 
 or just search for title on Google.
 
-Some readers might find the maths in the paper a bit advanced for some people,
-so here is a simple explanation:
+Some readers might find the maths in the paper a bit advanced,
+so here is a simple explanation
+(probably oversimplified):
 
-Each RTCM base station is in a known location.
-The GNSS satellites currently broadcast signals on two frequency bands,
-one for unencrypted public data and another for encrypted data meant for the owner's police force, military etc.
-A dual-band base station scans for signals from all the satellites it can see for signals.
-A base station that you and I can buy
-can't decrypt the encrypted signals but analysing the effect of the ionosphere on the carrier wave allows a rover to better estimate the distortion.
+White light is composed of light of different colours,
+each at a different frequency.
+When a beam of white light passes through a prism,
+it's broken up into a spectrum of colours.
+This is because the different frequencies travel along different paths
+through the prism and emerge at different angles.
 
-The base passes its observations to any rovers that have subscribed to receive them, along with its known real position.
-A rover close to the base sees the same satellites with the same distortions and it use the information from the base to correct the calculation of its own position.
-The rover only needs to pick up the public signals from the satellites
-so it can be single-band,
-which is cheaper.
+When a signal from a satellite travels to a GNSS receiver on the ground
+it passes through the ionosphere
+and is distorted,
+like the light passing through a prism.
+The receiver uses the transit time of the signal
+to calculate the distance to the satellite,
+but the signal didn't travel in a straight line,
+so the resulting distance is slightly wrong.
+Without more information
+the receiver can only estimate its position to within a few metres
 
-In ideal conditions a rover within about 8km of a base station and receiving RTCM data from it
+The curent generation of GNSS satellites broadcast signals on two frequency bands.
+The ionosphere distorts signals on each frequency band differently,
+so two signals from the same satellite
+sent at the same time travel along different paths,
+neither a straight line,
+and arrive at the GNSS receiver at slightly different times.
+A GNSS receiver uses the transit time to calculate the distance to the satellite,
+so it ends up with two notions of that distance,
+both slightly wrong.
+
+Each base station is in a known fixed position.
+It has a dual-band receiver so it can receive signals on both frequency bands.
+It scans for signals from all the satellites it can see
+and broadcasts
+those data, plus its correct position.
+
+Moving receivers (rovers) which are close to the base station receive signals from the same
+satellites
+distorted in the same way.
+A rover can use the information from the base station to correct its calculation of its own position.
+
+The rover can do this even if its receiver is single-band,
+and can only see some of the signals.
+That's useful because single-band receivers are cheaper.
+
+Some of the signals are sent in plain text,
+others are encrypted and meant for the owner's police force, military etc.
+A receiver that you and I can buy
+can't decrypt the encrypted signals but it can still see how the carrier wave is distorted
+and analysing that is enough to better estimate the effect of the ionosphere on the plain-text signals
+that it can make use of.
+
+In ideal conditions a rover within about 8km of a base station and receiving data from it
 can estimate its position to within 2cm.
 Beyond 8km, the accuracy falls linearly -
-within 16km a rover can attain an accuracy of 4cm,
+within 16km the rover can attain an accuracy of 4cm,
 within 24km an accuracy of 8cm, and so on.
 At about 64 km the RTCM data only allows about 2.5m accuracy,
 which is close to what the rover can achieve without help.
 
 Unfortunately, we don't live in ideal conditions.
-Here in the real world we get less accuracy,
-but typically at least 100cm.
-That's still better than traditional surveying techniques using theodolites - 
-they achieve accuracy of around 1m at best.
+Here in the real world we get less accuracy.
+I'm currently trying to figure out how accurate my equipment is,
+but that's work in progress.
 
 Accurate GNSS systems are also easier and faster to use than theodolites.
-The UK's mapping authority the Ordnance Survey has been using them
+The UK's mapping authority the Ordnance Survey has been using satellit positioning
 for many years.
-In the early days such equipment was expensive but now
+In the early days the equipment was expensive but now
 a base and rover communicating via RTCM can cost as little as $2,000
 and one base can support many rovers.
 
-For RTCM correction to work properly, the operator has to tell the base station its position.  If that's wrong by, say,
+For RTCM correction to work properly, the operator has to figure out the base station's precise position.
+If that's wrong by, say,
 1.5m to the North,
-each of the rover's position will be wrong by the same amount.
+then each each rover using that base station
+will calculate positions that are wrong by the same amount.
 The positions in the resulting survey will be accurate
 relative to each other
 but they will each be shifted from their true position by 1.5m to the North. 
-So the problem becomes finding the position of the base accurately.
+
+So the problem becomes finding the position of the base station accurately.
+
+
+The Caster
+==========
 
 To avoid the rover or the base station needing a fixed Internet (IP) address,
 they communicate via an intermediate device called an NTRIP caster (broadcaster).
@@ -109,22 +175,37 @@ it doesn't need to be close to the base station or the rover,
 it can be anywhere.
 
 The caster offers a set of named endpoints.
+each rover connects to the caster and subscribes to an NTRIP feed from one endpoint.
+
 In the simple case, each endpoint is fed by a single base station,
 (so endpoint equals base station).
-A rover subscribes to an NTRIP feed from one endpoint.
 The base station reads signals from the satellites that it can see,
 encodes them as RTCM messages, packages those up into NTRIP messages
 and sends them over the Internet to its assigned endpoint on the caster.
 The caster sends those messages on to any rovers that have subscribed to that endpoint.
 
+```
+                                                    NTRIP
+                                                  ---------> rover
+ ------------                       --------     /
+| NTRIP base |      NTRIP          | NTRIP  | __/
+| station    | ------------------> | caster |   \
+ ------------                       --------     \  NTRIP
+                                                  ---------> rover
+```
+
 (The more complicated case involves taking readings from many base stations spread over a wide area
 and merging them together to create a virtual base station feeding a single endpoint.)
+
+
+NTRIP on a budget
+=================
 
 A configuration that I've used is a GNSS receiver such as a Sparkfun
 RTK board producing RTCM and other messages, connected via
 I2C or serial USB to a host computer running my RTCM filter.  The
-host could be a Windows machine but something as cheap as
-a Raspberry Pi single board computer is quite adequate:
+host could be a Windows machine but
+a Raspberry Pi single board computer is cheaper and quite adequate:
 
 ```
  -------------          messages          --------------
@@ -136,8 +217,9 @@ With a bit more free software that can be used to create an NTRIP
 base station.
 The software for the base station is called an NTRIP server.
 This github account contains a ready-made NTRIP server and an NTRIP caster,
-derived from open source software originally
+derived from open source software
 developed by the International GNSS Service (IGS).
+
 This is my setup:
 
 ```
@@ -157,25 +239,12 @@ It runs on a Digital Ocean droplet which costs $5 per month to rent.
 
 My rover is an Emlid Reach M+, which costs about $300 and uses my smartphone to provide an Internet connection in the field. 
 
-The stationary base station sends RTCM messages over the Internet using the
-NTRIP protocol to the NTRIP caster which sends them on to moving GNSS rovers:
-
-```
-                                                    NTRIP
-                                                  ---------> rover
- ------------                       --------     /
-| NTRIP base |   RTCM over NTRIP   | NTRIP  | __/
-| station    | ------------------> | caster |   \
- ------------                       --------     \  NTRIP
-                                                  ---------> rover
-```
-
 
 RTCM
 =====
 
 The RTCM protocol is currently at version 3.
-RTCM3 messages are in as
+RTCM3 messages are in a
 compact binary form and not readable by eye.
 The format is described by RTCM STANDARD 10403.3
 Differential GNSS (Global Navigation Satellite Systems) Services –
@@ -357,7 +426,7 @@ A d3 byte marks the start of each message but
 the data within can also contain one.
 Note the d3 value on the
 fifth line of the hex dump above.  This is not the start of another
-message.  One clue is that it's not followed by six zero bits.  To extract
+message.  One clue is that it's not followed by a few zero bits.  To extract
 a message frame from a stream of data and decode it, you need to read the
 header and the next two bytes, check the header, find the message length,
 read the whole message frame and check the CRC value.  This matters
@@ -531,17 +600,18 @@ The GPS week starts at midnight at the start of Sunday
 but GPS time is ahead of UTC by a few leap seconds, so in
 UTC terms the GPS week starts on Saturday a few seconds before midnight.
 Since 2017/01/01, GPS time is ahead of UTC by 18 leap seconds
-so in UTC terms the timestamp rolls over on Saturday 18 seconds before midnight
-at the start of Sunday.
+so in UTC terms the timestamp rolls over on Saturday at 23:59:42,
+18 seconds before midnight.
 An extra leap
 second may be added every four years.  The start of 2021 was a
 candidate for adding another leap second but it was not necessary.
 One may be added in 2025.
 
-Galileo time is currently (2022) the same as GPS time.
+Galileo time is the same as GPS time.
 
-The Beidou timestamp rolls over in UTC terms at 14 seconds after 
-midnight at the start of Sunday.
+At prsent (2022) the Beidou timestamp rolls over in UTC terms on Saturday at 23:59:56,
+4 seconds before 
+midnight.
 
 For the GLONASS constellation, the timestamp is in two parts,
 the top 3 bits giving the day and the lower 27 bits giving
