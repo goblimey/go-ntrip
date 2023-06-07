@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goblimey/go-crc24q/crc24q"
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
 	"github.com/goblimey/go-ntrip/rtcm/type1005"
+	"github.com/goblimey/go-ntrip/rtcm/type1006"
 	msm4message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
 	msm4satellite "github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
 	msm4signal "github.com/goblimey/go-ntrip/rtcm/type_msm4/signal"
@@ -21,20 +21,6 @@ import (
 
 	"github.com/kylelemons/godebug/diff"
 )
-
-// This "test" is used to calculate the CRC when hand-crafting a bit stream.
-// Run te test in a debugger and examine the value of crc.
-func Test(t *testing.T) {
-
-	var bitStream = []byte{
-		0xd3, 0x00, 0x08,
-		0x4c, 0xe0, 00, 0x8a, 0, 0, 0, 0,
-	}
-
-	crc := crc24q.Hash(bitStream)
-
-	_ = crc
-}
 
 // A complete message frame (including 3-byte leader and 3-byte CRC).  The message
 // type is the bottom half of byte 3 and all of byte 4 - 0x449 - decimal 1097.
@@ -69,12 +55,12 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	const wantNumMessages = 2
 	const wantType0 = 1077
 	const wantLength0 = 226
-	var wantContents0 = testdata.MesageBatchWith1077[:226]
+	var wantContents0 = testdata.MessageBatchWith1077[:226]
 	const wantType1 = utils.NonRTCMMessage
 	const wantLength1 = 9
-	var wantContents1 = testdata.MesageBatchWith1077[226:]
+	var wantContents1 = testdata.MessageBatchWith1077[226:]
 
-	reader := bytes.NewReader(testdata.MesageBatchWith1077)
+	reader := bytes.NewReader(testdata.MessageBatchWith1077)
 
 	// Create a buffered channel big enough to hold the test data, send the
 	// data to it and close it.
@@ -306,6 +292,7 @@ func TestGetMessage(t *testing.T) {
 		{"1230", testdata.Fake1230, utils.MessageTypeGCPB},
 		{"1074", testdata.MessageBatch, utils.MessageTypeMSM4GPS},
 		{"1005", testdata.MessageFrameType1005, utils.MessageType1005},
+		{"1006", testdata.MessageFrameType1006, utils.MessageType1006},
 	}
 	for _, td := range testData {
 		startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, utils.LocationUTC)
@@ -384,20 +371,6 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 		0, 0, 0,
 	}
 
-	// frameWithIllegalGlonassDay contains message type 1084 (MSM4 Glonass) but the
-	// day in the timestamp is the illegal value 7.
-	messageFrameWithIllegalGlonassDay := []byte{
-		0xd3, 0x00, 0x10,
-		//       |      |   timestamp (1110 0000 ..)
-		0x43, 0xc0, 0x00, 0xe0, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x42, 0xf2, 0x8f,
-		// CRC
-		0, 0, 0,
-	}
-
 	// messageFrameWithLengthZero is a valid message frame but the length of the
 	// contained message is zero.
 	messageFrameWithLengthZero := []byte{0xd3, 0x00, 0x00, 0x44}
@@ -412,10 +385,6 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 		// GetMessage should return a nil message and an error.
 		{"very short", messageFrame1077NoTimestamp,
 			"incomplete message frame", ""},
-
-		// GetMessage should return an error AND a message with the warning set.
-		{"illegal", messageFrameWithIllegalGlonassDay,
-			"illegal Glonass day", "illegal Glonass day"},
 
 		// GetMessage calls GetMessageLengthAndType.  That returns an error because the
 		// bit stream is too short.  GetMessage should return the error message AND a
@@ -643,7 +612,22 @@ func TestStartTimes(t *testing.T) {
 		startTime       time.Time
 		wantStartOfWeek time.Time
 	}{
-
+		{
+			"Glonass MSM4 start of the week", "Glonass", 1084,
+			time.Date(2023, time.June, 11, 0, 0, 0, 0, utils.LocationMoscow),
+			time.Date(2023, time.June, 11, 0, 0, 0, 0, utils.LocationMoscow),
+		},
+		{
+			"Glonass MSM7 end of the week", "Glonass", 1087,
+			time.Date(2023, time.June, 17, 23, 59, 59, 999, utils.LocationMoscow),
+			time.Date(2023, time.June, 11, 0, 0, 0, 0, utils.LocationMoscow),
+		},
+		{
+			//just before 1am BST is just before midnight UTC.
+			"Sunday 2020/08/02 BST, just before the end of the week.", "GPS", 1074,
+			time.Date(2020, time.August, 9, 00, 59, 41, int(999*time.Millisecond), utils.LocationLondon),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.GPSTimeOffset),
+		},
 		{
 			//just before 1am BST is just before midnight UTC.
 			"Sunday 2020/08/02 BST, just before the end of the week.", "GPS", 1077,
@@ -676,7 +660,11 @@ func TestStartTimes(t *testing.T) {
 			time.Date(2020, time.August, 9, 1, 59, 42, int(999*time.Millisecond), utils.LocationParis),
 			time.Date(2020, time.August, 8, 23, 59, 42, 0, utils.LocationUTC),
 		},
-
+		{
+			"Saturday 2nd August, start of week", "Galileo", 1094,
+			time.Date(2020, time.August, 2, 0, 59, 42, 0, utils.LocationLondon),
+			time.Date(2020, time.August, 1, 23, 59, 42, 0, utils.LocationUTC),
+		},
 		{
 			"Saturday 2nd August, start of week", "Galileo", 1097,
 			time.Date(2020, time.August, 2, 0, 59, 42, 0, utils.LocationLondon),
@@ -702,7 +690,12 @@ func TestStartTimes(t *testing.T) {
 			time.Date(2020, time.August, 9, 1, 59, 44, 0, utils.LocationParis),
 			time.Date(2020, time.August, 8, 23, 59, 42, 0, utils.LocationUTC),
 		},
-
+		{
+			// This start time should be at the end of the previous week ...
+			"Saturday 8th August, end of week", "Beidou", 1124,
+			time.Date(2020, time.August, 8, 23, 59, 55, int(999*time.Millisecond), utils.LocationUTC),
+			time.Date(2020, time.August, 2, 0, 0, 0, 0, utils.LocationUTC).Add(utils.BeidouTimeOffset),
+		},
 		{
 			// This start time should be at the end of the previous week ...
 			"Saturday 8th August, end of week", "Beidou", 1127,
@@ -735,9 +728,11 @@ func TestStartTimes(t *testing.T) {
 
 	for _, td := range testData {
 
-		handler := New(td.startTime)
-		startOfWeek := getStartOfWeek(td.messageType, handler)
-
+		h := New(td.startTime)
+		startOfWeek, err := h.getStartOfWeek(td.messageType)
+		if err != nil {
+			t.Error(err)
+		}
 		if !td.wantStartOfWeek.Equal(startOfWeek) {
 			t.Errorf("%s %s: want %s got %s\n",
 				td.constellation, td.description,
@@ -747,8 +742,6 @@ func TestStartTimes(t *testing.T) {
 	}
 }
 
-// TestGlonassStartTimes tests that New sets up the correct start time
-// for the Glonass weeks.
 func TestGlonassStartTimes(t *testing.T) {
 
 	var testData = []struct {
@@ -929,7 +922,7 @@ func TestAnalyseWithMSM7(t *testing.T) {
 	}
 }
 
-// TestAnalyseWith1005 checks that Analyse correctly handles an MSM7.
+// TestAnalyseWith1005 checks that Analyse correctly handles a message type 1005 (base position).
 func TestAnalyseWith1005(t *testing.T) {
 
 	message := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
@@ -944,7 +937,26 @@ func TestAnalyseWith1005(t *testing.T) {
 	_, ok := message.Readable.(*type1005.Message)
 
 	if !ok {
-		t.Error("expecting Readable to contain an MSM7")
+		t.Error("expecting Readable to contain a message type 1005")
+	}
+}
+
+// TestAnalyseWith1006 checks that Analyse correctly handles a message type 1006 (base position and height).
+func TestAnalyseWith1006(t *testing.T) {
+
+	message := NewMessage(utils.MessageType1006, "", testdata.MessageFrameType1006)
+
+	Analyse(message)
+
+	if message.Readable == nil {
+		t.Error("Readable is nil")
+		return
+	}
+
+	_, ok := message.Readable.(*type1006.Message)
+
+	if !ok {
+		t.Error("expecting Readable to contain a message type 1006")
 	}
 }
 
@@ -960,279 +972,6 @@ func TestAnalyseWith1230(t *testing.T) {
 
 	if !ok {
 		t.Error("expecting Readable to contain a string")
-	}
-}
-
-// TestDisplayMessage checks DisplayMessage.
-func TestDisplayMessage(t *testing.T) {
-
-	const resultForNotRTCM = `Message type -1 Non-RTCM data
-Data which is not in RTCM3 format, for example NMEA messages.
-Frame length 4 bytes:
-00000000  6a 75 6e 6b                                       |junk|
-
-`
-
-	const resultForIncomplete = `Message type 1127 BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
-The type 7 Multiple Signal Message format for China’s BeiDou system.
-Frame length 6 bytes:
-00000000  d3 00 aa 46 70 00                                 |...Fp.|
-
-bitstream is too short for an MSM header - got 0 bits, expected at least 169
-`
-
-	// The hex dump includes a ` so we have to create this string by glueing parts together.
-	const resultForMSM4 = `Message type 1074 GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
-The type 4 Multiple Signal Message format for the American GPS system.
-Frame length 42 bytes:
-00000000  d3 00 24 43 20 01 00 00  00 04 00 00 08 00 00 00  |..$C ...........|
-00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
-00000020  00 40 00 00 68 8e 80 83  f7 4b                    |.@..h....K|
-
-Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 1 (0d 0h 0m 0s 1ms)
-stationID 1, single message, issue of data station 0
-session transmit time 0, clock steering 0, external clock 0
-divergence free smoothing false, smoothing interval 0
-1 satellites, 2 signal types, 2 signals
-1 Satellites
-Satellite ID {range ms}
- 4 {374740.573}
-1 Signals
-Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}
- 4  2 {374758.870, 1970044.248, 3, false, 7}
- 4 16 {374777.168, 1534500.000, 4, true, 16}
-`
-
-	const resultForMSM7 = `Message type 1077 GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
-The type 7 Multiple Signal Message format for the USA’s GPS system.
-Frame length 841 bytes:
-00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
-00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
-00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
-00000030  fe f2 05 b0 4a a0 ec 7b  0e 09 27 d0 3f 23 7c b9  |....J..{..'.?#|.|
-00000040  6f bd 73 ee 1f 01 64 96  f5 7b 27 46 f1 f2 1a bf  |o.s...d..{'F....|
-00000050  19 fa 08 41 08 7b b1 1b  67 e1 a6 70 71 d9 df 0c  |...A.{..g..pq...|
-00000060  61 7f 19 9c 7e 66 66 fb  86 c0 04 e9 c7 7d 85 83  |a...~ff......}..|
-00000070  7d ac ad fc be 2b fc 3c  84 02 1d eb 81 a6 9c 87  |}....+.<........|
-00000080  17 5d 86 f5 60 fb 66 72  7b fa 2f 48 d2 29 67 08  |.]..` + "`" + `.fr{./H.)g.|
-00000090  c8 72 15 0d 37 ca 92 a4  e9 3a 4e 13 80 00 14 04  |.r..7....:N.....|
-000000a0  c0 e8 50 16 04 c1 40 46  17 05 41 70 52 17 05 01  |..P...@F..ApR...|
-000000b0  ef 4b de 70 4c b1 af 84  37 08 2a 77 95 f1 6e 75  |.K.pL...7.*w..nu|
-000000c0  e8 ea 36 1b dc 3d 7a bc  75 42 80 00 00 00 00 00  |..6..=z.uB......|
-000000d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 fe  |................|
-000000e0  69 e8 6a d3 00 c3 43 f0  00 a2 93 7c 22 00 00 04  |i.j...C....|"...|
-000000f0  0e 03 80 00 00 00 00 20  80 00 00 7f fe 9c 8a 80  |....... ........|
-00000100  94 86 84 99 0c a0 95 2a  8b d8 3a 92 f5 74 7d 56  |.......*..:..t}V|
-00000110  fe b7 ec e8 0d 41 69 7c  00 0e f0 61 42 9c f0 27  |.....Ai|...aB..'|
-00000120  38 86 2a da 62 36 3c 8f  eb c8 27 1b 77 6f b9 4c  |8.*.b6<...'.wo.L|
-00000130  be 36 2b e4 26 1d c1 4f  dc d9 01 16 24 11 9a e0  |.6+.&..O....$...|
-00000140  91 02 00 7a ea 61 9d b4  e1 52 f6 1f 22 ae df 26  |...z.a...R.."..&|
-00000150  28 3e e0 f6 be df 90 df  b8 01 3f 8e 86 bf 7e 67  |(>........?...~g|
-00000160  1f 83 8f 20 51 53 60 46  60 30 43 c3 3d cf 12 84  |... QS` + "`F`" + `0C.=...|
-00000170  b7 10 c4 33 53 3d 25 48  b0 14 00 00 04 81 28 60  |...3S=%H......(` + "`" + `|
-00000180  13 84 81 08 54 13 85 40  e8 60 12 85 01 38 5c 67  |....T..@.` + "`" + `...8\g|
-00000190  b7 67 a5 ff 4e 71 cd d3  78 27 29 0e 5c ed d9 d7  |.g..Nq..x').\...|
-000001a0  cc 7e 04 f8 09 c3 73 a0  40 70 d9 6d 6a 75 6e 6b  |.~....s.@p.mjunk|
-000001b0  d3 00 c3 44 90 00 67 00  97 62 00 00 21 18 00 c0  |...D..g..b..!...|
-000001c0  08 00 00 00 20 01 00 00  7f fe ae be 90 98 a6 9c  |.... ...........|
-000001d0  b4 00 00 00 08 c1 4b c1  32 f8 0b 08 c5 83 c8 01  |......K.2.......|
-000001e0  e8 25 3f 74 7c c4 02 a0  4b c1 47 90 12 86 62 72  |.%?t|...K.G...br|
-000001f0  92 28 53 18 9d 8d 85 82  c6 e1 8a 6a 2f dd 5e cd  |.(S........j/.^.|
-00000200  d3 e1 1a 15 01 a1 2b dc  56 3f c4 ea c0 5e dc 40  |......+.V?...^.@|
-00000210  48 d3 80 b2 25 60 9c 7b  7e 32 dd 3e 22 f7 01 b6  |H...%` + "`" + `.{~2.>"...|
-00000220  f3 81 af b7 1f 78 e0 7f  6c aa fe 9a 7e 7e 94 9f  |.....x..l...~~..|
-00000230  bf 06 72 3f 15 8c b1 44  56 e1 b1 92 dc b5 37 4a  |..r?...DV.....7J|
-00000240  d4 5d 17 38 4e 30 24 14  00 04 c1 50 3e 0f 85 41  |.].8N0$....P>..A|
-00000250  40 52 13 85 61 50 5a 16  04 a1 38 12 5b 24 7e 03  |@R..aPZ...8.[$~.|
-00000260  6c 07 89 db 93 bd ba 0d  34 27 68 75 d0 a6 72 24  |l.......4'hu..r$|
-00000270  e4 88 dc 61 a9 40 b1 9d  0d d3 00 aa 46 70 00 66  |...a.@......Fp.f|
-00000280  ff bc a0 00 00 00 04 00  26 18 00 00 00 20 02 00  |........&.... ..|
-00000290  00 75 53 fa 82 42 62 9a  80 00 00 06 95 4e a7 a0  |.uS..Bb......N..|
-000002a0  bf 1e 78 7f 0a 10 08 18  7f 35 04 ab ee 50 77 8a  |..x......5...Pw.|
-000002b0  86 f0 51 f1 4d 82 46 38  29 0a 8c 35 57 23 87 82  |..Q.M.F8)..5W#..|
-000002c0  24 2a 01 b5 40 07 eb c5  01 37 a8 80 b3 88 03 23  |$*..@....7.....#|
-000002d0  c4 fc 61 e0 4f 33 c4 73  31 cd 90 54 b2 02 70 90  |..a.O3.s1..T..p.|
-000002e0  26 0b 42 d0 9c 2b 0c 02  97 f4 08 3d 9e c7 b2 6e  |&.B..+.....=...n|
-000002f0  44 0f 19 48 00 00 00 00  00 00 00 00 00 00 00 00  |D..H............|
-00000300  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
-00000310  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
-00000320  00 00 00 00 00 00 e5 1e  d8 d3 00 aa 46 70 00 66  |............Fp.f|
-00000330  ff bc a0 00 00 00 04 00  26 18 00 00 00 20 02 00  |........&.... ..|
-00000340  00 75 53 fa 82 42 62 9a  80                       |.uS..Bb..|
-
-Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)
-stationID 0, multiple message, issue of data station 0
-session transmit time 0, clock steering 0, external clock 0
-divergence free smoothing false, smoothing interval 0
-8 satellites, 2 signal types, 16 signals
-Satellite ID {approx range m, extended info, phase range rate}:
- 4 {24410542.339, 0, -135}
- 9 {25264833.738, 0, 182}
-16 {22915678.774, 0, 597}
-18 {21506595.669, 0, 472}
-25 {23345166.602, 0, -633}
-26 {20661965.550, 0, 292}
-29 {21135953.821, 0, -383}
-31 {21670837.435, 0, -442}
-Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
- 4  2 {24410527.355, 128282115.527, 513, false, 80, -136.207}
- 4 16 {24410523.313, 99955313.523, 320, false, 82, -134.869}
- 9 16 {25264751.952, 103451227.387, 606, false, 78, 182.267}
-16  2 {22915780.724, 120426622.169, 40, true, 86, 597.233}
-18  2 {21506547.550, 113021883.224, 968, false, 84, 471.599}
-18 16 {21506542.760, 88061705.706, 37, false, 90, 472.270}
-25  2 {23345103.037, 122677706.869, 51, true, 88, -632.317}
-25 16 {23345100.838, 95594616.762, 78, false, 74, -634.411}
-26  2 {20662003.308, 108581645.522, 329, false, 78, 291.597}
-26 16 {20662000.914, 84606022.946, 80, false, 18, 290.429}
-29  2 {21136079.188, 111074207.143, 664, false, 364, -382.650}
-29 16 {21136074.598, 86547263.526, 787, false, 583, -382.997}
-31  2 {21670772.711, 113885408.778, 710, true, 896, -443.036}
-31 16 {21670767.783, 88736342.592, 779, false, 876, -441.969}
-`
-
-	const resultForUnhandledMessageType = `Message type 1024 Residuals, Plane Grid Representation
-A coordinate transformation message.  Not often found in actual use.
-Frame length 14 bytes:
-00000000  d3 00 08 40 00 00 8a 00  00 00 00 4f 5e e7        |...@.......O^.|
-
-message type 1024 currently cannot be displayed
-`
-
-	const resultFor1005 = `Message type 1005 Stationary RTK Reference Station Antenna Reference Point (ARP)
-Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
-Frame length 25 bytes:
-00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
-00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
-
-message type 1005 - Base Station Information
-stationID 2, ITRF realisation year 3, ignored 0xf,
-x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
-ECEF coords in metres (12.3456, 23.4567, 34.5678)
-`
-
-	var testData = []struct {
-		description string
-		bitStream   []byte
-		messageType int
-		want        string
-	}{
-
-		{"msm4", testdata.MessageFrameType1074_2, 1074, resultForMSM4},
-
-		{"not RTCM", testdata.AllJunk, utils.NonRTCMMessage, resultForNotRTCM},
-		{"incomplete", testdata.IncompleteMessage, 1127, resultForIncomplete},
-		{"1005", testdata.MessageFrameType1005, 1005, resultFor1005},
-		{"msm7", testdata.MessageBatchWithJunk, 1077, resultForMSM7},
-		{"1024", testdata.UnhandledMessageType1024, 1024, resultForUnhandledMessageType},
-	}
-	for _, td := range testData {
-		message := NewMessage(td.messageType, "", td.bitStream)
-		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
-		handler := New(startTime)
-
-		got := handler.DisplayMessage(message)
-		if got != td.want {
-			t.Errorf("%s:\n%s, ", td.description, diff.Diff(td.want, got))
-
-		}
-	}
-}
-
-// TestDisplayMessageWithErrors creates some obscure error conditions and checks
-// that DisplayMessage handles them.
-func TestDisplayMessageWithErrors(t *testing.T) {
-
-	// RTCM3 messages that will produce an error when DisplayMessage is called.
-	// In most cases the problem is that the type value in the message doesn't match
-	// the value in the raw data.
-	messageWithErrorMessage := NewMessage(utils.MessageType1005, "an error message", testdata.MessageFrameType1005)
-	fake1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrame1077)
-	fakeMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrame1077)
-	fakeMSM7 := NewMessage(utils.MessageTypeMSM7Glonass, "", testdata.MessageFrameType1074_2)
-	// Expected results.
-	resultForMessageWithWarning := `Message type 1005 Stationary RTK Reference Station Antenna Reference Point (ARP)
-Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
-Frame length 25 bytes:
-00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
-00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
-
-an error message
-`
-
-	resultForFake1005 := `Message type 1005 Stationary RTK Reference Station Antenna Reference Point (ARP)
-Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
-Frame length 226 bytes:
-00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
-00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
-00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
-00000030  fe f2 05 b0 4a a0 ec 7b  0e 09 27 d0 3f 23 7c b9  |....J..{..'.?#|.|
-00000040  6f bd 73 ee 1f 01 64 96  f5 7b 27 46 f1 f2 1a bf  |o.s...d..{'F....|
-00000050  19 fa 08 41 08 7b b1 1b  67 e1 a6 70 71 d9 df 0c  |...A.{..g..pq...|
-00000060  61 7f 19 9c 7e 66 66 fb  86 c0 04 e9 c7 7d 85 83  |a...~ff......}..|
-00000070  7d ac ad fc be 2b fc 3c  84 02 1d eb 81 a6 9c 87  |}....+.<........|
-00000080  17 5d 86 f5 60 fb 66 72  7b fa 2f 48 d2 29 67 08  |.]..` + "`" + `.fr{./H.)g.|
-00000090  c8 72 15 0d 37 ca 92 a4  e9 3a 4e 13 80 00 14 04  |.r..7....:N.....|
-000000a0  c0 e8 50 16 04 c1 40 46  17 05 41 70 52 17 05 01  |..P...@F..ApR...|
-000000b0  ef 4b de 70 4c b1 af 84  37 08 2a 77 95 f1 6e 75  |.K.pL...7.*w..nu|
-000000c0  e8 ea 36 1b dc 3d 7a bc  75 42 80 00 00 00 00 00  |..6..=z.uB......|
-000000d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 fe  |................|
-000000e0  69 e8                                             |i.|
-
-expected message type 1005 got 1077
-`
-
-	const resultForFakeMSM4 = `Message type 1124 BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
-The type 4 Multiple Signal Message format for China’s BeiDou system.
-Frame length 226 bytes:
-00000000  d3 00 dc 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
-00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
-00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
-00000030  fe f2 05 b0 4a a0 ec 7b  0e 09 27 d0 3f 23 7c b9  |....J..{..'.?#|.|
-00000040  6f bd 73 ee 1f 01 64 96  f5 7b 27 46 f1 f2 1a bf  |o.s...d..{'F....|
-00000050  19 fa 08 41 08 7b b1 1b  67 e1 a6 70 71 d9 df 0c  |...A.{..g..pq...|
-00000060  61 7f 19 9c 7e 66 66 fb  86 c0 04 e9 c7 7d 85 83  |a...~ff......}..|
-00000070  7d ac ad fc be 2b fc 3c  84 02 1d eb 81 a6 9c 87  |}....+.<........|
-00000080  17 5d 86 f5 60 fb 66 72  7b fa 2f 48 d2 29 67 08  |.]..` + "`" + `.fr{./H.)g.|
-00000090  c8 72 15 0d 37 ca 92 a4  e9 3a 4e 13 80 00 14 04  |.r..7....:N.....|
-000000a0  c0 e8 50 16 04 c1 40 46  17 05 41 70 52 17 05 01  |..P...@F..ApR...|
-000000b0  ef 4b de 70 4c b1 af 84  37 08 2a 77 95 f1 6e 75  |.K.pL...7.*w..nu|
-000000c0  e8 ea 36 1b dc 3d 7a bc  75 42 80 00 00 00 00 00  |..6..=z.uB......|
-000000d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 fe  |................|
-000000e0  69 e8                                             |i.|
-
-message type 1077 is not an MSM4
-`
-
-	const resultForFakeMSM7 = `Message type 1087 GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
-The type 7 Multiple Signal Message format for the Russian GLONASS system.
-Frame length 42 bytes:
-00000000  d3 00 24 43 20 01 00 00  00 04 00 00 08 00 00 00  |..$C ...........|
-00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
-00000020  00 40 00 00 68 8e 80 83  f7 4b                    |.@..h....K|
-
-message type 1074 is not an MSM7
-`
-
-	var testData = []struct {
-		description string
-		message     *Message
-		want        string
-	}{
-		{"error message", messageWithErrorMessage, resultForMessageWithWarning},
-		{"1005", fake1005, resultForFake1005},
-		{"msm4", fakeMSM4, resultForFakeMSM4},
-		{"msm7", fakeMSM7, resultForFakeMSM7},
-	}
-	for _, td := range testData {
-		startTime := time.Now()
-		handler := New(startTime)
-		got := handler.DisplayMessage(td.message)
-		if td.want != got {
-			t.Errorf("%s\n%s", td.description, diff.Diff(td.want, got))
-		}
 	}
 }
 
@@ -1447,19 +1186,19 @@ func TestGetTimeFromTimeStampWithError(t *testing.T) {
 		hdr         *header.Header
 		wantError   string
 	}{
-		{"4 0", createHeader(utils.MessageTypeMSM4Glonass, (7 << 27)), "illegal Glonass day"},
-		{"7 1", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | 1)), "illegal Glonass day"},
-		{"7 max", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | (1 << 25))), "illegal Glonass day"},
+		{"4 0", createHeader(utils.MessageTypeMSM4Glonass, (7 << 27)), "timestamp out of range"},
+		{"7 1", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | 1)), "timestamp out of range"},
+		{"7 max", createHeader(utils.MessageTypeMSM7Glonass, ((7 << 27) | (1 << 25))), "timestamp out of range"},
 		// This timestamp is an int, which is 32 bits on some machines, 64 on others.  For safety, only
 		// set the timestamp to the max value of an int32.
-		{"max int32", createHeader(utils.MessageTypeMSM4Glonass, math.MaxInt32), "out of range"},
+		{"max int32", createHeader(utils.MessageTypeMSM4Glonass, math.MaxInt32), "timestamp out of range"},
 		// Try all of the other constellations with a value bigger than 30 bits.
-		{"GPS MSM4", createHeader(utils.MessageTypeMSM4GPS, utils.MaxTimestamp+1), "out of range"},
-		{"GPS MSM7", createHeader(utils.MessageTypeMSM7GPS, math.MaxInt32), "out of range"},
-		{"Galileo MSM4", createHeader(utils.MessageTypeMSM4Galileo, utils.MaxTimestamp+1), "out of range"},
-		{"Galileo MSM7", createHeader(utils.MessageTypeMSM7Galileo, math.MaxInt32/2+1), "out of range"},
-		{"Beidou MSM4", createHeader(utils.MessageTypeMSM4Beidou, utils.MaxTimestamp+2), "out of range"},
-		{"Beidou MSM7", createHeader(utils.MessageTypeMSM7Beidou, 0x40000000), "out of range"},
+		{"GPS MSM4", createHeader(utils.MessageTypeMSM4GPS, utils.MaxTimestamp+1), "timestamp out of range"},
+		{"GPS MSM7", createHeader(utils.MessageTypeMSM7GPS, math.MaxInt32), "timestamp out of range"},
+		{"Galileo MSM4", createHeader(utils.MessageTypeMSM4Galileo, utils.MaxTimestamp+1), "timestamp out of range"},
+		{"Galileo MSM7", createHeader(utils.MessageTypeMSM7Galileo, math.MaxInt32/2+1), "timestamp out of range"},
+		{"Beidou MSM4", createHeader(utils.MessageTypeMSM4Beidou, utils.MaxTimestamp+2), "timestamp out of range"},
+		{"Beidou MSM7", createHeader(utils.MessageTypeMSM7Beidou, 0x40000000), "timestamp out of range"},
 		{"SBAS MSM7", createHeader(utils.MessageTypeMSM7SBAS, 0x40000000), "unknown message type"},
 	}
 
@@ -1494,7 +1233,7 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 
 	const illegal1 = 0x3c000000 // 11 1100 0000 0000 0000 0000 0000 0000
 	const illegal2 = 0x3c000000 // 11 1100 0000 0000 0000 0000 0000 0000
-	const want = "illegal Glonass day"
+	const want = "timestamp out of range"
 
 	var zeroTimeValue time.Time // utcTime should be set to this.
 
@@ -1536,7 +1275,7 @@ func TestCheckCRC(t *testing.T) {
 		bitStream   []byte
 		want        bool
 	}{
-		{"valid", testdata.MesageBatchWith1077, true},
+		{"valid", testdata.MessageBatchWith1077, true},
 		{"CRC failure", testdata.MessageFrameWithCRCFailure, false},
 		{"short", shortFrame, false},
 	}
@@ -1625,16 +1364,19 @@ func createMSM4() *msm4message.Message {
 
 // createRTCMWithMSM4 creates an RTCM message containing the given MSM4,
 // setting the time to utcTime.  The Readable doesn't match the RawData.
-func createRTCMWithMSM4(msm4 *msm4message.Message, utcTime time.Time) *Message {
+func createRTCMWithMSM4(msm4 *msm4message.Message, startOfWeek time.Time) *Message {
 	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	message.Readable = msm4
-	message.UTCTimeFromTimestamp = utcTime
+	// In the real world these values would be set by handler.GetMessage.
+	message.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	message.StartOfWeek =
+		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 
 	return message
 }
 
-// TestNew checks that New creates a message correctly.
-func TestNew(t *testing.T) {
+// TestNewMessage checks that NewMessage creates a message correctly.
+func TestNewMessage(t *testing.T) {
 
 	const wantType = utils.MessageTypeMSM4QZSS
 	const wantWarning = "a warning"
@@ -1659,10 +1401,6 @@ func TestNew(t *testing.T) {
 	}
 
 	// Check the fields that should never be set by New
-
-	if !message.UTCTimeFromTimestamp.IsZero() {
-		t.Errorf("want time zero got %v", message.UTCTimeFromTimestamp)
-	}
 
 	if wantReadable != message.Readable {
 		t.Errorf("want %v got %v", wantReadable, message.Readable)
@@ -1696,16 +1434,12 @@ func TestNewNonRTCM(t *testing.T) {
 
 	// Check the fields that should never be set by NewNonRTCM
 
-	if !message.UTCTimeFromTimestamp.IsZero() {
-		t.Errorf("want time zero got %v", message.UTCTimeFromTimestamp)
-	}
-
 	if wantReadable != message.Readable {
 		t.Errorf("want %v got %v", wantReadable, message.Readable)
 	}
 }
 
-// TestString checks the message.String method for various message types.
+// TestString checks the String method using various message types.
 func TestString(t *testing.T) {
 
 	const wantNonRTCM = `Message type -1, Non-RTCM data
@@ -1715,12 +1449,20 @@ Frame length 4 bytes:
 
 `
 
-	const wantShortFrame = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
+	const wantShort1005Frame = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
 Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
 Frame length 7 bytes:
 00000000  d3 00 13 3e d0 02 0f                              |...>...|
 
 overrun - expected 152 bits in a message type 1005, got 8
+`
+
+	const wantShort1006Frame = `Message type 1006, Stationary RTK Reference Station ARP with Antenna Height
+Commonly called the Station Description this message includes the ECEF location of the antenna (the antenna reference point (ARP) not the phase center) and also the quarter phase alignment details.  The height about the ARP value is also provided. The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1005 and 1032. The 1005 message does not convey the height about the ARP value.
+Frame length 7 bytes:
+00000000  d3 00 15 3e e0 02 0f                              |...>...|
+
+overrun - expected 168 bits in a message type 1006, got 8
 `
 
 	const want1024 = `Message type 1024, Residuals, Plane Grid Representation
@@ -1731,144 +1473,58 @@ Frame length 14 bytes:
 message type 1024 currently cannot be displayed
 `
 
-	const want1005 = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
-Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
-Frame length 25 bytes:
-00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
-00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
-
-message type 1005 - Base Station Information
-stationID 2, ITRF realisation year 3, ignored 0xf,
-x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
-ECEF coords in metres (12.3456, 23.4567, 34.5678)
-`
 	const resultTemplateMSM4Complete = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
 The type 4 Multiple Signal Message format for the American GPS system.
+Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
-Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
-1 Satellites
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 Satellite ID {range ms}
  8 {%.3f}
-1 Signals
+Signals:
 Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}
  8 11 {%.3f, %.3f, 14, true, 15}
 `
 
 	const wantIncompleteMSM4 = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
 The type 4 Multiple Signal Message format for the American GPS system.
+Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
 00000020  00 40 00 00 68 8e 80 6e  75 44                    |.@..h..nuD|
 
-Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 No Satellites
 No Signals
 `
 
-	// This result is copied from rtcm_test.go.
-	const wantMSM7 = `Message type 1077, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
-The type 7 Multiple Signal Message format for the USA’s GPS system.
-Frame length 838 bytes:
-00000000  43 50 00 67 00 97 62 00  00 08 40 a0 65 00 00 00  |CP.g..b...@.e...|
-00000010  00 20 00 80 00 6d ff a8  aa 26 23 a6 a2 23 24 00  |. ...m...&#..#$.|
-00000020  00 00 00 36 68 cb 83 7a  6f 9d 7c 04 92 fe f2 05  |...6h..zo.|.....|
-00000030  b0 4a a0 ec 7b 0e 09 27  d0 3f 23 7c b9 6f bd 73  |.J..{..'.?#|.o.s|
-00000040  ee 1f 01 64 96 f5 7b 27  46 f1 f2 1a bf 19 fa 08  |...d..{'F.......|
-00000050  41 08 7b b1 1b 67 e1 a6  70 71 d9 df 0c 61 7f 19  |A.{..g..pq...a..|
-00000060  9c 7e 66 66 fb 86 c0 04  e9 c7 7d 85 83 7d ac ad  |.~ff......}..}..|
-00000070  fc be 2b fc 3c 84 02 1d  eb 81 a6 9c 87 17 5d 86  |..+.<.........].|
-00000080  f5 60 fb 66 72 7b fa 2f  48 d2 29 67 08 c8 72 15  |.` + "`" + `.fr{./H.)g..r.|
-00000090  0d 37 ca 92 a4 e9 3a 4e  13 80 00 14 04 c0 e8 50  |.7....:N.......P|
-000000a0  16 04 c1 40 46 17 05 41  70 52 17 05 01 ef 4b de  |...@F..ApR....K.|
-000000b0  70 4c b1 af 84 37 08 2a  77 95 f1 6e 75 e8 ea 36  |pL...7.*w..nu..6|
-000000c0  1b dc 3d 7a bc 75 42 80  00 00 00 00 00 00 00 00  |..=z.uB.........|
-000000d0  00 00 00 00 00 00 00 00  00 00 00 00 fe 69 e8 6a  |.............i.j|
-000000e0  d3 00 c3 43 f0 00 a2 93  7c 22 00 00 04 0e 03 80  |...C....|"......|
-000000f0  00 00 00 00 20 80 00 00  7f fe 9c 8a 80 94 86 84  |.... ...........|
-00000100  99 0c a0 95 2a 8b d8 3a  92 f5 74 7d 56 fe b7 ec  |....*..:..t}V...|
-00000110  e8 0d 41 69 7c 00 0e f0  61 42 9c f0 27 38 86 2a  |..Ai|...aB..'8.*|
-00000120  da 62 36 3c 8f eb c8 27  1b 77 6f b9 4c be 36 2b  |.b6<...'.wo.L.6+|
-00000130  e4 26 1d c1 4f dc d9 01  16 24 11 9a e0 91 02 00  |.&..O....$......|
-00000140  7a ea 61 9d b4 e1 52 f6  1f 22 ae df 26 28 3e e0  |z.a...R.."..&(>.|
-00000150  f6 be df 90 df b8 01 3f  8e 86 bf 7e 67 1f 83 8f  |.......?...~g...|
-00000160  20 51 53 60 46 60 30 43  c3 3d cf 12 84 b7 10 c4  | QS` + "`F`" + `0C.=......|
-00000170  33 53 3d 25 48 b0 14 00  00 04 81 28 60 13 84 81  |3S=%H......(` + "`" + `...|
-00000180  08 54 13 85 40 e8 60 12  85 01 38 5c 67 b7 67 a5  |.T..@.` + "`" + `...8\g.g.|
-00000190  ff 4e 71 cd d3 78 27 29  0e 5c ed d9 d7 cc 7e 04  |.Nq..x').\....~.|
-000001a0  f8 09 c3 73 a0 40 70 d9  6d 6a 75 6e 6b d3 00 c3  |...s.@p.mjunk...|
-000001b0  44 90 00 67 00 97 62 00  00 21 18 00 c0 08 00 00  |D..g..b..!......|
-000001c0  00 20 01 00 00 7f fe ae  be 90 98 a6 9c b4 00 00  |. ..............|
-000001d0  00 08 c1 4b c1 32 f8 0b  08 c5 83 c8 01 e8 25 3f  |...K.2........%?|
-000001e0  74 7c c4 02 a0 4b c1 47  90 12 86 62 72 92 28 53  |t|...K.G...br.(S|
-000001f0  18 9d 8d 85 82 c6 e1 8a  6a 2f dd 5e cd d3 e1 1a  |........j/.^....|
-00000200  15 01 a1 2b dc 56 3f c4  ea c0 5e dc 40 48 d3 80  |...+.V?...^.@H..|
-00000210  b2 25 60 9c 7b 7e 32 dd  3e 22 f7 01 b6 f3 81 af  |.%` + "`" + `.{~2.>"......|
-00000220  b7 1f 78 e0 7f 6c aa fe  9a 7e 7e 94 9f bf 06 72  |..x..l...~~....r|
-00000230  3f 15 8c b1 44 56 e1 b1  92 dc b5 37 4a d4 5d 17  |?...DV.....7J.].|
-00000240  38 4e 30 24 14 00 04 c1  50 3e 0f 85 41 40 52 13  |8N0$....P>..A@R.|
-00000250  85 61 50 5a 16 04 a1 38  12 5b 24 7e 03 6c 07 89  |.aPZ...8.[$~.l..|
-00000260  db 93 bd ba 0d 34 27 68  75 d0 a6 72 24 e4 88 dc  |.....4'hu..r$...|
-00000270  61 a9 40 b1 9d 0d d3 00  aa 46 70 00 66 ff bc a0  |a.@......Fp.f...|
-00000280  00 00 00 04 00 26 18 00  00 00 20 02 00 00 75 53  |.....&.... ...uS|
-00000290  fa 82 42 62 9a 80 00 00  06 95 4e a7 a0 bf 1e 78  |..Bb......N....x|
-000002a0  7f 0a 10 08 18 7f 35 04  ab ee 50 77 8a 86 f0 51  |......5...Pw...Q|
-000002b0  f1 4d 82 46 38 29 0a 8c  35 57 23 87 82 24 2a 01  |.M.F8)..5W#..$*.|
-000002c0  b5 40 07 eb c5 01 37 a8  80 b3 88 03 23 c4 fc 61  |.@....7.....#..a|
-000002d0  e0 4f 33 c4 73 31 cd 90  54 b2 02 70 90 26 0b 42  |.O3.s1..T..p.&.B|
-000002e0  d0 9c 2b 0c 02 97 f4 08  3d 9e c7 b2 6e 44 0f 19  |..+.....=...nD..|
-000002f0  48 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |H...............|
-00000300  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
-00000310  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
-00000320  00 00 00 e5 1e d8 d3 00  aa 46 70 00 66 ff bc a0  |.........Fp.f...|
-00000330  00 00 00 04 00 26 18 00  00 00 20 02 00 00 75 53  |.....&.... ...uS|
-00000340  fa 82 42 62 9a 80                                 |..Bb..|
-
-Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)
-stationID 0, multiple message, issue of data station 0
-session transmit time 0, clock steering 0, external clock 0
-divergence free smoothing false, smoothing interval 0
-8 satellites, 2 signal types, 16 signals
-Satellite ID {approx range m, extended info, phase range rate}:
- 4 {24410542.339, 0, -135}
- 9 {25264833.738, 0, 182}
-16 {22915678.774, 0, 597}
-18 {21506595.669, 0, 472}
-25 {23345166.602, 0, -633}
-26 {20661965.550, 0, 292}
-29 {21135953.821, 0, -383}
-31 {21670837.435, 0, -442}
-Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
- 4  2 {24410527.355, 128282115.527, 513, false, 80, -136.207}
- 4 16 {24410523.313, 99955313.523, 320, false, 82, -134.869}
- 9 16 {25264751.952, 103451227.387, 606, false, 78, 182.267}
-16  2 {22915780.724, 120426622.169, 40, true, 86, 597.233}
-18  2 {21506547.550, 113021883.224, 968, false, 84, 471.599}
-18 16 {21506542.760, 88061705.706, 37, false, 90, 472.270}
-25  2 {23345103.037, 122677706.869, 51, true, 88, -632.317}
-25 16 {23345100.838, 95594616.762, 78, false, 74, -634.411}
-26  2 {20662003.308, 108581645.522, 329, false, 78, 291.597}
-26 16 {20662000.914, 84606022.946, 80, false, 18, 290.429}
-29  2 {21136079.188, 111074207.143, 664, false, 364, -382.650}
-29 16 {21136074.598, 86547263.526, 787, false, 583, -382.997}
-31  2 {21670772.711, 113885408.778, 710, true, 896, -443.036}
-31 16 {21670767.783, 88736342.592, 779, false, 876, -441.969}
-`
+	const wantComplete1077Display = testdata.MessageFrameType1077Heading +
+		"Sent at 2023-02-17 00:00:05 +0000 UTC\n" +
+		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)\n" +
+		testdata.MessageFrameType1077HexDump +
+		testdata.WantHeaderFromMessageFrameType1077 + "\n" +
+		testdata.WantSatelliteListFromMessageFrameType1077 + "\n" +
+		testdata.WantSignalListFromMessageFrameType1077 + "\n"
 
 	const wantCrazy1005 = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
 Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
@@ -1893,6 +1549,8 @@ expected message type 1005 got 1077
 `
 	const wantCrazyMSM4 = `Message type 1124, BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
 The type 4 Multiple Signal Message format for China’s BeiDou system.
+Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 225 bytes:
 00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
 00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
@@ -1915,6 +1573,8 @@ message type 1077 is not an MSM4
 
 	const wantCrazyMSM7 = `Message type 1097, Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
 The type 7 Multiple Signal Message format for Europe’s Galileo system.
+Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
 00000010  00 00 00 00 20 00 80 00  60 28 00 40 01 00 02 00  |.... ...` + "`" + `(.@....|
@@ -1927,11 +1587,15 @@ message type 1074 is not an MSM7
 	// doesn't contain any RTCM material.
 	nonRTCMMessage := NewNonRTCM(testdata.AllJunk)
 
-	// messageFromShortFrame is a message built from a frame too short
-	// to make sense of - the embedded message is only one byte long so
-	// the message length is incomplete.  The display will contain an
-	// error message.
-	messageFromShortFrame := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005[:7])
+	// messageFromShort1005Frame is a message built from a type 1005 frame too
+	// short to make sense of - the embedded message is only one byte long so
+	// the message length is incomplete.  The display will contain an error message.
+	messageFromShort1005Frame := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005[:7])
+
+	// messageFromShort1006Frame is a message built from a type 1005 frame too
+	// short to make sense of - the embedded message is only one byte long so
+	// the message length is incomplete.  The display will contain an error message.
+	messageFromShort1006Frame := NewMessage(utils.MessageType1006, "", testdata.MessageFrameType1006[:7])
 
 	// message1024 is a message of type 1024.  It's not handled and
 	// displaying it produces a Readable field which is just a
@@ -1941,13 +1605,16 @@ message type 1074 is not an MSM7
 	// message1005 is a message type 1005 - base position.
 	message1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
 
-	// A message containing an MSM4 or an MSM7 has a date attached.
-	// Use this one.
-	utcTime := time.Date(2023, time.February, 14, 1, 2, 3, int(4*time.Millisecond), utils.LocationUTC)
+	// message1006 is a message type 1006 - base position and height.
+	message1006 := NewMessage(utils.MessageType1006, "", testdata.MessageFrameType1006)
+
+	// The start times for MSM messages.
+	startTime := time.Date(2023, time.February, 14, 1, 2, 3, 0, utils.LocationUTC)
+	startOfWeek := time.Date(2023, time.February, 11, 23, 59, 42, 0, utils.LocationUTC)
 
 	// completeMessage has a header, satellites and Signals.
 	msm4 := createMSM4()
-	completeMSM4Message := createRTCMWithMSM4(msm4, utcTime)
+	completeMSM4Message := createRTCMWithMSM4(msm4, startOfWeek)
 
 	// Work out the values for the template and produce the wanted string for the
 	// complete message.
@@ -1975,43 +1642,58 @@ message type 1074 is not an MSM7
 
 	incompleteMessage := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	incompleteMessage.Readable = incompleteMSM4
+	incompleteMessage.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	incompleteMessage.StartOfWeek =
+		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 
-	// testdata.MessageBatchWithJunk starts with a message type 1077 (a GPS MSM7)
-	msm7, createError := msm7message.GetMessage(testdata.MessageBatchWithJunk)
-	if createError != nil {
-		t.Error(createError)
-	}
-
-	completeMSM7Message := NewMessage(msm7.Header.MessageType, "", testdata.MessageBatchWithJunk[3:841])
-	completeMSM7Message.Readable = msm7
-	completeMSM7Message.UTCTimeFromTimestamp = utcTime
-
-	// These messages have the wrong message type, which
-	// String() treats as special cases.
+	// These messages have the wrong message type, which are
+	// treated as special cases.
 	crazy1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1077)
 	crazyMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrameType1077)
+	crazyMSM4.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	crazyMSM4.StartOfWeek =
+		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 	// This one is an MSM4 but the message type is forced to be MSM7.
 	crazyMSM7 := NewMessage(utils.MessageTypeMSM7Galileo, "", testdata.MessageFrameType1074_1)
 	crazyMSM7.MessageType = utils.MessageTypeMSM7Galileo
+	crazyMSM7.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	crazyMSM7.StartOfWeek =
+		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
+
+	rtcmHandler := New(startTime)
+
+	completeMSM7Message, err := rtcmHandler.GetMessage(testdata.MessageFrameType1077)
+	if err != nil {
+		t.Error(err)
+	}
+
+	glonassMSM7WithIllegalDay, glonassError := rtcmHandler.GetMessage(testdata.GlonassMSM7WithIllegalDay)
+	if glonassError == nil {
+		t.Error("expected an error - timestamp out of range")
+	}
 
 	var testData = []struct {
 		description string
 		message     *Message
 		want        string
 	}{
+		{"complete MSM4", completeMSM4Message, wantCompleteMSM4},
+		{"complete MSM7", completeMSM7Message, wantComplete1077Display},
+		{"glonass with illegal day", glonassMSM7WithIllegalDay, testdata.GlonassMSM7WithIllegalDayDisplay},
+		{"1005", message1005, testdata.MessageFrameType1005Display},
+		{"1006", message1006, testdata.MessageFrameType1006Display},
 		{"not handled", message1024, want1024},
 		{"no RTCM", nonRTCMMessage, wantNonRTCM},
-		{"short frame", messageFromShortFrame, wantShortFrame},
-		{"complete MSM4", completeMSM4Message, wantCompleteMSM4},
+		{"short 1005 frame", messageFromShort1005Frame, wantShort1005Frame},
+		{"short 1006 frame", messageFromShort1006Frame, wantShort1006Frame},
 		{"incomplete MSM4", incompleteMessage, wantIncompleteMSM4},
-		{"1005", message1005, want1005},
-		{"complete MSM7", completeMSM7Message, wantMSM7},
 		{"crazy 1005", crazy1005, wantCrazy1005},
 		{"crazy MSM4", crazyMSM4, wantCrazyMSM4},
 		{"crazy MSM7", crazyMSM7, wantCrazyMSM7},
 	}
 
 	for _, td := range testData {
+
 		got := td.message.String()
 
 		if td.want != got {
@@ -2041,9 +1723,6 @@ func TestCopy(t *testing.T) {
 
 	const wantType = utils.MessageTypeMSM4QZSS
 	const wantWarning = "a warning"
-	const wantValid = false
-	const wantComplete = false
-	const wantCRCValid = false
 	const wantUTCTime = 0
 	var wantReadable interface{} = nil
 	wantBitstream := testdata.UnhandledMessageType1024
@@ -2069,23 +1748,20 @@ func TestCopy(t *testing.T) {
 
 	// Check the fields that should never be set by Copy
 
-	if !message.UTCTimeFromTimestamp.IsZero() {
-		t.Errorf("want %v got %v", wantUTCTime, message.UTCTimeFromTimestamp)
-	}
-
 	if wantReadable != message.Readable {
 		t.Errorf("want %v got %v", wantReadable, message.Readable)
 	}
 }
 
-// TestDispayable checks the displayable function.
-func TestDispayable(t *testing.T) {
+// TestDisplayable checks the displayable function.
+func TestDisplayable(t *testing.T) {
 	var testData = []struct {
 		messageType int
 		want        bool
 	}{
 		{utils.NonRTCMMessage, false},
 		{1005, true},
+		{1006, true},
 		{1076, false},
 		{1074, true},
 		{1077, true},
@@ -2105,6 +1781,85 @@ func TestDispayable(t *testing.T) {
 		got := message.displayable()
 		if got != td.want {
 			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
+		}
+	}
+}
+
+// TestGetTimeDisplayFromTimestamp checks getTimeDisplayFromTimestamp.
+func TestGetTimeDisplayFromTimestamp(t *testing.T) {
+
+	const timestampTooBig = 0x40000000
+
+	var testData = []struct {
+		messageType int
+		timestamp   uint
+		wantError   string
+		wantDisplay string
+	}{
+		{utils.MessageTypeMSM7Galileo, 3 * 24 * 3600 * 1000, "", "Sent at 2023-02-14 23:59:42 +0000 UTC"},
+		{utils.MessageTypeMSM7GPS, timestampTooBig, "timestamp out of range", "Sent at (timestamp out of range)"},
+	}
+	for _, td := range testData {
+
+		startTime := time.Date(2023, time.February, 14, 0, 0, 0, 0, utils.LocationUTC)
+
+		h := New(startTime)
+
+		display, displayErr := h.getTimeDisplayFromTimestamp(td.messageType, td.timestamp)
+
+		if len(td.wantError) > 0 {
+			if displayErr == nil {
+				t.Error("expected an error")
+			}
+
+			if td.wantError != displayErr.Error() {
+				t.Error(diff.Diff(td.wantError, displayErr.Error()))
+			}
+		} else {
+			if displayErr != nil {
+				t.Error(displayErr)
+			}
+		}
+
+		if td.wantDisplay != display {
+			t.Error(diff.Diff(td.wantDisplay, display))
+		}
+	}
+}
+
+// TestGetStartTimeDisplay checks getStartTimeDisplay.
+func TestGetStartTimeDisplay(t *testing.T) {
+
+	const maxTimestamp = ((((6*24 + 23) * 3600) + 59*60 + 59) * 1000) + 999
+	const timestampTooBig = utils.MaxTimestamp + 1
+	const glonassTimestampTooBig = utils.MaxTimestampGlonass + 1
+
+	var testData = []struct {
+		messageType int
+		timestamp   uint
+		wantDisplay string
+	}{
+		{utils.MessageTypeMSM7Glonass, (6 << 27) + (24 * 3600 * 1000) - 1,
+			"Start of Glonass week 2023-02-11 21:00:00 +0000 UTC plus timestamp 891706367 (6d 23h 59m 59s 999ms)"},
+		{utils.MessageTypeMSM7Galileo, maxTimestamp,
+			"Start of Galileo week 2023-02-11 23:59:42 +0000 UTC plus timestamp 604799999 (6d 23h 59m 59s 999ms)"},
+		{utils.MessageTypeMSM7SBAS, 1,
+			"Start of SBAS week (don't know the start of week for message type 1107) plus timestamp 1 (0d 0h 0m 0s 1ms)"},
+		{utils.MessageTypeMSM7Glonass, glonassTimestampTooBig,
+			"Start of Glonass week 2023-02-11 21:00:00 +0000 UTC plus timestamp out of range - 0x35265c00 (6/86400000)"},
+		{utils.MessageTypeMSM7Galileo, timestampTooBig,
+			"Start of Galileo week 2023-02-11 23:59:42 +0000 UTC plus timestamp out of range - 604800000 (7/0)"},
+	}
+	for _, td := range testData {
+
+		startTime := time.Date(2023, time.February, 14, 0, 0, 0, 0, utils.LocationUTC)
+
+		h := New(startTime)
+
+		display := h.getStartTimeDisplay(td.messageType, td.timestamp)
+
+		if td.wantDisplay != display {
+			t.Error(diff.Diff(td.wantDisplay, display))
 		}
 	}
 }

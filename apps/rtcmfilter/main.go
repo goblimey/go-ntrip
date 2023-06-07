@@ -129,13 +129,11 @@
 // or scrambling the occasional character.)  Dropped characters
 // will cause the message's CRC check to fail and the message
 // will be deemed invalid.
-
 package main
 
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"time"
 
@@ -151,18 +149,16 @@ import (
 // the names of the potential input files.
 const controlFileName = "./ntrip.json"
 
-// logger writes to the daily event log.
-var logger *log.Logger
-
 func main() {
 
-	logger := getDailyLogger()
+	// logger writes to the daily event log.
+	logger := utils.GetDailyLogger()
 
 	config, err := jsonconfig.GetJSONConfigFromFile(controlFileName, logger)
 
 	if err != nil {
 		// There is no JSON config file.  We can't continue.
-		logger.Fatalf("cannot find config %s", controlFileName)
+		logger.Fatalf("config error in %s - %v", controlFileName, err)
 		os.Exit(1)
 	}
 
@@ -199,8 +195,6 @@ func processMessages(config *jsonconfig.Config) {
 	if len(config.MessageLogDirectory) > 0 {
 		logDir = config.MessageLogDirectory
 	}
-
-	logger = getDailyLogger()
 
 	// Set up the output channels and the goroutines that consume them.  Ensure
 	// that the channels are closed on our return.
@@ -239,13 +233,7 @@ func processMessages(config *jsonconfig.Config) {
 	// Start a handler.  The resulting messages will emerge from the
 	// message channel.
 	appCore := AppCore.New(config, channels)
-	go appCore.HandleMessages(time.Now())
-
-	// HandleMessages runs until it's forcibly shut down. To keep the goroutines
-	// running, loop forever.
-	// for {
-	// 	time.Sleep(time.Hour)
-	// }
+	appCore.HandleMessages(time.Now())
 }
 
 // writeRTCMMessages receives the messages from the channel and writes them
@@ -312,12 +300,4 @@ func writeReadableMessages(ch chan rtcm.Message, writer io.Writer) {
 		display := fmt.Sprintf("%s\n", message.String())
 		writer.Write([]byte(display))
 	}
-}
-
-// getDailyLogger gets a daily log file which can be written to as a logger
-// (each line decorated with filename, date, time, etc).
-func getDailyLogger() *log.Logger {
-	dailyLog := dailylogger.New("logs", "rtcmfilter.", ".log")
-	logFlags := log.LstdFlags | log.Lshortfile | log.Lmicroseconds
-	return log.New(dailyLog, "rtcmfilter", logFlags)
 }

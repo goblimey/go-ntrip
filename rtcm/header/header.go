@@ -4,15 +4,15 @@ package header
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
-// Field lengths in bits.
-const lenMessageType = 12
-const lenStationID = 12
-const lenTimeStamp = 30
+// Field lengths in bits.  The visible values are used by other packages.
+const LenMessageType = 12
+const LenStationID = 12
+const LenTimeStamp = 30
+
 const lenMultipleMessageFlag = 1
 const lenIssueOfDataStation = 3
 const lenSessionTransmissionTime = 7
@@ -28,8 +28,8 @@ const lenSignalMask = 32
 const maxLengthOfCellMask = 64
 
 // The minimum length of an MSM header
-const minBitsInHeader = lenMessageType + lenStationID +
-	lenTimeStamp + lenMultipleMessageFlag + lenIssueOfDataStation +
+const minBitsInHeader = LenMessageType + LenStationID +
+	LenTimeStamp + lenMultipleMessageFlag + lenIssueOfDataStation +
 	lenSessionTransmissionTime + lenClockSteeringIndicator +
 	lenExternalClockIndicator + lenGNSSDivergenceFreeSmoothingIndicator +
 	lenGNSSSmoothingInterval + lenSatelliteMask +
@@ -64,27 +64,21 @@ type Header struct {
 	StationID uint
 
 	// Timestamp - uint30.
-	// The structure of the 30 bits varies with the constellation.  For GPS
-	// and Galileo it's the number of milliseconds from the start of the
-	// current GPS week, which starts at midnight GMT at the start of Sunday
-	// (in GPS time, a few leap seconds before UTC).  For Beidou it's
-	// similar but with a different number of leap seconds.  For GLONASS the
-	// top three bits are the day of the week (0 is Sunday) and the rest are
-	// milliseconds from the start of the day in the Moscow time zone.
 	//
+	// The structure of the 30 bits varies with the constellation.  For GPS,
+	// Galileo and Beidou it's a single uint, the number of milliseconds from
+	// the start of the current week.  For GPS and Galileo that starts on
+	// Saturday UTC at a few leap seconds before midnight (in 2013, 18 seconds
+	// before.  For Beidou it's similar but, in 2013, 4 seconds before midnight
+	// UTC.  The maximum value is ((milliseconds in 7 days) - 1)
+	// (utils.MaxTimestamp).
+	//
+	// For GLONASS the top three bits are the day of the week (0 is Sunday) and
+	// the lower 27 bits are milliseconds from the start of the day in the
+	// Moscow time zone, which is 3 hours ahead of UTC.  The maximum value is
+	// day == 6, milliseconds == ((milliseconds in 24 hours) - 1),
+	// (utils.MaxTimestampGlonass).
 	Timestamp uint
-
-	// StartOfWeek is the start of the GNSS week in which the timestamp
-	// occurs.  Each constellation's week start around midnight at the end of
-	// but each constellations has a different offset.  For example in 2023
-	// the GPS "timezone" is 18 seconds ahead of UTC so the last few seconds
-	// of Saturday UTC is Sunday for GPS.
-	StartOfWeek time.Time
-
-	// UTCTimeFromTimestamp is the time in UTC derived from the timestamp.
-	// The header doesn't contain sufficient information to figure this
-	// out.  Something else has to set it.
-	UTCTimeFromTimestamp time.Time
 
 	// MultipleMessage - bit(1) - true if more MSMs follow for this
 	// constellation, station and timestamp.
@@ -187,8 +181,6 @@ func New(
 
 	signals := getSignals(signalMask)
 
-	numberOfSignalCells := len(satellites) * len(signals)
-
 	cells := getCells(cellMask, len(satellites), len(signals))
 
 	header := Header{
@@ -203,7 +195,6 @@ func New(
 		ExternalClockSteeringIndicator:       externalClockSteeringIndicator,
 		GNSSDivergenceFreeSmoothingIndicator: gnssDivergenceFreeSmoothingIndicator,
 		GNSSSmoothingInterval:                gnssSmoothingInterval,
-		NumSignalCells:                       numberOfSignalCells,
 		SatelliteMask:                        satelliteMask,
 		SignalMask:                           signalMask,
 		CellMask:                             cellMask,
@@ -212,60 +203,78 @@ func New(
 		Cells:                                cells,
 	}
 
+	// Set the number of signal cells.
+	for i := range cells {
+		for j := range cells[i] {
+			if cells[i][j] {
+				header.NumSignalCells++
+			}
+		}
+	}
+
 	return &header
 }
 
 // String return a text version of the MSMHeader.
 func (header *Header) String() string {
 
-	line := "Sent at " + header.UTCTimeFromTimestamp.Format(utils.DateLayout) + "\n"
-
-	startTimeDisplay := header.StartOfWeek.Format(utils.DateLayout)
-
-	constellation := utils.GetConstellation(header.MessageType)
-	if constellation == "Glonass" {
-
-		// A Glonass timestamp is 3 bits day, 27 bit milliseconds.  A day
-		// value of 7 provokes an error.
-		day, millis, err := utils.ParseGlonassTimestamp(header.Timestamp)
-
-		if err != nil {
-			line += fmt.Sprintf("timestamp %d - %s\n",
-				header.Timestamp, err.Error())
-		} else {
-			_, hours, minutes, seconds, millis :=
-				utils.ParseMilliseconds(millis)
-
-			line += fmt.Sprintf("Start of Glonass week %s plus timestamp %d (%dd %dh %dm %ds %dms)\n",
-				startTimeDisplay, header.Timestamp, day, hours, minutes, seconds, millis)
-		}
-	} else {
-
-		// The timestamp is milliseconds from the start of this
-		// constellation's GNSS week.
-		days, hours, minutes, seconds, millis :=
-			utils.ParseMilliseconds(header.Timestamp)
-
-		line += fmt.Sprintf("Start of %s week %s plus timestamp %d (%dd %dh %dm %ds %dms)\n",
-			constellation, startTimeDisplay, header.Timestamp,
-			days, hours, minutes, seconds, millis)
-	}
-
 	mode := "single message"
 	if header.MultipleMessage {
 		mode = "multiple message"
 	}
-	line += fmt.Sprintf("stationID %d, %s, issue of data station %d\n",
+	display := fmt.Sprintf("stationID %d, %s, issue of data station %d\n",
 		header.StationID, mode, header.IssueOfDataStation)
-	line += fmt.Sprintf("session transmit time %d, clock steering %d, external clock %d\n",
+	display += fmt.Sprintf("session transmit time %d, clock steering %d, external clock %d\n",
 		header.SessionTransmissionTime, header.ClockSteeringIndicator,
 		header.ExternalClockSteeringIndicator)
-	line += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
+	display += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
 		header.GNSSDivergenceFreeSmoothingIndicator, header.GNSSSmoothingInterval)
-	line += fmt.Sprintf("%d satellites, %d signal types, %d signals\n",
+
+	// Display the 64-bit satellite mask in 4 bit chunks.
+	display += "Satellite mask:\n"
+	for s := 60; s >= 0; s -= 4 {
+		display += fmt.Sprintf("%04b", (header.SatelliteMask>>s)&0xf)
+		if s > 0 {
+			display += " "
+			if s%16 == 0 {
+				display += " " // An extra space every 16 bits.
+			}
+		}
+	}
+	display += "\n"
+
+	// Display the 32-bit signal mask in 4 bit chunks.
+	display += "Signal mask: "
+	for s := 28; s >= 0; s -= 4 {
+		display += fmt.Sprintf("%04b", (header.SignalMask>>s)&0xf)
+		if s > 0 {
+			display += " "
+			if s%16 == 0 {
+				display += " " // An extra space every 16 bits.
+			}
+		}
+	}
+	display += "\n"
+
+	// Display the cell mask which is a slice of slices of bools.
+	display += "cell mask:"
+	for i, _ := range header.Cells {
+		display += " "
+		for j, _ := range header.Cells[i] {
+			if header.Cells[i][j] {
+				display += "t"
+			} else {
+				display += "f"
+			}
+		}
+
+	}
+	display += "\n"
+
+	display += fmt.Sprintf("%d satellites, %d signal types, %d signals\n",
 		len(header.Satellites), len(header.Signals), header.NumSignalCells)
 
-	return line
+	return display
 }
 
 // getTitle gets the title of the MSM.
@@ -351,11 +360,11 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 	}
 
 	// Get the rest of the fixed-length values.
-	stationID := uint(utils.GetBitsAsUint64(bitStream, pos, lenStationID))
-	pos += lenStationID
+	stationID := uint(utils.GetBitsAsUint64(bitStream, pos, LenStationID))
+	pos += LenStationID
 
-	timestamp := uint(utils.GetBitsAsUint64(bitStream, pos, lenTimeStamp))
-	pos += lenTimeStamp
+	timestamp := uint(utils.GetBitsAsUint64(bitStream, pos, LenTimeStamp))
+	pos += LenTimeStamp
 
 	mm := utils.GetBitsAsUint64(bitStream, pos, lenMultipleMessageFlag)
 	multipleMessage := (mm == 1)
@@ -440,18 +449,13 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 
 	pos += lenCellMaskBits
 
-	// Shift (lenCellMaskBits) bits to the top of cellMask, ready for
-	// getCells:  0000000 .... bbbbbb => bbbbbb00000 ....
-	shift := 64 - lenCellMaskBits
-	cellMask = cellMask << shift
-
 	header := New(messageType, stationID, timestamp, multipleMessage, issueOfDataStation,
 		sessionTransmissionTime, clockSteeringIndicator, externalClockIndicator,
 		gnssDivergenceFreeSmoothingIndicator, gnssSmoothingInterval,
 		satelliteMask, signalMask, cellMask)
+
 	header.Satellites = satellites
 	header.Signals = signals
-	header.NumSignalCells = len(satellites) * len(signals)
 	return header, pos, nil
 }
 
@@ -463,14 +467,14 @@ func getMSMType(bitStream []byte) (int, uint, error) {
 	// The bit stream contains a 3-byte leader, an embedded message and a 3-byte CRC.
 	// Here we are only concerned with the embedded message.
 	lenBitStream := (len(bitStream) - utils.LeaderLengthBytes - utils.CRCLengthBytes) * 8
-	if lenBitStream < lenMessageType {
+	if lenBitStream < LenMessageType {
 		em := fmt.Sprintf("bit stream is %d bits long, too short for a message type", lenBitStream)
 		return 0, 0, errors.New(em)
 	}
 
 	var pos uint = utils.LeaderLengthBits // Jump over the leader.
-	messageType := int(utils.GetBitsAsUint64(bitStream, pos, lenMessageType))
-	pos += lenMessageType
+	messageType := int(utils.GetBitsAsUint64(bitStream, pos, LenMessageType))
+	pos += LenMessageType
 
 	// Check that the message type is an MSM.
 	switch messageType {
@@ -557,10 +561,13 @@ func getSignals(signalMask uint32) []uint {
 // getCells gets the cell list
 func getCells(cellMask uint64, numberOfSatellites, numberOfSignalTypes int) [][]bool {
 	// Get the cell mask as a string of bits.  The bits form a two-dimensional
-	// array of (number of signals) X (number of satellites) bits.  The length
-	// is always <= 64.  If the receiver observed two signals types and it
-	// observed both types from one satellite, just the first type from another
-	// and just the second type from a third satellite, the mask will be 11 10 01.
+	// array of (number of signals) X (number of satellites) bits.  The length is
+	// always <= 64 and they are at the bottom end of cellMask .  If the receiver
+	// observed two signals types and it observed both types from one satellite,
+	/// just the first type from another and just the second type from a third
+	// satellite, the mask will be:
+	// bit 63              0
+	//      000000....111001.
 	//
 	// Create a slice of slices of bools, each bool representing a bit in the
 	// cell mask.  If the receiver observed two signals types and it observed
@@ -572,7 +579,7 @@ func getCells(cellMask uint64, numberOfSatellites, numberOfSignalTypes int) [][]
 	// However, if there are a lot of signal cells, they may be spread over
 	// several messages.
 
-	const bitsInCellMask = 64
+	shift := (numberOfSatellites * numberOfSignalTypes) - 1
 	cellNumber := 0
 	cells := make([][]bool, 0)
 	for i := 0; i < numberOfSatellites; i++ {
@@ -580,13 +587,14 @@ func getCells(cellMask uint64, numberOfSatellites, numberOfSignalTypes int) [][]
 		for j := 0; j < numberOfSignalTypes; j++ {
 			cellNumber++
 			// bit 63 is first bit, bit 62 is second bit ...
-			shift := uint(bitsInCellMask - cellNumber)
+			// shift := uint(bitsInCellMask - cellNumber)
 			// Shift down to remove the lower bits.
 			shiftedDown := cellMask >> shift
 			// Isolate the bit we want.
 			bit := shiftedDown & 1
 			val := bit == 1
 			row = append(row, val)
+			shift--
 		}
 		cells = append(cells, row)
 	}

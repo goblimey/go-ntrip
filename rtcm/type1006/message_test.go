@@ -1,4 +1,4 @@
-package type1005
+package type1006
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 func TestNew(t *testing.T) {
 
 	want := Message{
-		MessageType:         1005,
+		MessageType:         1006,
 		StationID:           2,
 		ITRFRealisationYear: 3,
 		Ignored1:            0xf,
@@ -20,9 +20,10 @@ func TestNew(t *testing.T) {
 		AntennaRefY:         5,
 		Ignored3:            2,
 		AntennaRefZ:         6,
+		AntennaHeight:       7,
 	}
 
-	got := New(2, 3, 0xf, 4, 1, 5, 2, 6)
+	got := New(2, 3, 0xf, 4, 1, 5, 2, 6, 7)
 
 	if want != *got {
 		t.Errorf("want: %v\n got: %v\n", want, *got)
@@ -34,9 +35,10 @@ func TestString(t *testing.T) {
 	const want = `stationID 2, ITRF realisation year 3, ignored 0xf,
 x 12345, ignored 0x1, y 23456, ignored 0x2, z 34567,
 ECEF coords in metres (1.2345, 2.3456, 3.4567)
+Antenna height 4.5678
 `
 
-	got := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567)
+	got := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567, 45678)
 
 	if want != got.String() {
 		t.Error(diff.Diff(want, got.String()))
@@ -44,7 +46,7 @@ ECEF coords in metres (1.2345, 2.3456, 3.4567)
 }
 
 // TestGetMessage checks that GetMessage correctly interprets a
-// bitstream containing a message type 1005, or returns an appropriate
+// bitstream containing a message type 1006, or returns an appropriate
 // error message.
 func TestGetMessage(t *testing.T) {
 
@@ -54,14 +56,14 @@ func TestGetMessage(t *testing.T) {
 		wantError   string
 		wantMessage *Message
 	}{
-		// This is a 3-byte leader, one byte of message data and a 3-byte CRC, which is not
+		// This is a 3-byte leader, one byte of message and a 3-byte CRC, which is not
 		// enough data to get the message length - fails very quickly.
-		{"very short", testdata.MessageFrameType1005[:7], "overrun - expected 152 bits in a message type 1005, got 8", nil},
+		{"very short", testdata.MessageFrameType1006[:7], "overrun - expected 168 bits in a message type 1006, got 8", nil},
 		// This frame is too short but will fail further down the track.
-		{"short", testdata.MessageFrameType1005[:24], "overrun - expected 152 bits in a message type 1005, got 144", nil},
+		{"short", testdata.MessageFrameType1006[:24], "overrun - expected 168 bits in a message type 1006, got 144", nil},
 		// This contains a 3 byte leader, 19 bytes of embedded message and a 3 byte CRC,
 		// 25 bytes (160 bits) in all.
-		{"complete", testdata.MessageFrameType1005, "", New(2, 3, 0xf, 123456, 1, 234567, 2, 345678)},
+		{"complete", testdata.MessageFrameType1006, "", New(2, 3, 0xf, 123456, 1, 234567, 2, 345678, 513)},
 	}
 
 	for _, td := range testData {
@@ -73,7 +75,7 @@ func TestGetMessage(t *testing.T) {
 			}
 
 			if gotError == nil {
-				t.Errorf("%s: expected the error ", td.description+td.wantError)
+				t.Errorf("%s: expected the error %s", td.description, td.wantError)
 				continue
 			}
 			if td.wantError != gotError.Error() {
@@ -87,7 +89,7 @@ func TestGetMessage(t *testing.T) {
 			}
 
 			if gotMessage == nil {
-				t.Errorf("%s:expected a message", td.description)
+				t.Errorf("%s: expected a message", td.description)
 				continue
 			}
 
@@ -99,9 +101,9 @@ func TestGetMessage(t *testing.T) {
 }
 
 // TestIncorrectMessageType checks an obscure case where GetMessage is called
-// on a bit stream that doesn't contain a message of type 1005.
+// on a bit stream that doesn't contain a message of type 1006.
 func TestIncorrectMessageType(t *testing.T) {
-	const want = "expected message type 1005 got 1077"
+	const want = "expected message type 1006 got 1077"
 	message, err := GetMessage(testdata.MessageFrameType1077)
 	if err == nil {
 		t.Error("expected an error")

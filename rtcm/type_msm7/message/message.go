@@ -25,14 +25,14 @@ type Message struct {
 	Signals [][]signal.Cell
 }
 
-// New creates an MSM4 Message.
+// New creates an MSM7 Message.
 func New(header *header.Header, satellites []satellite.Cell, signals [][]signal.Cell) *Message {
 	message := Message{Header: header, Satellites: satellites, Signals: signals}
 
 	return &message
 }
 
-// String return a text version of the MSM7Message.
+// String return a text version of the MSM7 Message.
 func (message *Message) String() string {
 	result :=
 		message.Header.String() +
@@ -70,7 +70,7 @@ func (message *Message) DisplaySignalCells() string {
 		return "No signals\n"
 	}
 
-	heading := "Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:\n"
+	heading := "Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio}:\n"
 
 	body := ""
 

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/pushback"
 	"github.com/goblimey/go-ntrip/rtcm/type1005"
+	"github.com/goblimey/go-ntrip/rtcm/type1006"
 	msm4Message "github.com/goblimey/go-ntrip/rtcm/type_msm4/message"
 	msm7Message "github.com/goblimey/go-ntrip/rtcm/type_msm7/message"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
@@ -27,9 +29,6 @@ import (
 // was collected.  If the handler is receiving live data, the current
 // date and time can be used, as in the example.
 //
-// If the logger is non-nil the handler writes material such as error
-// messages to it.
-//
 // Given a reader r yielding data, the handler returns the data as a
 // series of rtcm.Message objects containing the raw data of the message
 // and other values such as a flag to say if the data is a valid RTCM
@@ -43,18 +42,18 @@ import (
 // encoded.  The handler can decode some message types and add a
 // much more verbose plain text readable version to the message:
 //
-//    handler.DisplayMessage(&message))
+//    message.String())
 //
-// DisplayMessage can decode RTCM message type 1005 (which gives the base
-// station position) plus MSM7 and MSM4 messages for GPS, Galileo, GLONASS
-// and Beidou (which carry the base station's observations of signals
-// from satellites).  The structure of these messages is described in the
-// RTCM standard, which is not open source.  However, the structure can be
-// reverse-engineered by looking at existing software such as the RTKLIB
-// library, which is written in the C programming language.
+// The message's String method can decode RTCM message type 1005 (which
+// gives the base station position) plus MSM7 and MSM4 messages for GPS,
+// Galileo, GLONASS and Beidou (which carry the base station's observations
+// of signals from satellites).  The structure of these messages is
+// described in the RTCM standard, which is not open source.  However, the
+// structure can be reverse-engineered by reading existing software such as
+// the RTKLIB library, which is written in the C programming language.
 //
-// For an example of usage, see the rtcmdisplay tool in this repository.
-// The filter reads a stream of message data from a base station and
+// For an example of usage, see the displayrtcm3 tool in this repository.
+// The tool reads a stream of message data from a base station and
 // emits a readable version of the messages.  That's useful when you are
 // setting up a base station and need to know exactly what it's
 // producing.
@@ -95,7 +94,7 @@ type Handler struct {
 	// next period.  (The strategy assumes that the time gap between
 	// messages is short.)
 
-	// timestampFromPreviousGPSMessage is the timestamp of the previous GPS
+	// TimestampFromPreviousGPSMessage is the timestamp of the previous GPS
 	// multiple signal message (MSM).
 	timestampFromPreviousGPSMessage uint
 
@@ -428,7 +427,7 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 	// The message is complete and the CRC check passes, so it's valid.
 	message := NewMessage(messageType, "", bitStream[:expectedFrameLength])
 
-	// If the message is an MSM7, get the time (for the heading if displaying)
+	// If the message is an MSM7, get the timestamp (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
 	// station ID followed by the 30-bit timestamp, followed by lots of other
 	// stuff and finally a 3-byte CRC.  If we get to here then the leader and
@@ -437,47 +436,98 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 	if utils.MSM(message.MessageType) {
 
 		// The message is an MSM so get the timestamp and set the UTCTime.  The
-		// message frame starts with 3 bytes of leader, a 12-bit message type, a
-		// 12-bit station ID and the 30-bit timestamp.  The timestamp is relative
-		// to the start of period, a different time for each constellation.
+		// message frame starts with 3 bytes of leader, a message type, a
+		// station ID and a timestamp.  The timestamp is relative to the start of
+		// the week.  Each constellation's week starts at a different UTC time.
 
-		const firstBit = 48 // Leader plus 24 bits.
-		const timestampLength = 30
+		const timestampPosition = utils.LeaderLengthBits + header.LenMessageType + header.LenStationID
 
-		timestamp := uint(utils.GetBitsAsUint64(bitStream, firstBit, timestampLength))
+		message.Timestamp =
+			uint(utils.GetBitsAsUint64(bitStream, timestampPosition, header.LenTimeStamp))
 
-		// Get the time from the timestamp (for display).  This has to be done by
-		// the handler because it depends on knowing which GNSS period that we are in,
-		// which involves keeping track of time over many messages.  Only the handler
-		// lives long enough to do that.
-		utcTime, timeError :=
-			rtcmHandler.getTimeFromTimeStamp(message.MessageType, timestamp)
+		// Get the time from the timestamp.  This may advance the start of week value.
+		// If there is an error, BOTH the string and the error are returned..
+		sentAt, timeError := rtcmHandler.getTimeDisplayFromTimestamp(message.MessageType, message.Timestamp)
+
+		message.SentAt = sentAt
 
 		if timeError != nil {
 			message.ErrorMessage = timeError.Error()
-			return message, timeError
 		}
 
-		message.UTCTimeFromTimestamp = utcTime
+		// If the timestamp puts us into the next week that's now been handled so we can
+		// set the start of week value in the message.
+		message.StartOfWeek = rtcmHandler.getStartTimeDisplay(message.MessageType, message.Timestamp)
 
-		// Set the start time of the period (for display).  This must be done
-		// after we get the timestamp, as that might move us onto the next
-		// period.
-		switch utils.GetConstellation(message.MessageType) {
-		case "GPS":
-			message.StartOfWeek = rtcmHandler.startOfGPSWeek
-		case "Glonass":
-			message.StartOfWeek = rtcmHandler.startOfGlonassWeek
-		case "Galileo":
-			message.StartOfWeek = rtcmHandler.startOfGalileoWeek
-		case "Beidou":
-			message.StartOfWeek = rtcmHandler.startOfBeidouWeek
-		}
-
-		return message, nil
+		return message, timeError
 	}
 
 	return message, nil
+}
+
+// getTimeDisplayFromTimestamp gets a printable version of the time from the
+// timestamp.  If that provokes an error, BOTH the string and the error
+// are returned.
+func (rtcmHandler Handler) getTimeDisplayFromTimestamp(messageType int, timestamp uint) (string, error) {
+
+	result := "Sent at "
+
+	sentAt, err := rtcmHandler.getTimeFromTimeStamp(messageType, timestamp)
+	if err != nil {
+
+		// Error such as timestamp out of range.
+		// Return the string AND the error.
+		result += "(" + err.Error() + ")"
+		return result, err
+	}
+
+	result += sentAt.Format(utils.DateLayout)
+	return result, nil
+}
+
+func (rtcmHandler Handler) getStartTimeDisplay(messageType int, timestamp uint) string {
+
+	constellation := utils.GetConstellation(messageType)
+
+	display := "Start of " + constellation + " week "
+	startTime, startTimeError := rtcmHandler.getStartOfWeek(messageType)
+	if startTimeError != nil {
+		// This is one of the constellations we don't handle.
+		display += fmt.Sprintf("(%s) plus ", startTimeError.Error())
+	} else {
+		display += fmt.Sprintf("%s plus ", startTime.Format(utils.DateLayout))
+	}
+
+	days, millisInTimestamp, err := utils.ParseTimestamp(constellation, timestamp)
+	if err != nil {
+		// The timestamp is illegal, for example it's out of range.
+		if utils.GetConstellation(messageType) == "Glonass" {
+			// Illegal Glonass timestamp.  It's in two parts, a
+			// 3-bit day and a 27-bit millisecond offset.
+			display += fmt.Sprintf("%s - 0x%x (%d/%d)",
+				err.Error(), timestamp, timestamp>>27,
+				timestamp&^utils.GlonassDayBitMask)
+			return display
+
+		}
+		// Not Glonass and timestamp out of range.  The timestamp
+		// is a millisecond offset from the start of the week.
+		const millisInOneDay = 24 * 3600 * 1000
+		display += fmt.Sprintf("%s - %d (%d/%d)",
+			err.Error(), timestamp, timestamp/millisInOneDay,
+			timestamp%millisInOneDay)
+		return display
+	}
+
+	// The timestamp is valid.
+
+	hours, minutes, seconds, millis :=
+		utils.ParseMilliseconds(millisInTimestamp)
+
+	display += fmt.Sprintf("timestamp %d (%dd %dh %dm %ds %dms)",
+		timestamp, days, hours, minutes, seconds, millis)
+
+	return display
 }
 
 // Analyse decodes the raw byte stream and fills in the broken out message.
@@ -494,6 +544,9 @@ func Analyse(message *Message) {
 
 	case message.MessageType == 1005:
 		analyse1005(message.RawData, message)
+
+	case message.MessageType == 1006:
+		analyse1006(message.RawData, message)
 
 	case message.MessageType == 1230:
 		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this)"
@@ -513,11 +566,7 @@ func analyseMSM4(messageBitStream []byte, message *Message) {
 		return
 	}
 
-	msm4Message.Header.StartOfWeek = message.StartOfWeek
-
 	message.Readable = msm4Message
-
-	msm4Message.Header.UTCTimeFromTimestamp = message.UTCTimeFromTimestamp
 }
 
 func analyseMSM7(messageBitStream []byte, message *Message) {
@@ -526,10 +575,6 @@ func analyseMSM7(messageBitStream []byte, message *Message) {
 		message.ErrorMessage = msm7Error.Error()
 		return
 	}
-
-	msm7Message.Header.UTCTimeFromTimestamp = message.UTCTimeFromTimestamp
-
-	msm7Message.Header.StartOfWeek = message.StartOfWeek
 
 	message.Readable = msm7Message
 }
@@ -544,6 +589,16 @@ func analyse1005(messageBitStream []byte, message *Message) {
 	message.Readable = message1005
 }
 
+func analyse1006(messageBitStream []byte, message *Message) {
+	message1006, message1006Error := type1006.GetMessage(messageBitStream)
+	if message1006Error != nil {
+		message.ErrorMessage = message1006Error.Error()
+		return
+	}
+
+	message.Readable = message1006
+}
+
 // getTimeFromTimeStamp converts the 30-bit timestamp in the MSM header to a time value
 // in the UTC timezone.  The message must be an MSM as others don't have a timestamp.
 func (rtcmHandler *Handler) getTimeFromTimeStamp(messageType int, timestamp uint) (time.Time, error) {
@@ -554,8 +609,7 @@ func (rtcmHandler *Handler) getTimeFromTimeStamp(messageType int, timestamp uint
 	// over many messages, potentially for many days, so it must be done by
 	// this module.
 	//
-	// The Glonass timestamp has an invalid value, so the Glonass converter can
-	// return an error.
+	// The timestamps have a maximum value, so the converter can return an error.
 
 	switch messageType {
 	case utils.MessageTypeMSM4GPS:
@@ -585,6 +639,36 @@ func (rtcmHandler *Handler) getTimeFromTimeStamp(messageType int, timestamp uint
 	default:
 		// This MSM is one that we don't know how to decode.
 		return zeroTimeValue, errors.New("unknown message type")
+	}
+}
+
+// getStartOfWeek gets the start of week of the constellation
+// associated with the given message type.
+func (rtcmHandler *Handler) getStartOfWeek(messageType int) (time.Time, error) {
+
+	var zeroTimeValue time.Time
+
+	switch messageType {
+	case utils.MessageTypeMSM4GPS:
+		return rtcmHandler.startOfGPSWeek, nil
+	case utils.MessageTypeMSM7GPS:
+		return rtcmHandler.startOfGPSWeek, nil
+	case utils.MessageTypeMSM4Glonass:
+		return rtcmHandler.startOfGlonassWeek, nil
+	case utils.MessageTypeMSM7Glonass:
+		return rtcmHandler.startOfGlonassWeek, nil
+	case utils.MessageTypeMSM4Galileo:
+		return rtcmHandler.startOfGalileoWeek, nil
+	case utils.MessageTypeMSM7Galileo:
+		return rtcmHandler.startOfGalileoWeek, nil
+	case utils.MessageTypeMSM4Beidou:
+		return rtcmHandler.startOfBeidouWeek, nil
+	case utils.MessageTypeMSM7Beidou:
+		return rtcmHandler.startOfBeidouWeek, nil
+	default:
+		// This MSM is one that we don't know how to decode.
+		em := fmt.Sprintf("don't know the start of week for message type %d", messageType)
+		return zeroTimeValue, errors.New(em)
 	}
 }
 
@@ -624,8 +708,9 @@ func (rtcmHandler *Handler) getUTCFromGlonassTime(timestamp uint) (time.Time, er
 	// The Glonass timestamp contains two bit fields.  Bits 0-26 give
 	// milliseconds since the start of the day.  Bits 27-29 give the
 	// day, 0: Sunday, 1: Monday ... 6: Saturday and 7: invalid.  The
-	// Glonass day starts at midnight in the Moscow timezone, so three
-	// hours ahead of UTC.
+	// maximum value is six days and ((24 hours in milliseconds) -1).
+	// The Glonass day starts at midnight in the Moscow timezone, so
+	// three hours ahead of UTC.
 	//
 	// day = 1, glonassTime = 1 is 1 millisecond into Russian Monday,
 	// which in UTC is Sunday 21:00:00 plus one millisecond.
@@ -641,7 +726,7 @@ func (rtcmHandler *Handler) getUTCFromGlonassTime(timestamp uint) (time.Time, er
 	// will be producing RTCM3 messages something like once per second, so
 	// this assumption is safe.)
 
-	day, millis, err := utils.ParseGlonassTimestamp(timestamp)
+	day, millis, err := utils.ParseTimestamp("Glonass", timestamp)
 
 	if err != nil {
 		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
@@ -752,64 +837,6 @@ func getStartOfLastSundayUTC(now time.Time) time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, utils.LocationUTC)
 }
 
-// DisplayMessage takes the given Message object and returns it
-// as a readable string.
-func (rtcmHandler *Handler) DisplayMessage(message *Message) string {
-
-	titleAndComment := utils.GetTitleAndComment(message.MessageType)
-
-	display := fmt.Sprintf("Message type %d %s\n",
-		message.MessageType, titleAndComment.Title)
-
-	if len(titleAndComment.Comment) > 0 {
-		display += titleAndComment.Comment + "\n"
-	}
-
-	display += fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
-
-	display += hex.Dump(message.RawData) + "\n"
-
-	if len(message.ErrorMessage) > 0 {
-		display += message.ErrorMessage + "\n"
-		return display
-	}
-
-	if message.MessageType == utils.NonRTCMMessage {
-		return display
-	}
-
-	readable := PrepareForDisplay(message)
-
-	if len(message.ErrorMessage) > 0 {
-		display += message.ErrorMessage + "\n"
-	}
-
-	// The message could be one of type 1005 or an MSM, which means that
-	// it's a set of broken out fields and can be displayed as a string,
-	// or it could have a Readable which is already a string.  If any of
-	// those, add the string to the display.
-	s, isString := readable.(string)
-	m1005, is1005 := readable.(*type1005.Message)
-	msm4, isMSM4 := readable.(*msm4Message.Message)
-	msm7, isMSM7 := readable.(*msm7Message.Message)
-
-	switch {
-	case isString:
-		display += s + "\n"
-	case is1005:
-		// The message is type 1005
-		display += m1005.String()
-		return display
-	case isMSM4:
-		display += msm4.String()
-
-	case isMSM7:
-		display += msm7.String()
-	}
-
-	return display
-}
-
 // Message contains an RTCM3 message, possibly broken out into readable form,
 // or a stream of non-RTCM data.  Message type NonRTCMMessage indicates the
 // second case.
@@ -821,6 +848,16 @@ type Message struct {
 	// a corrupt RTCM.
 	MessageType int
 
+	// Timestamp is the timestamp from the message.  Only set when the message
+	// is a Multiple Signal message (MSM).
+	Timestamp uint
+
+	// SentAt is a text version of the time from the timestamp.
+	SentAt string
+
+	// StartOfWeek
+	StartOfWeek string
+
 	// ErrorMessage contains any error message encountered while fetching
 	// the message.
 	ErrorMessage string
@@ -828,16 +865,6 @@ type Message struct {
 	// RawData is the message frame in its original binary form
 	//including the header and the CRC.
 	RawData []byte
-
-	// StartOfWeek is the start of the period in which a Multiple Signal Message
-	// is sent - this constellation's GNSS week.  If the message is not an MSM,
-	// the value is not useful.
-	StartOfWeek time.Time
-
-	// UTCTimeFromTimestamp points to a Time value containing the time in UTC from
-	// the message timestamp.  Only a Multiple Signal Message (MSM) has a timestamp
-	// field.  If the message is not an MSM, the value is not useful.
-	UTCTimeFromTimestamp time.Time
 
 	// Readable is a broken out version of the RTCM message.  It's accessed
 	// via the Readable method.
@@ -893,48 +920,60 @@ func (message *Message) String() string {
 		PrepareForDisplay(message)
 	}
 
-	tc := utils.GetTitleAndComment(message.MessageType)
-	display := fmt.Sprintf("Message type %d, %s\n", message.MessageType, tc.Title)
-	display += tc.Comment + "\n"
+	titleAndComment := utils.GetTitleAndComment(message.MessageType)
+
+	display := fmt.Sprintf("Message type %d, %s\n",
+		message.MessageType, titleAndComment.Title)
+
+	if len(titleAndComment.Comment) > 0 {
+		display += titleAndComment.Comment + "\n"
+	}
+
+	if utils.MSM(message.MessageType) {
+		// A Multiple Signal Message (MSM) has a timestamp which gives
+		// the duration since the start of the constellation's week and
+		// the time that the message was sent.  When the handler created
+		// the message it set two strings containing readable versions
+		// of these times.
+
+		display += message.SentAt + "\n"
+		display += message.StartOfWeek + "\n"
+	}
+
 	display += fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
+
 	display += hex.Dump(message.RawData) + "\n"
 
 	if len(message.ErrorMessage) > 0 {
 		display += message.ErrorMessage + "\n"
+		return display
 	}
 
 	if message.MessageType == utils.NonRTCMMessage {
 		return display
 	}
 
-	if message.Readable != nil {
+	s, isString := message.Readable.(string)
+	m1005, is1005 := message.Readable.(*type1005.Message)
+	m1006, is1006 := message.Readable.(*type1006.Message)
+	msm4, isMSM4 := message.Readable.(*msm4Message.Message)
+	msm7, isMSM7 := message.Readable.(*msm7Message.Message)
+	switch {
+	case isString:
+		display += s + "\n"
+	case is1005:
+		// The message is type 1005 - base position.
+		display += m1005.String()
+		return display
+	case is1006:
+		// The message is type 1006 - base position and height.
+		display += m1006.String()
+		return display
+	case isMSM4:
+		display += msm4.String()
 
-		// The message has a readable form.
-
-		// In some cases the displayable is a simple string.
-		m, ok := message.Readable.(string)
-		if ok {
-			display += m + "\n"
-			return display
-		}
-
-		// If the message is a set of broken out fields, create a readable version
-		// and add it to the display.
-
-		m1005, is1005 := message.Readable.(*type1005.Message)
-		msm4, isMSM4 := message.Readable.(*msm4Message.Message)
-		msm7, isMSM7 := message.Readable.(*msm7Message.Message)
-
-		switch {
-		case is1005:
-			display += m1005.String()
-
-		case isMSM4:
-			display += msm4.String()
-
-		case isMSM7:
-			display += msm7.String()
-		}
+	case isMSM7:
+		display += msm7.String()
 	}
 
 	return display
@@ -949,7 +988,10 @@ func (message *Message) displayable() bool {
 		return false
 	}
 
-	if utils.MSM(message.MessageType) || message.MessageType == 1005 {
+	if utils.MSM(message.MessageType) ||
+		message.MessageType == 1005 ||
+		message.MessageType == 1006 {
+
 		return true
 	}
 
@@ -1005,7 +1047,7 @@ func getUTCFromTimestamp(timestamp, timestampFromPreviousMessage uint, startOfWe
 
 	if timestamp > utils.MaxTimestamp {
 		var zeroTimeValue time.Time // 0001-01-01 00:00:00 +0000 UTC.
-		rangeError = errors.New("out of range")
+		rangeError = errors.New("timestamp out of range")
 		return zeroTimeValue, startOfWeek, rangeError
 	}
 

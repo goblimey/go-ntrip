@@ -634,7 +634,7 @@ func TestMSM7DopplerWithRealData(t *testing.T) {
 		Satellite:           satelliteCell,
 	}
 
-	got := sigCell.GetMSM7Doppler()
+	got := sigCell.PhaseRangeRateDoppler()
 
 	if !utils.EqualWithin(3, want, got) {
 		t.Errorf("expected %f got %f", want, got)
@@ -853,9 +853,9 @@ func TestString(t *testing.T) {
 	const wavelength = utils.SpeedOfLightMS / utils.Freq2
 
 	const rangeMilliseconds = 128.5 + 1/float64(2048)
-	const wantRangeMetresWhenAllValid float64 = rangeMilliseconds * utils.OneLightMillisecond
-	const wantPhaseRangeRate = 6.789
-
+	const wantRangeMetres float64 = rangeMilliseconds * utils.OneLightMillisecond
+	const wantPhaseRangeRateMetresPerSecond = 6.789
+	const wantPhaseRangeRateDoppler = -27.8
 	// Phase Range
 	const phaseRangeMilliseconds = 128.5 + float64(twoToPowerMinus31*float64(phaseRangeDelta))
 	phaseRangeLightMilliseconds := phaseRangeMilliseconds * utils.OneLightMillisecond
@@ -891,6 +891,9 @@ func TestString(t *testing.T) {
 		rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr,
 		phaseRangeRateDelta, wavelength)
 
+	signalCellWithZeroWavelength := New(signalID, satelliteCellAllValid, rangeDelta, phaseRangeDelta,
+		lockTimeIndicator, halfCycleAmbiguity, cnr, phaseRangeRateDelta, 0)
+
 	var testData = []struct {
 		description string
 		cell        *Cell
@@ -898,21 +901,28 @@ func TestString(t *testing.T) {
 	}{
 		{
 			"all valid", signalCellAllValid,
-			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %d, %v, %d, %.3f}",
-				wantRangeMetresWhenAllValid, wantPhaseRangeWhenAllValid, lockTimeIndicator, halfCycleAmbiguity,
-				cnr, wantPhaseRangeRate),
+			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %.3f, %.3f, %d, %v, %d}",
+				wantRangeMetres, wantPhaseRangeWhenAllValid,
+				wantPhaseRangeRateDoppler, wantPhaseRangeRateMetresPerSecond,
+				lockTimeIndicator, halfCycleAmbiguity, cnr),
 		},
 		{
 			"invalid range", signalCellWithInvalidRange,
-			fmt.Sprintf(" 1 16 {invalid, invalid, %d, %v, %d, %.3f}",
+			fmt.Sprintf(" 1 16 {invalid, invalid, %.3f, %.3f, %d, %v, %d}",
+				wantPhaseRangeRateDoppler, wantPhaseRangeRateMetresPerSecond,
 				lockTimeIndicator, halfCycleAmbiguity,
-				cnr, wantPhaseRangeRate),
+				cnr),
 		},
 		{
 			"invalid phase range rate", signalCellWithInvalidPhaseRangeRate,
-			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %d, %v, %d, invalid}",
-				wantRangeMetresWhenAllValid, wantPhaseRangeWhenAllValid, lockTimeIndicator, halfCycleAmbiguity,
-				cnr),
+			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, invalid, invalid, %d, %v, %d}",
+				wantRangeMetres, wantPhaseRangeWhenAllValid,
+				lockTimeIndicator, halfCycleAmbiguity, cnr),
+		},
+		{
+			"zero wavelength", signalCellWithZeroWavelength,
+			fmt.Sprintf(" 1 16 {%8.3f, no wavelength, no wavelength, no wavelength, %d, %v, %d}",
+				wantRangeMetres, lockTimeIndicator, halfCycleAmbiguity, cnr),
 		},
 	}
 

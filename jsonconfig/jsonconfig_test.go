@@ -37,16 +37,19 @@ func TestGetJSONControl(t *testing.T) {
 
 	config, err := getJSONConfig(reader, logger)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
+		return
 	}
 
 	if config == nil {
-		t.Fatal("parsing json failed - nil")
+		t.Error("parsing json failed - nil")
+		return
 	}
 
 	numFiles := len(config.Filenames)
 	if numFiles != 2 {
-		t.Fatalf("parsing json, expected 2 files, got %d", numFiles)
+		t.Errorf("parsing json, expected 2 files, got %d", numFiles)
+		return
 	}
 
 	if config.Filenames[0] != "a" {
@@ -107,6 +110,52 @@ func TestGetJSONControl(t *testing.T) {
 	if config.TimeoutOnEOFMilliSeconds != wantEOFTimeout {
 		t.Errorf("parsing json, expected wait time to be %d, got %d",
 			wantEOFTimeout, config.TimeoutOnEOFMilliSeconds)
+	}
+}
+
+// TestJSONControl tests that the correct data is produced when the
+// text from a JSON control file is unmarshalled.
+func TestGetJSONControlWithOneFile(t *testing.T) {
+	reader := strings.NewReader(`{
+		"input": [
+			"a"
+		],
+		"stop_on_eof": true,
+		"record_messages": true,
+		"message_log_directory": "someDirectory",
+		"display_messages": true,
+		"caster_host_name": "caster.example.com",
+		"caster_port": 2101,
+		"caster_user_name": "user",
+		"caster_password": "password",
+		"read_timeout_milliseconds": 100,
+		"sleep_time_after_failed_open_milliseconds": 200,
+		"wait_time_on_EOF_millis": 300,
+		"timeout_on_EOF_milliseconds":2000
+	}`)
+
+	writer := switchwriter.New()
+	logger := log.New(writer, "jsonconfig_test", 0)
+
+	config, err := getJSONConfig(reader, logger)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	if config == nil {
+		t.Error("parsing json failed - nil")
+		return
+	}
+
+	numFiles := len(config.Filenames)
+	if numFiles != 1 {
+		t.Errorf("parsing json, expected 1 file, got %d", numFiles)
+		return
+	}
+
+	if config.Filenames[0] != "a" {
+		t.Errorf("want a, got %s", config.Filenames[0])
 	}
 }
 

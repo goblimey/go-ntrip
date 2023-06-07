@@ -1,4 +1,6 @@
-package type1005
+// type1006 handles messages of type 1006 - Stationary RTK Reference Station ARP
+// with Antenna Height (base position and height).
+package type1006
 
 import (
 	"errors"
@@ -7,8 +9,7 @@ import (
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
 
-// This package handles messages of type 1005 (base position).
-const expectedMessageType = 1005
+const expectedMessageType = 1006
 
 // Lengths of the fields in the bit stream.
 const lenMessageType = 12
@@ -20,18 +21,19 @@ const lenIgnoredBits2 = 2
 const lenAntennaRefY = 38
 const lenIgnoredBits3 = 2
 const lenAntennaRefZ = 38
+const lenAntennaHeight = 16
 
 const lengthOfMessageInBits = lenMessageType + lenStationID +
 	lenITRFRealisationYear + lenIgnoredBits1 +
 	lenAntennaRefX + lenIgnoredBits2 + lenAntennaRefY +
-	lenIgnoredBits3 + lenAntennaRefZ
+	lenIgnoredBits3 + lenAntennaRefZ + lenAntennaHeight
 
-// Message contains a message of type 1005 - antenna position.
+// Message contains a message of type 1006 - antenna position and height.
 type Message struct {
 	// Some bits in the message are ignored by the RTKLIB decoder so
 	// we're not sure what they are.  We just store them for display.
 
-	// MessageType - uint12 - always 1005.
+	// MessageType - uint12 - always 1006.
 	MessageType uint `json:"message_type,omitempty"`
 
 	// station ID - uint12.
@@ -58,13 +60,18 @@ type Message struct {
 
 	// AntennaRefZ is the antenna Reference Point coordinate X in ECEF - int38.
 	AntennaRefZ int64 `json:"antenna_ref_z,omitempty"`
+
+	// AntennaHeight is the height of the antenna above some base height
+	// (for example the height above ground level).
+	AntennaHeight uint `json:"antenna_height,omitempty`
 }
 
 func New(stationID, itrfRealisationYear, ignored1 uint,
-	antennaRefX int64, ignored2 uint, antennaRefY int64, ignored3 uint, antennaRefZ int64) *Message {
+	antennaRefX int64, ignored2 uint, antennaRefY int64, ignored3 uint, antennaRefZ int64,
+	antennaHeight uint) *Message {
 
 	message := Message{
-		MessageType:         utils.MessageType1005,
+		MessageType:         utils.MessageType1006,
 		StationID:           stationID,
 		ITRFRealisationYear: itrfRealisationYear,
 		Ignored1:            ignored1,
@@ -73,12 +80,13 @@ func New(stationID, itrfRealisationYear, ignored1 uint,
 		AntennaRefY:         antennaRefY,
 		Ignored3:            ignored3,
 		AntennaRefZ:         antennaRefZ,
+		AntennaHeight:       antennaHeight,
 	}
 
 	return &message
 }
 
-// String returns a text version of a message type 1005
+// String returns a text version of a message type 1006
 func (message *Message) String() string {
 
 	display := fmt.Sprintf("stationID %d, ITRF realisation year %d, ignored 0x%x,\n",
@@ -87,18 +95,19 @@ func (message *Message) String() string {
 		message.AntennaRefX, message.Ignored2, message.AntennaRefY,
 		message.Ignored3, message.AntennaRefZ)
 
-	// The Antenna Reference coordinates are in units of 1/10,000 of a metre.
+	// The Antenna Reference coordinates and the height are in units of 1/10,000 of a metre.
 	const scaleFactor = 0.0001
 	x := float64(message.AntennaRefX) * scaleFactor
 	y := float64(message.AntennaRefY) * scaleFactor
 	z := float64(message.AntennaRefZ) * scaleFactor
-	display += fmt.Sprintf("ECEF coords in metres (%.4f, %.4f, %.4f)\n",
-		x, y, z)
+	height := float64(message.AntennaHeight) * 0.0001
 
+	display += fmt.Sprintf("ECEF coords in metres (%.4f, %.4f, %.4f)\n", x, y, z)
+	display += fmt.Sprintf("Antenna height %.4f\n", height)
 	return display
 }
 
-// GetMessage returns a text version of a message type 1005
+// GetMessage returns a text version of a message type 1006
 func GetMessage(bitStream []byte) (*Message, error) {
 
 	// The bit stream contains a 3-byte leader, an embedded message and a 3-byte CRC.
@@ -108,7 +117,7 @@ func GetMessage(bitStream []byte) (*Message, error) {
 
 	// Check that the bit stream is long enough.
 	if lenMessageInBits < lengthOfMessageInBits {
-		errorMessage := fmt.Sprintf("overrun - expected %d bits in a message type 1005, got %d",
+		errorMessage := fmt.Sprintf("overrun - expected %d bits in a message type 1006, got %d",
 			lengthOfMessageInBits, lenMessageInBits)
 		return nil, errors.New(errorMessage)
 	}
@@ -143,8 +152,10 @@ func GetMessage(bitStream []byte) (*Message, error) {
 	pos += lenIgnoredBits3
 	antennaRefZ := utils.GetBitsAsInt64(bitStream, pos, lenAntennaRefZ)
 	pos += lenAntennaRefZ
+	antennaHeight := uint(utils.GetBitsAsUint64(bitStream, pos, lenAntennaHeight))
+	pos += lenAntennaHeight
 
 	message := New(stationID, itrfRealisationYear, ignored1,
-		antennaRefX, ignored2, antennaRefY, ignored3, antennaRefZ)
+		antennaRefX, ignored2, antennaRefY, ignored3, antennaRefZ, antennaHeight)
 	return message, nil
 }

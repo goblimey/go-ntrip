@@ -1,5 +1,11 @@
 package testdata
 
+import (
+	"time"
+
+	"github.com/goblimey/go-ntrip/rtcm/utils"
+)
+
 // Empty frame.
 var EmptyFrame []byte
 
@@ -62,6 +68,8 @@ var MessageFrameWithCRCFailure = []byte{0xd3, 0, 0x08,
 	0xa8, 0xf7, 0x2b,
 }
 
+// MessageFrameType1005 contains a message of type 1005 - Stationary RTK Reference Station
+// ARP (base position).
 var MessageFrameType1005 = []byte{
 	// leader:
 	0xd3, 0, 19,
@@ -82,13 +90,67 @@ var MessageFrameType1005 = []byte{
 	0x5b, 0x90, 0x5f,
 }
 
+const MessageFrameType1005Display = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
+Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
+Frame length 25 bytes:
+00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
+00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
+
+stationID 2, ITRF realisation year 3, ignored 0xf,
+x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
+ECEF coords in metres (12.3456, 23.4567, 34.5678)
+`
+
+// MessageFrameType1006 contains a message of type 1006 - Stationary RTK Reference Station
+// ARP with Antenna Height (base position and height).
+var MessageFrameType1006 = []byte{
+	// leader:
+	0xd3, 0, 21,
+	// messageType1006 contains a message type 1006.
+	// message type:    Station ID:        ITRF year
+	//                                             ign:   x:
+	// 0011 1110   1110|0000   0000 0010|  0000 11|11  11|00 0000
+	//                                                 ig y:
+	// 0000 0000   0000 0001   1110 0010   0100 0000|  01|00 0000
+	//                                                    z:
+	// 0000 0000   0000 0011   1001 0100   0100 0111|  10|00 0000
+	//                                                 height
+	// 0000 0000   0000 0101   0100 0110   0100 1110|  0000 0010
+	// 0000 0001 (height 513 - 0.0513)
+	0x3e, 0xe0, 0x02, 0x0f, 0xc0,
+	0x00, 0x01, 0xe2, 0x40, 0x40,
+	0x00, 0x03, 0x94, 0x47, 0x80,
+	0x00, 0x05, 0x46, 0x4e, 0x02,
+	0x01,
+	// CRC
+	0x9f, 0x72, 0xf4,
+}
+
+const MessageFrameType1006Display = `Message type 1006, Stationary RTK Reference Station ARP with Antenna Height
+Commonly called the Station Description this message includes the ECEF location of the antenna (the antenna reference point (ARP) not the phase center) and also the quarter phase alignment details.  The height about the ARP value is also provided. The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1005 and 1032. The 1005 message does not convey the height about the ARP value.
+Frame length 27 bytes:
+00000000  d3 00 15 3e e0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
+00000010  47 80 00 05 46 4e 02 01  9f 72 f4                 |G...FN...r.|
+
+stationID 2, ITRF realisation year 3, ignored 0xf,
+x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
+ECEF coords in metres (12.3456, 23.4567, 34.5678)
+Antenna height 0.0513
+`
+
 var MessageFrameType1077 = []byte{
 
 	// A real RTCM message frame captured from a UBlox GPS device.  This contains a message
 	// type 1077 (a GPS MSM7), padded with null bytes at the end. Bytes 6 and 7 (0x62, 0x00)
 	// of the embedded message contain the multiple message flag (true), and the sequence
 	// number (zero), so this is the first of a sequence of messages covering the same scan
-	// and it only contains some of the signal cells.
+	// and it only contains some of the signal cells.  The timestamp is 432023000
+	// (5 days 0 hours 0 minutes 23 seconds 0 milliseconds).  In 2023 the GPS week starts at
+	// 23:59:42 on Saturday so the resulting time is 00:00:05 on Friday.  If the start of
+	// week value is set to 2023-05-13 23:59:42 UTC then the time of this message should be
+	// displayed as 2023-05-18 00:00:05.
+	//
+	// This is the first message of MesageBatchWith1077 below,
 	//
 	// Leader:
 	0xd3, 0, 219, // 0-2 of message frame
@@ -99,8 +161,8 @@ var MessageFrameType1077 = []byte{
 	//         v v
 	// 0110 00|1|0 00|00 0000
 	//
-	// The header is 185 bits long, with 16 cell mask bits.
-	//
+	// The header is 185 bits long with 16 cell mask bits.
+	//               | 30-bit timestamp 0x6700976 - 432023000 -
 	0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, // 0-7 of embedded message
 	//                   64 bit satellite mask
 	// 0|00|0 0|0|00   0|000 1000   0100 0000   1010 0000
@@ -151,7 +213,92 @@ var MessageFrameType1077 = []byte{
 	0x0c, 0x2d, 0xf3, // 222-224 of message frame.
 }
 
-var MesageBatchWith1077 = []byte{
+// The time of the message depends on the timestamp and the current GNSS week of the constellation.
+// The latter changes over time and only the handler can keep track of it, so for many packages
+// these values have to be set manually by the test.  These are the expected times in
+// the display of the message when StartOfWeek is set to 2023-05-13 23:59:42 +0000 UTC
+// (18 seconds before midnight at the end of Saturday, the start of the GPS week).
+var StartTimeOfMessageFrameType1077 = time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
+var UTCTimeOfMessageFrameType1077 = time.Date(2023, time.May, 18, 0, 0, 5, 0, utils.LocationUTC)
+
+const MessageFrameType1077Heading = `Message type 1077, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for the USA’s GPS system.
+`
+
+const MessageFrameType1077SentAt = "Sent at: 2023-05-13 23:59:42.002 +0000 UTC\n"
+
+const MessageFrameType1077StartOfWeek = "Start of GPS week 2023-05-13 23:59:42.000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)\n"
+
+const MessageFrameType1077HexDump = `Frame length 225 bytes:
+00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
+00000010  00 00 00 00 20 00 80 00  6d ff a8 aa 26 23 a6 a2  |.... ...m...&#..|
+00000020  23 24 00 00 00 00 36 68  cb 83 7a 6f 9d 7c 04 92  |#$....6h..zo.|..|
+00000030  fe f2 05 b0 4a a0 ec 7b  0e 09 27 d0 3f 23 7c b9  |....J..{..'.?#|.|
+00000040  6f bd 73 ee 1f 01 64 96  f5 7b 27 46 f1 f2 1a bf  |o.s...d..{'F....|
+00000050  19 fa 08 41 08 7b b1 1b  67 e1 a6 70 71 d9 df 0c  |...A.{..g..pq...|
+00000060  61 7f 19 9c 7e 66 66 fb  86 c0 04 e9 c7 7d 85 83  |a...~ff......}..|
+00000070  7d ac ad fc be 2b fc 3c  84 02 1d eb 81 a6 9c 87  |}....+.<........|
+00000080  17 5d 86 f5 60 fb 66 72  7b fa 2f 48 d2 29 67 08  |.]..` + "`" + `.fr{./H.)g.|
+00000090  c8 72 15 0d 37 ca 92 a4  e9 3a 4e 13 80 00 14 04  |.r..7....:N.....|
+000000a0  c0 e8 50 16 04 c1 40 46  17 05 41 70 52 17 05 01  |..P...@F..ApR...|
+000000b0  ef 4b de 70 4c b1 af 84  37 08 2a 77 95 f1 6e 75  |.K.pL...7.*w..nu|
+000000c0  e8 ea 36 1b dc 3d 7a bc  75 42 80 00 00 00 00 00  |..6..=z.uB......|
+000000d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 0c 2d  |...............-|
+000000e0  f3                                                |.|
+
+`
+
+// The expected display of the header of the message in MessageFrameType1077 when the
+// StartOfWeek is set to 2023-05-13 23:59:42 +0000 UTC.
+const WantHeaderFromMessageFrameType1077 = `stationID 0, multiple message, issue of data station 0
+session transmit time 0, clock steering 0, external clock 0
+divergence free smoothing false, smoothing interval 0
+Satellite mask:
+0001 0000 1000 0001  0100 0000 1100 1010  0000 0000 0000 0000  0000 0000 0000 0000
+Signal mask: 0100 0000 0000 0001  0000 0000 0000 0000
+cell mask: tt ft tf tt tt tt tt tt
+8 satellites, 2 signal types, 14 signals`
+
+// The expected display of the satellite list of the message in MessageFrameType1077.
+const WantSatelliteListFromMessageFrameType1077 = `Satellite ID {approx range m, extended info, phase range rate}:
+ 4 {24410542.339, 0, -135}
+ 9 {25264833.738, 0, 182}
+16 {22915678.774, 0, 597}
+18 {21506595.669, 0, 472}
+25 {23345166.602, 0, -633}
+26 {20661965.550, 0, 292}
+29 {21135953.821, 0, -383}
+31 {21670837.435, 0, -442}`
+
+// The expected display of the signal list of the message in MessageFrameType1077
+const WantSignalListFromMessageFrameType1077 = `Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio}:
+ 4  2 {24410527.355, 128278179.264, 709.992, -135.107, 582, false, 640}
+ 4 16 {24410523.313, 99956970.352, 553.242, -135.107, 581, false, 608}
+ 9 16 {25264751.952, 103454935.508, -745.762, 182.123, 179, false, 464}
+16  2 {22915780.724, 120423177.179, -3139.070, 597.345, 529, false, 640}
+18  2 {21506547.550, 113017684.727, -2482.645, 472.432, 579, false, 704}
+18 16 {21506542.760, 88065739.822, -1934.473, 472.418, 578, false, 608}
+25  2 {23345103.037, 122679365.321, 3327.570, -633.216, 646, false, 640}
+25 16 {23345100.838, 95594272.692, 2592.793, -633.187, 623, false, 560}
+26  2 {20662003.308, 108579565.367, -1538.436, 292.755, 596, false, 736}
+26 16 {20662000.914, 84607418.613, -1198.760, 292.749, 596, false, 672}
+29  2 {21136079.188, 111070868.860, 2016.750, -383.775, 628, false, 736}
+29 16 {21136074.598, 86548719.034, 1571.474, -383.770, 628, false, 656}
+31  2 {21670772.711, 113880577.055, 2325.559, -442.539, 624, false, 736}
+31 16 {21670767.783, 88738155.231, 1812.168, -442.550, 624, false, 640}`
+
+const WantMessageFrameType1077Display = MessageFrameType1077Heading +
+	MessageFrameType1077SentAt +
+	MessageFrameType1077StartOfWeek +
+	MessageFrameType1077HexDump +
+	WantHeaderFromMessageFrameType1077 + "\n" +
+	WantSatelliteListFromMessageFrameType1077 + "\n" +
+	WantSignalListFromMessageFrameType1077 + "\n"
+
+var MessageBatchWith1077 = []byte{
+
+	// The first message in this batch is the contents of MessageFrameType1077 above so
+	// the header, satellite and signal display given above should also match it.
 
 	// RTCM message type 1077 - signals from GPS satellites:
 	0xd3, 0x00, 0xdc, // header - message length (0xdc - 220)
@@ -342,9 +489,61 @@ var MessageFrame1077 = []byte{
 	0x69, 0xe8,
 }
 
+var GlonassMSM7WithIllegalDay = []byte{
+	// message 3: Type 1087 - Glonass.  This is derived from the Glonass message in
+	// MessageBatchWithJunk below but the day in the timestamp is 7, which is illegal.
+	//
+	// R 5  23482521.703   125527502.441         886.891          36.000                                                                    23482518.744    97632475.638         689.879          37.000
+	// R12  20829833.360   111269260.007        3266.930          48.000       20829832.826    86542668.996        2540.913          39.000
+	// R13  19220908.037   102638574.587        -569.980          36.000       19220907.074    79830006.582        -443.200          33.000
+	// R14  22228766.616   118491839.342       -3852.575          42.000       22228768.714    92160317.831       -2996.456          39.000
+	// R22  20286899.487   108292911.973        2735.571          42.000       20286900.360    84227771.187        2127.874          29.000
+	// R23  19954308.877   106742118.811       -2561.292          48.000       19954309.753    83021654.098       -1992.063          37.000
+	// R24  22984791.448   122910027.290       -4164.178          40.000       22984791.701    95596674.871       -3238.890          39.000
+	0xd3, 0x00, 0xc3,
+	//               | timestamp: 3-bit day, 27-bit milliseconds.
+	0x43, 0xf0, 0x00, 0xf0, 0x00, 0x00, 0x06, 0x00, 0x00, 0x04, 0x0e, 0x03, 0x80,
+	0x00, 0x00, 0x00, 0x00, 0x20, 0x80, 0x00, 0x00, 0x7f, 0xfe, 0x9c, 0x8a, 0x80, 0x94, 0x86, 0x84,
+	0x99, 0x0c, 0xa0, 0x95, 0x2a, 0x8b, 0xd8, 0x3a, 0x92, 0xf5, 0x74, 0x7d, 0x56, 0xfe, 0xb7, 0xec,
+	0xe8, 0x0d, 0x41, 0x69, 0x7c, 0x00, 0x0e, 0xf0, 0x61, 0x42, 0x9c, 0xf0, 0x27, 0x38, 0x86, 0x2a,
+	0xda, 0x62, 0x36, 0x3c, 0x8f, 0xeb, 0xc8, 0x27, 0x1b, 0x77, 0x6f, 0xb9, 0x4c, 0xbe, 0x36, 0x2b,
+	0xe4, 0x26, 0x1d, 0xc1, 0x4f, 0xdc, 0xd9, 0x01, 0x16, 0x24, 0x11, 0x9a, 0xe0, 0x91, 0x02, 0x00,
+	0x7a, 0xea, 0x61, 0x9d, 0xb4, 0xe1, 0x52, 0xf6, 0x1f, 0x22, 0xae, 0xdf, 0x26, 0x28, 0x3e, 0xe0,
+	0xf6, 0xbe, 0xdf, 0x90, 0xdf, 0xb8, 0x01, 0x3f, 0x8e, 0x86, 0xbf, 0x7e, 0x67, 0x1f, 0x83, 0x8f,
+	0x20, 0x51, 0x53, 0x60, 0x46, 0x60, 0x30, 0x43, 0xc3, 0x3d, 0xcf, 0x12, 0x84, 0xb7, 0x10, 0xc4,
+	0x33, 0x53, 0x3d, 0x25, 0x48, 0xb0, 0x14, 0x00, 0x00, 0x04, 0x81, 0x28, 0x60, 0x13, 0x84, 0x81,
+	0x08, 0x54, 0x13, 0x85, 0x40, 0xe8, 0x60, 0x12, 0x85, 0x01, 0x38, 0x5c, 0x67, 0xb7, 0x67, 0xa5,
+	0xff, 0x4e, 0x71, 0xcd, 0xd3, 0x78, 0x27, 0x29, 0x0e, 0x5c, 0xed, 0xd9, 0xd7, 0xcc, 0x7e, 0x04,
+	0xf8, 0x09, 0xc3, 0x73, 0xa0, 0x40,
+	// CRC
+	0xcf, 0x64, 0x00,
+}
+
+const GlonassMSM7WithIllegalDayDisplay = `Message type 1087, GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
+The type 7 Multiple Signal Message format for the Russian GLONASS system.
+Sent at (timestamp out of range)
+Start of Glonass week 2023-02-11 21:00:00 +0000 UTC plus timestamp out of range - 0x3c000001 (7/67108865)
+Frame length 201 bytes:
+00000000  d3 00 c3 43 f0 00 f0 00  00 06 00 00 04 0e 03 80  |...C............|
+00000010  00 00 00 00 20 80 00 00  7f fe 9c 8a 80 94 86 84  |.... ...........|
+00000020  99 0c a0 95 2a 8b d8 3a  92 f5 74 7d 56 fe b7 ec  |....*..:..t}V...|
+00000030  e8 0d 41 69 7c 00 0e f0  61 42 9c f0 27 38 86 2a  |..Ai|...aB..'8.*|
+00000040  da 62 36 3c 8f eb c8 27  1b 77 6f b9 4c be 36 2b  |.b6<...'.wo.L.6+|
+00000050  e4 26 1d c1 4f dc d9 01  16 24 11 9a e0 91 02 00  |.&..O....$......|
+00000060  7a ea 61 9d b4 e1 52 f6  1f 22 ae df 26 28 3e e0  |z.a...R.."..&(>.|
+00000070  f6 be df 90 df b8 01 3f  8e 86 bf 7e 67 1f 83 8f  |.......?...~g...|
+00000080  20 51 53 60 46 60 30 43  c3 3d cf 12 84 b7 10 c4  | QS` + "`" + `F` + "`" + `0C.=......|
+00000090  33 53 3d 25 48 b0 14 00  00 04 81 28 60 13 84 81  |3S=%H......(` + "`" + `...|
+000000a0  08 54 13 85 40 e8 60 12  85 01 38 5c 67 b7 67 a5  |.T..@.` + "`" + `...8\g.g.|
+000000b0  ff 4e 71 cd d3 78 27 29  0e 5c ed d9 d7 cc 7e 04  |.Nq..x').\....~.|
+000000c0  f8 09 c3 73 a0 40 cf 64  00                       |...s.@.d.|
+
+timestamp out of range
+`
+
 // This is real data collected on the 13th November 2020 with some junk added
-// to check that junk is handled properly as well as good data.  The first 
-// message is type 1077 - GPS MSM7.  It has a timestamp of 
+// to check that junk is handled properly as well as good data.
+// The first message is type 1077 - GPS MSM7.  It has a timestamp of
 // 2020/11/13 00:00:05 UTC and that GPS week starts at 2020/11/07 23:59:42 UTC.
 var MessageBatchWithJunk = []byte{
 

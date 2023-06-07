@@ -14,12 +14,12 @@ import (
 )
 
 type AppCore struct {
-	Conf     *jsonconfig.Config
+	Config   *jsonconfig.Config
 	Channels []chan rtcm.Message
 }
 
 func New(conf *jsonconfig.Config, channels []chan rtcm.Message) *AppCore {
-	appCore := AppCore{Conf: conf, Channels: channels}
+	appCore := AppCore{Config: conf, Channels: channels}
 	return &appCore
 }
 
@@ -36,7 +36,6 @@ func New(conf *jsonconfig.Config, channels []chan rtcm.Message) *AppCore {
 // file names.  If the device is connected using an RS/232 serial line then
 // the config just needs to specify one name, the name of that device.
 func (appCore *AppCore) HandleMessages(startTime time.Time) {
-
 	// Loop forever:  find and consume input files, read the data from them,
 	// convert them to messages and send the messages to the given channel.
 	// When a data file is exhausted (which may or may not happen), search
@@ -48,7 +47,7 @@ func (appCore *AppCore) HandleMessages(startTime time.Time) {
 	// this could hang and require human intervention to stop it.
 	for {
 		// Find the input file and get a buffered reader.
-		r := appCore.Conf.WaitAndConnectToInput()
+		r := appCore.Config.WaitAndConnectToInput()
 		reader := bufio.NewReader(r)
 
 		continueFlag := appCore.HandleMessagesUntilEOF(startTime, reader)
@@ -79,9 +78,7 @@ func (appCore *AppCore) HandleMessagesUntilEOF(startTime time.Time, reader *bufi
 	messageChan := make(chan rtcm.Message)
 
 	// Create a file handler.
-	waitTimeOnEOF := appCore.Conf.WaitTimeOnEOF()
-	timeoutOnEOF := appCore.Conf.TimeoutOnEOF()
-	fh := fileHandler.New(messageChan, waitTimeOnEOF, timeoutOnEOF)
+	fh := fileHandler.New(messageChan, appCore.Config)
 
 	// Start the file handler and feed the input into it.  Messages will come out
 	// of the message channel.  The file handler will die when it

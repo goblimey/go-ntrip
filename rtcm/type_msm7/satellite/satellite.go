@@ -62,11 +62,12 @@ type Cell struct {
 	RangeFractionalMillis uint
 
 	// PhaseRangeRate - int14.  The approximate phase range rate for all signals
-	// that come later in this MSM7 message.  Invalid if the top bit is set and all
-	// the others are zero (InvalidPhaseRangeRate).  The value is signed, so the
-	// invalid value is a negative number.  If the value is valid, the true phase
-	// range rate for a signal is derived by merging this (positive or negative)
-	// scaled value with the signal's PhaseRangeRateDelta value.
+	// that come later in this MSM7 message.  The value is in metres per second.
+	// Invalid if the top bit is set and all the others are zero 
+	// (InvalidPhaseRangeRate).  The value is signed, so the invalid value is a 
+	// negative number.  If the value is valid, the true phase range rate for a 
+	// signal is derived by merging this (positive or negative) value with the 
+	// signal's PhaseRangeRateDelta value.
 	PhaseRangeRate int
 }
 

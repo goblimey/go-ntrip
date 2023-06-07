@@ -97,18 +97,22 @@ type Config struct {
 	// The function TimeoutOnEOF returns this as a duration.
 	TimeoutOnEOFMilliSeconds uint `json:"timeout_on_EOF_milliseconds"`
 
-	// systemLog is the Writer used for the daily activity log (as opposed to
+	// SystemLog is the Writer used for the daily activity log (as opposed to
 	// the log of incoming RTCM messages) and can be nil.  It's not supplied
 	// in the JSON.  The application should call GetJSONConfigFromFile and, if
 	// there is a log writer, supply it as a parameter.
-	systemLog *log.Logger
+	SystemLog *log.Logger
 }
 
 // GetJSONConfigFromFile gets the config from the file given by configName.
 func GetJSONConfigFromFile(configFileName string, systemLog *log.Logger) (*Config, error) {
-
 	jsonReader, fileErr := os.Open(configFileName)
 	if fileErr != nil {
+		if systemLog != nil {
+			systemLog.Printf("cannot open config file %s: %v", configFileName, fileErr)
+		} else {
+			log.Printf("cannot open config file %s: %v", configFileName, fileErr)
+		}
 		return nil, fileErr
 	}
 
@@ -151,7 +155,7 @@ func getJSONConfig(jsonSource io.Reader, systemLog *log.Logger) (*Config, error)
 
 	// Set the fields that are not set by the JSON.
 
-	config.systemLog = systemLog
+	config.SystemLog = systemLog
 
 	return &config, nil
 }
@@ -177,7 +181,7 @@ func (config *Config) WaitTimeOnEOF() time.Duration {
 // when a series of read operations return EOF.  A value of 0 means that the
 // caller should give up on the first EOF.
 func (config *Config) TimeoutOnEOF() time.Duration {
-	return time.Duration(config.WaitTimeOnEOFMilliseconds) * time.Millisecond
+	return time.Duration(config.TimeoutOnEOFMilliSeconds) * time.Millisecond
 }
 
 // connectionFailureLogged controls when a connection failure is
@@ -191,8 +195,8 @@ func (config *Config) WaitAndConnectToInput() io.Reader {
 		reader := config.getInputFile()
 		if reader != nil {
 			logEntry1 := "waitAndConnectToInput: connected to GNSS source"
-			if config.systemLog != nil {
-				config.systemLog.Println(logEntry1)
+			if config.SystemLog != nil {
+				config.SystemLog.Println(logEntry1)
 			} else {
 				log.Println(logEntry1)
 			}
@@ -204,8 +208,8 @@ func (config *Config) WaitAndConnectToInput() io.Reader {
 		if !connectionFailureLogged {
 			// Log only the first of a series of connection failures.
 			logEntry2 := "waitAndConnectToInput: failed to connect to GNSS source.  Retrying"
-			if config.systemLog != nil {
-				config.systemLog.Println(logEntry2)
+			if config.SystemLog != nil {
+				config.SystemLog.Println(logEntry2)
 			} else {
 				log.Println(logEntry2)
 			}
@@ -224,8 +228,8 @@ func (config *Config) getInputFile() io.Reader {
 		file, err := os.Open(name)
 		if err == nil {
 			logEntry := fmt.Sprintf("getInputFile: found %s", name)
-			if config.systemLog != nil {
-				config.systemLog.Println(logEntry)
+			if config.SystemLog != nil {
+				config.SystemLog.Println(logEntry)
 			} else {
 				log.Println(logEntry)
 			}

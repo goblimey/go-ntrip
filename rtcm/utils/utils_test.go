@@ -1,9 +1,13 @@
 package utils
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/goblimey/go-tools/testsupport"
 )
 
 // Signal frequencies.
@@ -21,107 +25,96 @@ const b1 = 1.561098e9
 const b2a = 1.17645e9
 const b3i = 1.26852e9
 
-// TestParseGlonassTimestamp tests ParseGlonassTimestamp.
-func TestParseGlonassTimestamp(t *testing.T) {
-
-	// Maximum expected millis - twenty four hours of millis, less 1.
-	const maxMillis uint = (24 * 3600 * 1000) - 1
+// TestParseTimestamp tests ParseTimestamp.
+func TestParseTimestamp(t *testing.T) {
 
 	var testData = []struct {
-		timestamp  uint
-		wantDay    uint
-		wantMillis uint
-		wantError  string
+		constellation string
+		timestamp     uint
+		wantDay       uint
+		wantMillis    uint
+		wantError     string
 	}{
 
-		{maxMillis, 0, maxMillis, ""},
-		{6<<27 | maxMillis, 6, maxMillis, ""},
-
-		{0, 0, 0, ""},
-		{(2 << 27) + 42, 2, 42, ""},
-		// {maxMillis, 0, 0, ""},
-		{6 << 27, 6, 0, ""},
-		{6<<27 | maxMillis, 6, maxMillis, ""},
-
-		// Day 7 is illegal.
-		{7 << 27 /* 11 1111 1111 ... */, 0, 0, "illegal Glonass day"},
-		{0x3fffffff /* 11 1111 1111 ... */, 0, 0, "illegal Glonass day"},
-
-		// Greater than 30 bits is illegal and causes an error.
-		{0x80000000, 0, 0, "out of range"},
+		{"Glonass", (MillisIn24Hours - 1), 0, (MillisIn24Hours - 1), ""},
+		{"Glonass", 6<<27 | (MillisIn24Hours - 1), 6, (MillisIn24Hours - 1), ""},
+		{"Glonass", 0, 0, 0, ""},
+		{"Glonass", (2 << 27) + 42, 2, 42, ""},
+		{"Glonass", 6 << 27, 6, 0, ""},
+		{"Glonass", 6<<27 | (MillisIn24Hours - 1), 6, (MillisIn24Hours - 1), ""},
+		{"GPS", (MillisIn24Hours - 1), 0, (MillisIn24Hours - 1), ""},
+		{"GPS", MillisIn24Hours, 1, 0, ""},
+		{"GPS", (MillisIn7Days - 1), 6, (MillisIn24Hours - 1), ""},
+		{"Glonass", (6 << 27) + MillisIn24Hours, 0, 0, "timestamp out of range"},
+		{"Beidou", MillisIn7Days, 0, 0, "timestamp out of range"},
+		{"Glonass", MillisIn24Hours, 0, 0, "milliseconds in timestamp out of range"},
+		{"Glonass", ((3 << 27) + MillisIn24Hours), 0, 0, "milliseconds in timestamp out of range"},
 	}
 
 	for _, td := range testData {
-		gotDay, gotMillis, err := ParseGlonassTimestamp(td.timestamp)
-
+		gotDay, gotMillis, err := ParseTimestamp(td.constellation, td.timestamp)
 		if len(td.wantError) > 0 {
 			// Expecting an error.
 			if err == nil {
-				t.Errorf("%d: expected an error", td.timestamp)
+				t.Errorf("%s: %d: expected an error", td.constellation, td.timestamp)
 				continue
 			}
 			if td.wantError != err.Error() {
-				t.Errorf("%d: %v", td.timestamp, err)
+				t.Errorf("%s: %d: %v", td.constellation, td.timestamp, err)
 				continue
 			}
 			continue
 		} else {
 			// Not expecting an error.
 			if err != nil {
-				t.Errorf("0x%x: %v", td.timestamp, err)
+				t.Errorf("%s: 0x%x: %v", td.constellation, td.timestamp, err)
 				continue
 			}
 		}
 
 		if td.wantDay != gotDay {
-			t.Errorf("want day %d got %d", td.wantDay, gotDay)
+			t.Errorf("%s %d: want day %d got %d",
+				td.constellation, td.timestamp, td.wantDay, gotDay)
 		}
 		if td.wantMillis != gotMillis {
-			t.Errorf("%d: want millis %d got %d", td.timestamp, td.wantMillis, gotMillis)
+			t.Errorf("%s %d: want millis %d got %d",
+				td.constellation, td.timestamp, td.wantMillis, gotMillis)
 		}
 	}
 }
 
-// TestParseMilliseconds checks that a milliscond timestamp is broken down
+// TestParseMilliseconds checks that a millisecond timestamp is broken down
 // into components (days, hours etc) correctly.
 func TestParseMilliseconds(t *testing.T) {
 	var testData = []struct {
-		timestamp   uint
-		wantDays    uint
+		timestamp uint
+
 		wantHours   uint
 		wantMinutes uint
 		wantSeconds uint
 		wantMillis  uint
 	}{
-		{0, 0, 0, 0, 0, 0},
-		// Days.  (The number of days in a timestamp should be 0-6.)
-		{(4 * 24 * 3600 * 1000), 4, 0, 0, 0, 0},
-		{6 * 24 * 3600 * 1000, 6, 0, 0, 0, 0},
-		// This will never happen but we'll try it anyway.
-		{100 * 24 * 3600 * 1000, 100, 0, 0, 0, 0},
+		{0, 0, 0, 0, 0},
 		// hours
-		{(2 * 3600 * 1000), 0, 2, 0, 0, 0},
-		{(23 * 3600 * 1000), 0, 23, 0, 0, 0},
+		{(2 * 3600 * 1000), 2, 0, 0, 0},
+		{(23 * 3600 * 1000), 23, 0, 0, 0},
 		// minutes
-		{(42 * 60 * 1000), 0, 0, 42, 0, 0},
-		{(59 * 60 * 1000), 0, 0, 59, 0, 0},
+		{(42 * 60 * 1000), 0, 42, 0, 0},
+		{(59 * 60 * 1000), 0, 59, 0, 0},
 		// Seconds
-		{(43 * 1000), 0, 0, 0, 43, 0},
-		{(59 * 1000), 0, 0, 0, 59, 0},
+		{(43 * 1000), 0, 0, 43, 0},
+		{(59 * 1000), 0, 0, 59, 0},
 		// Milliseconds
-		{44, 0, 0, 0, 0, 44},
-		{999, 0, 0, 0, 0, 999},
+		{44, 0, 0, 0, 44},
+		{999, 0, 0, 0, 999},
 
-		// THis timestamp sets every component.
-		{((((4 * 24 * 3600) + (2 * 3600) + (42 * 60) + 43) * 1000) + 999), 4, 2, 42, 43, 999},
+		// This timestamp sets every component.
+		{((((2 * 3600) + (42 * 60) + 43) * 1000) + 999), 2, 42, 43, 999},
 	}
 
 	for _, td := range testData {
-		gotDays, gotHours, gotMinutes, gotSeconds, gotMillis := ParseMilliseconds(td.timestamp)
+		gotHours, gotMinutes, gotSeconds, gotMillis := ParseMilliseconds(td.timestamp)
 
-		if td.wantDays != gotDays {
-			t.Errorf("0x%x: want days %d got %d", td.timestamp, td.wantDays, gotDays)
-		}
 		if td.wantHours != gotHours {
 			t.Errorf("0x%x: want hours%d got %d", td.timestamp, td.wantHours, gotHours)
 		}
@@ -722,9 +715,9 @@ func TestGetSignalWavelength(t *testing.T) {
 		{"Galileo", 1, 0},
 		{"Galileo", 22, SpeedOfLightMS / e5a},
 		{"Galileo", 33, 0},
-		{"GLONASS", 1, 0},
-		{"GLONASS", 8, SpeedOfLightMS / g2},
-		{"GLONASS", 33, 0},
+		{"Glonass", 1, 0},
+		{"Glonass", 8, SpeedOfLightMS / g2},
+		{"Glonass", 33, 0},
 		{"Beidou", 1, 0},
 		{"Beidou", 16, SpeedOfLightMS / b2a},
 		{"Beidou", 33, 0},
@@ -1170,4 +1163,39 @@ func TestGetTitleAndComment(t *testing.T) {
 			t.Errorf("want %v got  %v", td.want, *got)
 		}
 	}
+}
+
+// TestGetDailyLogger test that GetDailyLogger correctly creates a
+// logfile.
+func TestGetDailyLogger(t *testing.T) {
+
+	workingDirectory, err := testsupport.CreateWorkingDirectory()
+	if err != nil {
+		t.Errorf("createWorkingDirectory failed - %v", err)
+	}
+	defer testsupport.RemoveWorkingDirectory(workingDirectory)
+
+	wantDir := workingDirectory + "/logs"
+
+	logger := GetDailyLogger()
+
+	if logger == nil {
+		t.Error("expected a logger")
+	}
+
+	fileInfo, scanError := os.ReadDir(wantDir)
+	if scanError != nil {
+		t.Error(scanError)
+	}
+
+	if len(fileInfo) != 1 {
+		t.Errorf("want 1 file got %d", len(fileInfo))
+	}
+
+	if !strings.Contains(fileInfo[0].Name(), "rtcmfilter.") ||
+		!strings.Contains(fileInfo[0].Name(), ".log") {
+
+		t.Errorf("want rtcmfilter.yyyy-mm-dd.log, got %s", fileInfo[0].Name())
+	}
+
 }

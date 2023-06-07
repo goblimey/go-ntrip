@@ -29,15 +29,15 @@ func TestString(t *testing.T) {
 	const wantRangeInMetres = rangeMilliseconds * utils.OneLightMillisecond
 	const wavelength = utils.SpeedOfLightMS / utils.Freq2
 	const phaseRangeDelta = 1
-	wantPhaseRange := (approxRange + (phaseRangeDelta * twoToPowerMinus31)) * utils.OneLightMillisecond / wavelength
-
+	const wantPhaseRange = (approxRange + (phaseRangeDelta * twoToPowerMinus31)) * utils.OneLightMillisecond / wavelength
 	const signalID1 uint = 16
 	const signalID2 uint = 5
 	const extendedInfo = 5
 
 	const wholePhaseRangeRate = 6
 	const phaseRangeRateDelta = 7000
-	const phaseRangeRate = 6.7
+	const wantPhaseRangeRateMS = 6.7
+	const wantPhaseRangeDoppler = -1 * (wantPhaseRangeRateMS / wavelength)
 	const lockTimeIndicator = 4
 	const halfCycleAmbiguity = true
 
@@ -69,23 +69,26 @@ func TestString(t *testing.T) {
 	signalRow2 := []signal.Cell{*signalCell2, *signalCell3}
 	signals := [][]signal.Cell{signalRow1, signalRow2}
 
-	resultTemplate := `Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 3 (0d 0h 0m 0s 3ms)
-stationID 2, single message, issue of data station 1
+	resultTemplate := `stationID 2, single message, issue of data station 1
 session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
-2 satellites, 2 signal types, 4 signals
+Satellite mask:
+0000 1100 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000
+Signal mask: 0000 1000 0000 0001  0000 0000 0000 0000
+cell mask: ft tt
+2 satellites, 2 signal types, 3 signals
 Satellite ID {approx range m, extended info, phase range rate}:
  1 {%.3f, 5, 6}
  2 {invalid, 5, invalid}
-Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
- 1 16 {%.3f, %.3f, %d, true, 5, %.3f}
- 2  5 {invalid, invalid, 4, true, 6, invalid}
- 2  5 {invalid, invalid, 7, false, 8, invalid}
+Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio}:
+ 1 16 {%.3f, %.3f, %.3f, %.3f, %d, true, 5}
+ 2  5 {invalid, invalid, invalid, invalid, 4, true, 6}
+ 2  5 {invalid, invalid, invalid, invalid, 7, false, 8}
 `
 	want := fmt.Sprintf(resultTemplate,
-		wantApproxRangeInMetres, wantRangeInMetres, wantPhaseRange,
-		lockTimeIndicator, phaseRangeRate)
+		wantApproxRangeInMetres, wantRangeInMetres,
+		wantPhaseRange, wantPhaseRangeDoppler, wantPhaseRangeRateMS,
+		lockTimeIndicator)
 
 	header :=
 		header.New(1077, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask)
@@ -206,41 +209,10 @@ func TestDisplaySignalCellsWithError(t *testing.T) {
 // TestGetMessageFromRealData is a regression test using real data.
 func TestGetMessageFromRealData(t *testing.T) {
 
-	// This is just copied from the first run of the test.  Given that
-	// the rest of the tests exercise the code properly, it's assumed
-	// that this result is correct.  The purpose of the test is to
-	// detect any future changes that break it.
-	const want = `Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)
-stationID 0, multiple message, issue of data station 0
-session transmit time 0, clock steering 0, external clock 0
-divergence free smoothing false, smoothing interval 0
-8 satellites, 2 signal types, 16 signals
-Satellite ID {approx range m, extended info, phase range rate}:
- 4 {24410542.339, 0, -135}
- 9 {25264833.738, 0, 182}
-16 {22915678.774, 0, 597}
-18 {21506595.669, 0, 472}
-25 {23345166.602, 0, -633}
-26 {20661965.550, 0, 292}
-29 {21135953.821, 0, -383}
-31 {21670837.435, 0, -442}
-Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguity, Carrier Noise Ratio, phase range rate}:
- 4  2 {24410527.355, 128278179.264, 582, false, 640, -135.107}
- 4 16 {24410523.313, 99956970.352, 581, false, 608, -135.107}
- 9 16 {25264751.952, 103454935.508, 179, false, 464, 182.123}
-16  2 {22915780.724, 120423177.179, 529, false, 640, 597.345}
-18  2 {21506547.550, 113017684.727, 579, false, 704, 472.432}
-18 16 {21506542.760, 88065739.822, 578, false, 608, 472.418}
-25  2 {23345103.037, 122679365.321, 646, false, 640, -633.216}
-25 16 {23345100.838, 95594272.692, 623, false, 560, -633.187}
-26  2 {20662003.308, 108579565.367, 596, false, 736, 292.755}
-26 16 {20662000.914, 84607418.613, 596, false, 672, 292.749}
-29  2 {21136079.188, 111070868.860, 628, false, 736, -383.775}
-29 16 {21136074.598, 86548719.034, 628, false, 656, -383.770}
-31  2 {21670772.711, 113880577.055, 624, false, 736, -442.539}
-31 16 {21670767.783, 88738155.231, 624, false, 640, -442.550}
-`
+	const want = testdata.WantHeaderFromMessageFrameType1077 + "\n" +
+		testdata.WantSatelliteListFromMessageFrameType1077 + "\n" +
+		testdata.WantSignalListFromMessageFrameType1077 + "\n"
+
 	message, err := GetMessage(testdata.MessageFrameType1077)
 	if err != nil {
 		t.Fatal(err)
@@ -251,4 +223,34 @@ Signals: sat ID sig ID {range m, phase range, lock time ind, half cycle ambiguit
 	if want != got {
 		t.Errorf("results differ:\n%s", diff.Diff(want, got))
 	}
+}
+
+// TestGlonassBugFix tests the fix for a bug in Glonass handling.
+func TestGlonassBugFix(t *testing.T) {
+	// This bitstream resulted in infinite values for the phase range
+	// and phase range rate doppler.
+	bitStream := []byte{
+		0xd3, 0x00, 0xc3, 0x43, 0xf0, 0x00, 0xa2, 0x93, 0x7c, 0x26, 0x00, 0x00, 0x60, 0x41, 0xe0, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x20, 0x80, 0x00, 0x00, 0x7f, 0xfe, 0x94, 0x90, 0x96, 0x92, 0x88, 0x82,
+		0x85, 0x06, 0xae, 0xd6, 0x85, 0x73, 0x4c, 0x65, 0xe0, 0xef, 0x37, 0xcf, 0x3e, 0xfd, 0x9e, 0x11,
+		0x20, 0x47, 0x3e, 0x7b, 0xfe, 0xed, 0xf6, 0x68, 0x25, 0xc1, 0x31, 0x10, 0x12, 0xc3, 0xbe, 0xb4,
+		0x19, 0xea, 0x40, 0x98, 0x63, 0x45, 0x83, 0x52, 0x65, 0xd2, 0x02, 0x5d, 0x20, 0x86, 0xc1, 0x6c,
+		0x6a, 0xf3, 0xe3, 0x4c, 0x34, 0x32, 0x0b, 0x9a, 0x17, 0x07, 0xa1, 0x9d, 0x20, 0x55, 0x26, 0x00,
+		0x4e, 0xcb, 0x3f, 0xb6, 0x65, 0x1f, 0xa9, 0x0d, 0x7e, 0x12, 0x2b, 0x3e, 0x0c, 0xef, 0xc1, 0x69,
+		0xb8, 0xe1, 0x65, 0x84, 0x41, 0xbf, 0x6d, 0x21, 0x5c, 0x81, 0x80, 0xdf, 0x58, 0x60, 0xc0, 0x6e,
+		0x5e, 0x96, 0x8d, 0xbe, 0xa0, 0x14, 0xd2, 0xa4, 0xa7, 0x14, 0x44, 0xf1, 0x1c, 0x47, 0x3b, 0xce,
+		0xf2, 0xec, 0xb9, 0x38, 0xce, 0x32, 0xcc, 0xb2, 0x00, 0x05, 0x21, 0x20, 0x62, 0x14, 0x05, 0x41,
+		0x58, 0x60, 0x15, 0x85, 0x81, 0x48, 0x64, 0x16, 0x06, 0x01, 0x58, 0x77, 0xb2, 0xef, 0x50, 0x91,
+		0xb5, 0x22, 0x29, 0xd9, 0x73, 0xbc, 0xd7, 0x00, 0x2e, 0x05, 0xf8, 0x45, 0xf0, 0xab, 0x8f, 0xe7,
+		0x22, 0x39, 0x8d, 0x43, 0x18, 0x40, 0x1c, 0x54, 0xe8,
+	}
+
+	m, err := GetMessage(bitStream)
+	if err != nil {
+		t.Error(err)
+	}
+
+	s := m.String()
+
+	_ = s
 }

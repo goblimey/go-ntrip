@@ -3,8 +3,10 @@ package filehandler
 import (
 	"bufio"
 	"io"
+	"strings"
 	"time"
 
+	"github.com/goblimey/go-ntrip/jsonconfig"
 	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
 )
 
@@ -17,16 +19,15 @@ type Handler struct {
 	MessageChan        chan rtcm.Message // ... and issues them on this channel.
 	RetryIntervalOnEOF time.Duration     // The time to wait between retries on EOF.
 	EOFTimeout         time.Duration     // Give up retrying after this time has elapsed.
-
+	Config             *jsonconfig.Config
 }
 
 // New creates a handler.
-func New(messageChan chan rtcm.Message, retryIntervalOnEOF, eofTimeout time.Duration) *Handler {
+func New(messageChan chan rtcm.Message, config *jsonconfig.Config) *Handler {
 
 	handler := Handler{
-		MessageChan:        messageChan,
-		RetryIntervalOnEOF: retryIntervalOnEOF,
-		EOFTimeout:         eofTimeout,
+		MessageChan: messageChan,
+		Config:      config,
 	}
 	return &handler
 }
@@ -83,16 +84,23 @@ func (handler *Handler) Handle(startTime time.Time, reader *bufio.Reader) error 
 		buf := make([]byte, 1)
 		n, err := reader.Read(buf)
 		if err != nil {
-			// Error of some kind, probably EOF.
-			if err != io.EOF {
+			// Error of some kind, probably EOF or i/o timeout.  If the latter, the
+			// error message is something like: "read /dev/ttyUSB0: i/o timeout"
+			if err != io.EOF && !strings.Contains(err.Error(), "i/o timeout") {
 				// Some other kind of file handling error.  (This is difficult
 				// to provoke during testing without using a mock.)
+				if handler.Config.SystemLog != nil {
+					handler.Config.SystemLog.Printf("%v", err)
+				}
 				return err
 			}
 
 			// EOF.
-			if handler.EOFTimeout == 0 {
+			if handler.Config.TimeoutOnEOF() == 0 {
 				// No timeout so don't retry.
+				if handler.Config.SystemLog != nil {
+					handler.Config.SystemLog.Printf("%v\n", err)
+				}
 				return err
 			}
 
@@ -104,25 +112,39 @@ func (handler *Handler) Handle(startTime time.Time, reader *bufio.Reader) error 
 				// Set up the timeout, pause and try again.
 				t := time.Now()
 				timeOfFirstEOF = &t
-				time.Sleep(handler.RetryIntervalOnEOF)
+				if handler.Config.WaitTimeOnEOF() != 0 {
+					time.Sleep(handler.Config.WaitTimeOnEOF())
+				}
+				if handler.Config.SystemLog != nil {
+					handler.Config.SystemLog.Printf("ignoring %v\n", err)
+				}
 				continue
 			}
 
 			// If we get to here, we've seen EOF this time and last time too.
+			// Has the timeout elapsed?
 			now := time.Now()
-			if now.Sub(*timeOfFirstEOF) > handler.EOFTimeout {
+			if now.Sub(*timeOfFirstEOF) > handler.Config.TimeoutOnEOF() {
 				// The timeout has elapsed.  Give up.
+				if handler.Config.SystemLog != nil {
+					handler.Config.SystemLog.Printf("giving up on %v\n", err)
+				}
 				return err
 			}
 
 			// The timeout has not elapsed yet.  Pause and try again.
-			time.Sleep(handler.RetryIntervalOnEOF)
+			// em := fmt.Sprintf("sleeping for %d\n", handler.RetryIntervalOnEOF)
+			// os.Stderr.Write([]byte(em))
+			if handler.Config.TimeoutOnEOF() != 0 {
+				time.Sleep(handler.Config.TimeoutOnEOF())
+			}
 		}
 
 		if n > 0 {
 			// We have read a byte.  Reset the timeout mechanism and send the
 			// byte to the channel.
 			timeOfFirstEOF = nil
+			// em := "read one byte\n"
 			byteChan <- buf[0]
 		}
 	}

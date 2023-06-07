@@ -76,7 +76,7 @@ type Cell struct {
 	CarrierToNoiseRatio uint
 
 	// PhaseRangeRateDelta - int15 - invalid if the top bit is set and the others are all
-	// zero (-16384).  The value is in ten thousands of a millisecond. The true value of the
+	// zero (-16384).  The value is in tenth millimetres per second. The true value of the
 	// signal's phase range rate is derived by scaling this (positive or negative) delta and
 	// adding it to the approximate value from the satellite cell.
 	PhaseRangeRateDelta int
@@ -105,26 +105,54 @@ func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDel
 // String returns a readable version of a signal cell.
 func (cell *Cell) String() string {
 	var rangeMillisecs string
-	var phaseRangeMillisecs string
 	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		rangeMillisecs = "invalid"
-		phaseRangeMillisecs = "invalid"
 	} else {
 		rangeMillisecs = fmt.Sprintf("%.3f", cell.RangeInMetres())
+	}
+
+	var phaseRangeMillisecs string
+	switch {
+	case cell.Satellite.RangeWholeMillis == utils.InvalidRange:
+		phaseRangeMillisecs = "invalid"
+	case cell.Wavelength == 0:
+		// The calculation involves dividing by the frequency
+		// so that must be non-zero.
+		phaseRangeMillisecs = "no wavelength"
+	default:
 		phaseRangeMillisecs = fmt.Sprintf("%.3f", cell.PhaseRange())
 	}
 
-	var phaseRangeRateMillisecs string
-	if cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate {
-		phaseRangeRateMillisecs = "invalid"
-	} else {
-		phaseRangeRateMillisecs = fmt.Sprintf("%.3f", cell.PhaseRangeRate())
+	var phaseRangeRateMetresPerSecond string
+	switch {
+	case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
+		phaseRangeRateMetresPerSecond = "invalid"
+	case cell.Wavelength == 0:
+		// The calculation involves dividing by the frequency
+		// so that must be non-zero.
+		phaseRangeRateMetresPerSecond = "no wavelength"
+	default:
+		phaseRangeRateMetresPerSecond = fmt.Sprintf("%.3f", cell.PhaseRangeRate())
 	}
 
-	return fmt.Sprintf("%2d %2d {%s, %s, %d, %v, %d, %s}",
+	// The phase range rate doppler matches the doppler value in Rinex format.
+	var phaseRangeRateDoppler string
+	switch {
+	case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
+		phaseRangeRateDoppler = "invalid"
+	case cell.Wavelength == 0:
+		// The calculation involves dividing by the frequency
+		// so that must be non-zero.
+		phaseRangeRateDoppler = "no wavelength"
+	default:
+		phaseRangeRateDoppler = fmt.Sprintf("%.3f", cell.PhaseRangeRateDoppler())
+	}
+
+	return fmt.Sprintf("%2d %2d {%s, %s, %s, %s, %d, %v, %d}",
 		cell.Satellite.ID, cell.ID, rangeMillisecs, phaseRangeMillisecs,
+		phaseRangeRateDoppler, phaseRangeRateMetresPerSecond,
 		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
-		cell.CarrierToNoiseRatio, phaseRangeRateMillisecs)
+		cell.CarrierToNoiseRatio)
 }
 
 // GetAggregateRange takes the range values from an MSM7 signal cell (including some
@@ -229,15 +257,15 @@ func (cell *Cell) PhaseRangeRate() float64 {
 
 	aggregatePhaseRangeRate := cell.GetAggregatePhaseRangeRate()
 
-	// The aggregate is milliseconds scaled up by 10,000.
+	// The aggregate is metres per second  scaled up by 10,000.
 	phaseRangeRateMillis := float64(aggregatePhaseRangeRate) / 10000
 
 	return phaseRangeRateMillis
 }
 
-// GetMSM7Doppler gets the doppler value in Hz from the phase
-// range rate fields of a satellite and signal cell from an MSM7.
-func (cell *Cell) GetMSM7Doppler() float64 {
+// PhaseRangeRateDoppler gets the doppler value in Hz from the phase
+// range rate fields of a satellite and signal cell of an MSM7.
+func (cell *Cell) PhaseRangeRateDoppler() float64 {
 	// RTKLIB save_msm_obs calculates the phase range, multiplies it by
 	// the wavelength of the signal, reverses the sign of the result and
 	// calls it the Doppler:
@@ -247,13 +275,13 @@ func (cell *Cell) GetMSM7Doppler() float64 {
 	//     rtcm->obs.data[index].D[ind[k]]=(float)(-(rr[i]+rrf[j])/wl);
 	// }
 	//
-	// When an MSM7 is converted to RINEX format, this value appears in one of
-	// the fields, so we can test the handling using data collected from a real
-	// device.
+	// When an MSM7 is converted to RINEX format, this value appears as the
+	// Doppler (in the third field) so we can test the handling using data
+	// collected from a real device.
 
-	phaseRangeRateMillis := cell.PhaseRangeRate()
+	phaseRangeRateMetresPerSecond := cell.PhaseRangeRate()
 
-	return (phaseRangeRateMillis / cell.Wavelength) * -1
+	return (phaseRangeRateMetresPerSecond / cell.Wavelength) * -1
 }
 
 // GetAggregatePhaseRangeRate returns the phase range rate as an int, scaled up

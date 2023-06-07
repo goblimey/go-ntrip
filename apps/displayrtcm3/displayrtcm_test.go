@@ -81,18 +81,9 @@ func TestGetTime(t *testing.T) {
 // containing a single message.
 func TestDisplayMessages(t *testing.T) {
 
-	const want = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
-Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
-Frame length 25 bytes:
-00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
-00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
-
-message type 1005 - Base Station Information
-stationID 2, ITRF realisation year 3, ignored 0xf,
-x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
-ECEF coords in metres (12.3456, 23.4567, 34.5678)
-
-`
+	// DisplayMessages reads messages from a channel and displays each one,
+	// adding a trailing newline.  In this test, we send just one message.
+	const want = testdata.MessageFrameType1005Display + "\n"
 
 	rtcmHandler := rtcm.New(time.Now())
 	message, gotError := rtcmHandler.GetMessage(testdata.MessageFrameType1005)
@@ -120,7 +111,6 @@ ECEF coords in metres (12.3456, 23.4567, 34.5678)
 	got := string(gotBytes[:n])
 
 	if want != got {
-		t.Errorf("want:\n%s\ngot:\n%s\n", want, got)
 		t.Error(diff.Diff(want, got))
 	}
 }

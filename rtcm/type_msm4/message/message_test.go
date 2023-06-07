@@ -1,7 +1,6 @@
 package message
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -188,28 +187,31 @@ func TestNew(t *testing.T) {
 	}
 }
 
-// TstString checks the String method.
+// TestString checks the String method.
 func TestString(t *testing.T) {
-	const resultTemplateComplete = `Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
-stationID 1, multiple message, issue of data station 3
+	const wantComplete = `stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
-1 Satellites
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 Satellite ID {range ms}
- 8 {%.3f}
-1 Signals
+ 8 {2701059.783}
+Signals:
 Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}
- 8 11 {%.3f, %.3f, 14, true, 15}
+ 8 11 {2701059.997, 168816.237, 14, true, 15}
 `
 
-	const wantIncomplete = `Sent at 0001-01-01 00:00:00 +0000 UTC
-Start of GPS week 0001-01-01 00:00:00 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
-stationID 1, multiple message, issue of data station 3
+	const wantIncomplete = `stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 No Satellites
 No Signals
 `
@@ -220,16 +222,6 @@ No Signals
 	incompleteMessage := createMessage()
 	incompleteMessage.Satellites = nil
 	incompleteMessage.Signals = nil
-
-	// The expected approximate range given by the satellite cell.
-	approxRange := utils.GetApproxRangeMetres(wantRangeWhole, wantRangeFractional)
-
-	rangefromSignal := completeMessage.Signals[0][0].RangeInMetres()
-
-	phaseRangefromSignal := completeMessage.Signals[0][0].PhaseRange()
-
-	wantComplete :=
-		fmt.Sprintf(resultTemplateComplete, approxRange, rangefromSignal, phaseRangefromSignal)
 
 	var testData = []struct {
 		description string

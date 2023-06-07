@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goblimey/go-ntrip/rtcm/utils"
-
 	"github.com/goblimey/go-crc24q/crc24q"
+	"github.com/goblimey/go-ntrip/rtcm/utils"
 
 	"github.com/kylelemons/godebug/diff"
 )
@@ -99,7 +98,7 @@ func TestGetMSMType(t *testing.T) {
 	// The message frame contains the leader, the embedded message and the CRC.
 	// The message type is the first field of the message.
 	//
-	const posAfterMessageType = lenMessageType + utils.LeaderLengthBits
+	const posAfterMessageType = LenMessageType + utils.LeaderLengthBits
 
 	var testData = []struct {
 		MessageType       int
@@ -191,7 +190,7 @@ func TestGetMSMType(t *testing.T) {
 
 		if td.WantPosition != int(gotPosition) {
 			t.Errorf("%d: want %d bits to be consumed, got %d",
-				td.MessageType, lenMessageType, gotPosition)
+				td.MessageType, LenMessageType, gotPosition)
 			continue
 		}
 	}
@@ -253,7 +252,7 @@ func TestGetMSMHeader(t *testing.T) {
 	//               cell mask:
 	// 0001 0101   0|111 1100  0000 1|000
 	//
-	// The cell mask is 4X3 bits - 111, 110, 000, 001.
+	// The cell mask is 4X3 bits - 111, 110, 000, 001 - 6 cells.
 
 	bitStream := []byte{
 		0xd3, 0, 32,
@@ -303,8 +302,8 @@ func TestGetMSMHeader(t *testing.T) {
 		GNSSSmoothingInterval:                7,
 		SatelliteMask:                        0x001d,
 		SignalMask:                           0x2a,
-		CellMask:                             0xf810000000000000,
-		NumSignalCells:                       12,
+		CellMask:                             0xf81,
+		NumSignalCells:                       6,
 	}
 
 	header, gotPos, err := GetMSMHeader(bitStream)
@@ -643,6 +642,56 @@ func TestGetMSMHeaderWithCellMaskTooLong(t *testing.T) {
 	}
 }
 
+// TestGetSatellites checks that getSatellites deciphers a bit mask correctly.
+func TestGetSatellites(t *testing.T) {
+	// 1    5    9    13   17   21   25   29   33   37   41   45   49   53   57   61
+	// 1000 0000 0000 0000 0100 0000 0000 0000 0100 0000 0000 0000 0000 0000 0000 0010
+	const satMask = 0x8000000040000002
+	want := []uint{1, 34, 63}
+	got := getSatellites(satMask)
+
+	if !utils.SlicesEqual(want, got) {
+		t.Errorf("want %v got  %v", want, got)
+	}
+}
+
+// TestGetSignals checks that getSignals deciphers a bit mask correctly.
+func TestGetSignals(t *testing.T) {
+	// 1    5    9    13   17   21   25   29
+	// 0100 0000 0000 0000 1111 0000 0000 0001
+	const satMask = 0x4000f001
+	want := []uint{2, 17, 18, 19, 20, 32}
+
+	got := getSignals(satMask)
+
+	if !utils.SlicesEqual(want, got) {
+		t.Errorf("want %v got  %v", want, got)
+	}
+}
+
+// TestGetCells checks that getCells deciphers a bit mask correctly.
+func TestGetCells(t *testing.T) {
+
+	// <- 3X2 mask ->
+	// 0001 1011 0000 | 0000 0000 0000 0000 0000 .....
+	const cellMask uint64 = 0x1b
+	want := [][]bool{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+	got := getCells(cellMask, 4, 2)
+
+	for i, _ := range want {
+		for j, _ := range want[i] {
+			if want[i][j] != got[i][j] {
+				t.Errorf("expected [%d][%d] to be %v", i, j, want[1][1])
+			}
+		}
+	}
+}
+
 // TestGetTitle checks that getTitle return the correct title for display.
 func TestGetTitle(t *testing.T) {
 
@@ -705,28 +754,34 @@ func TestString(t *testing.T) {
 	wantStartOfGlonassWeek := time.Date(2023, time.May, 14, 0, 0, 0, 0, utils.LocationMoscow)
 	wantUTCTimeFromGlonassTimestamp := time.Date(2023, time.May, 15, 0, 0, 2, 0, utils.LocationMoscow)
 
-	const wantGPSDisplay = `Sent at 2023-05-13 23:59:44 +0000 UTC
-Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 2000 (0d 0h 0m 2s 0ms)
-stationID 1, multiple message, issue of data station 3
+	const wantGPSDisplay = `stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 `
 
-	const wantGlonassDisplay = `Sent at 2023-05-15 00:00:02 +0300 MSK
-Start of GPS week 2023-05-14 00:00:00 +0300 MSK plus timestamp 2000 (0d 0h 0m 2s 0ms)
-stationID 1, multiple message, issue of data station 3
+	const wantGlonassDisplay = `stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 `
 
-	const wantGlonassDisplayIllegalDay = `Sent at 2023-05-14 00:00:00 +0300 MSK
-Start of GPS week 2023-05-14 00:00:00 +0300 MSK plus timestamp 2000 (0d 0h 0m 2s 0ms)
-stationID 1, multiple message, issue of data station 3
+	const wantGlonassDisplayIllegalDay = `stationID 1, multiple message, issue of data station 3
 session transmit time 4, clock steering 5, external clock 6
 divergence free smoothing true, smoothing interval 7
-2 satellites, 3 signal types, 6 signals
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 `
 
 	var testData = []struct {
@@ -749,9 +804,6 @@ divergence free smoothing true, smoothing interval 7
 			wantExternalClockSteeringIndicator, wantSmoothing, wantSmoothingInterval,
 			wantSatelliteMask, wantSignalMask, wantCellMask)
 
-		header.StartOfWeek = td.startOfWeek
-		header.UTCTimeFromTimestamp = td.utcTimeFromTimestamp
-
 		gotDisplay := header.String()
 
 		if td.wantDisplay != gotDisplay {
@@ -765,179 +817,42 @@ func TestStringMultipleFlag(t *testing.T) {
 	const satMask = 3
 	const sigMask = 7
 	const cellMask = 1
-	wantStartOfWeek := time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
-	wantUTCTimeFromTimestamp := time.Date(2023, time.May, 13, 23, 59, 45, 0, utils.LocationUTC)
 
 	// The result contains "single message" or "multiple message", depending
 	// on the multiple message flag.
-	resultTemplate := `Sent at 2023-05-13 23:59:45 +0000 UTC
-Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 3 (0d 0h 0m 0s 3ms)
-stationID 2, %s, issue of data station 1
+	resultTemplate := `stationID 2, %s, issue of data station 1
 session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
-2 satellites, 3 signal types, 6 signals
+Satellite mask:
+0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0000  0000 0000 0000 0011
+Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
+cell mask: fff fft
+2 satellites, 3 signal types, 1 signals
 `
 
 	var testData = []struct {
 		hdr                  *Header
-		startOfWeek          time.Time
-		utcTimeFromTimestamp time.Time
 		want                 string
 	}{
 		{
 			New(1074, 2, 3,
 				false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			wantStartOfWeek,
-			wantUTCTimeFromTimestamp,
 			fmt.Sprintf(resultTemplate, "single message"),
 		},
 
 		{
 			New(1074, 2, 3, true, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			wantStartOfWeek,
-			wantUTCTimeFromTimestamp,
 			fmt.Sprintf(resultTemplate, "multiple message"),
 		},
 	}
 
 	for _, td := range testData {
-		td.hdr.StartOfWeek = td.startOfWeek
-		td.hdr.UTCTimeFromTimestamp = td.utcTimeFromTimestamp
 
 		got := td.hdr.String()
 
 		if td.want != got {
-			t.Errorf(diff.Diff(td.want, got))
+			t.Error(diff.Diff(td.want, got))
 		}
 
-	}
-}
-
-// TestTimestampInString checks that String()correctly interprets the timestamp
-// in an MSM.
-func TestTimestampInString(t *testing.T) {
-	const satMask = 3
-	const sigMask = 7
-	const cellMask = 1
-	const wantGPSTimestamp = 2 * 1000                          // 2 seconds.
-	const wantGlonassTimestamp = uint(1<<27) + (2 * 60 * 1000) // One day and two minutes.
-	const wantIllegalGlonassTimestamp = uint(7 << 27)
-	wantStartOfGPSWeek := time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
-	wantUTCTimeFromGPSTimestamp := time.Date(2023, time.May, 13, 23, 59, 44, 0, utils.LocationUTC)
-	wantStartOfGlonassWeek := time.Date(2023, time.May, 14, 0, 0, 0, 0, utils.LocationMoscow).In(utils.LocationUTC)
-	wantUTCTimeFromGlonassTimestamp := time.Date(2023, time.May, 15, 0, 0, 2, 0, utils.LocationMoscow).In(utils.LocationUTC)
-
-	wantGPSDisplay := `Sent at 2023-05-13 23:59:44 +0000 UTC
-Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 2000 (0d 0h 0m 2s 0ms)
-stationID 2, single message, issue of data station 1
-session transmit time 5, clock steering 6, external clock 7
-divergence free smoothing true, smoothing interval 9
-2 satellites, 3 signal types, 6 signals
-`
-
-	wantGlonassDisplay := `Sent at 2023-05-14 21:00:02 +0000 UTC
-Start of Glonass week 2023-05-13 21:00:00 +0000 UTC plus timestamp 134337728 (1d 0h 2m 0s 0ms)
-stationID 2, single message, issue of data station 1
-session transmit time 5, clock steering 6, external clock 7
-divergence free smoothing true, smoothing interval 9
-2 satellites, 3 signal types, 6 signals
-`
-
-	wantGlonassDisplayWithIllegalDay := `Sent at 2023-05-14 21:00:02 +0000 UTC
-timestamp 939524096 - illegal Glonass day
-stationID 2, single message, issue of data station 1
-session transmit time 5, clock steering 6, external clock 7
-divergence free smoothing true, smoothing interval 9
-2 satellites, 3 signal types, 6 signals
-`
-
-	var testData = []struct {
-		hdr                  *Header
-		startOfWeek          time.Time
-		utcTimeFromTimestamp time.Time
-		want                 string
-	}{
-		{
-			New(1074, 2, wantGPSTimestamp, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			wantStartOfGPSWeek,
-			wantUTCTimeFromGPSTimestamp,
-			wantGPSDisplay,
-		},
-
-		{
-			New(1084, 2, wantGlonassTimestamp, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			wantStartOfGlonassWeek,
-			wantUTCTimeFromGlonassTimestamp,
-			wantGlonassDisplay,
-		},
-
-		{
-			New(1084, 2, wantIllegalGlonassTimestamp, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
-			wantStartOfGlonassWeek,
-			wantUTCTimeFromGlonassTimestamp, // placeholder - ignored.
-			wantGlonassDisplayWithIllegalDay,
-		},
-	}
-
-	for _, td := range testData {
-
-		td.hdr.StartOfWeek = td.startOfWeek
-		td.hdr.UTCTimeFromTimestamp = td.utcTimeFromTimestamp
-
-		got := td.hdr.String()
-
-		if td.want != got {
-			t.Errorf(diff.Diff(td.want, got))
-		}
-	}
-}
-
-// TestGetSatellites checks that getSatellites deciphers a bit mask correctly.
-func TestGetSatellites(t *testing.T) {
-	// 1    5    9    13   17   21   25   29   33   37   41   45   49   53   57   61
-	// 1000 0000 0000 0000 0100 0000 0000 0000 0100 0000 0000 0000 0000 0000 0000 0010
-	const satMask = 0x8000000040000002
-	want := []uint{1, 34, 63}
-	got := getSatellites(satMask)
-
-	if !utils.SlicesEqual(want, got) {
-		t.Errorf("want %v got  %v", want, got)
-	}
-}
-
-// TestGetSignals checks that getSignals deciphers a bit mask correctly.
-func TestGetSignals(t *testing.T) {
-	// 1    5    9    13   17   21   25   29
-	// 0100 0000 0000 0000 1111 0000 0000 0001
-	const satMask = 0x4000f001
-	want := []uint{2, 17, 18, 19, 20, 32}
-
-	got := getSignals(satMask)
-
-	if !utils.SlicesEqual(want, got) {
-		t.Errorf("want %v got  %v", want, got)
-	}
-}
-
-// TestGetCells checks that getCells deciphers a bit mask correctly.
-func TestGetCells(t *testing.T) {
-
-	// <- 3X2 mask ->
-	// 0001 1011 0000 | 0000 0000 0000 0000 0000 .....
-	const cellMask uint64 = 0x1b00000000000000
-	want := [][]bool{
-		{false, false},
-		{false, true},
-		{true, false},
-		{true, true},
-	}
-	got := getCells(cellMask, 4, 2)
-
-	for i, _ := range want {
-		for j, _ := range want[i] {
-			if want[i][j] != got[i][j] {
-				t.Errorf("expected [%d][%d] to be %v", i, j, want[1][1])
-			}
-		}
 	}
 }

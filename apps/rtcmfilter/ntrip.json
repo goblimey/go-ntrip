@@ -1,15 +1,15 @@
 {
     "input": [
-        "/dev/ttyACM0",
-        "/dev/ttyACM1",
-        "/dev/ttyACM2",
-        "/dev/ttyACM3"
+        "/dev/ttyUSB0",
+        "/dev/ttyUSB1",
+        "/dev/ttyUSB2",
+        "/dev/ttyUSB3"
     ],
     "display_messages": true,
     "record_messages": true,
     "message_log_directory": "logs",
-    "read_timeout_milliseconds": 100,
+    "read_timeout_milliseconds": 500,
     "sleep_time_after_failed_open_milliseconds": 100,
-    "wait_time_on_EOF_millis": 200,
-    "timeout_on_EOF_milliseconds": 3000
+    "wait_time_on_EOF_millis": 0,
+    "timeout_on_EOF_milliseconds": 500
 }

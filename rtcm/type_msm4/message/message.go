@@ -50,10 +50,7 @@ func (message *Message) DisplaySatelliteCells() string {
 		return "No Satellites\n"
 	}
 
-	heading := ""
-
-	heading = fmt.Sprintf("%d Satellites\nSatellite ID {range ms}\n",
-		len(message.Satellites))
+	heading := "Satellite ID {range ms}\n"
 
 	body := ""
 	for i := range message.Satellites {
@@ -71,9 +68,7 @@ func (message *Message) DisplaySignalCells() string {
 		return "No Signals\n"
 	}
 
-	heading := fmt.Sprintf(
-		"%d Signals\nSat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}\n",
-		len(message.Signals))
+	heading := "Signals:\nSat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}\n"
 
 	body := ""
 

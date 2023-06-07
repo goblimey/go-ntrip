@@ -4,8 +4,11 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"time"
+
+	"github.com/goblimey/go-tools/dailylogger"
 )
 
 // StartOfMessageFrame is the value of the byte that starts an RTCM3 message frame.
@@ -27,6 +30,7 @@ const MessageTypeStop = -2
 
 // RTCM3 Message types.
 const MessageType1005 = 1005 // Base position.
+const MessageType1006 = 1006 // Base position and height.
 const MessageTypeGCPB = 1230 // Glonass code/phase bias.
 const MessageTypeMSM4GPS = 1074
 const MessageTypeMSM7GPS = 1077
@@ -50,9 +54,9 @@ var MSM7MessageTypes map[int]interface{}
 // Handling of timestamps and the equivalent times.
 
 // Multiple Signal Messages contain a thirty-bit timestamp which is the time
-// since the start of some period. For Glonass the timestamp is a three-bit
-// day and a twentyseven-bit value, milliseconds since the start of the day
-// in Moscow time.  Day 0 is Sunday and day 7 is an illegal value.  For all
+// since the start of some period. For Glonass the timestamp is a 3-bit day
+// day and a 27-bit value, milliseconds since the start of the day in
+// Moscow time.  Day 0 is Sunday and day 7 is an illegal value.  For all
 // the other constellations the timestamp is milliseconds since the start of
 // the week, which starts a few leap seconds away from midnight at the start
 // of Sunday UTC, a different number of leap seconds for each constellation.
@@ -61,8 +65,15 @@ var MSM7MessageTypes map[int]interface{}
 // "timezone", the start of Sunday.
 
 // MaxTimestamp is the maximum timestamp value.  The timestamp is 30 bits
-// giving milliseconds since the start of the day.
-const MaxTimestamp = 0x3fffffff // 0011 1111 1111 1111 1111 1111 1111 1111
+// giving milliseconds since the start of the week BUT it must be less than
+// seven days worth of milliseconds.
+// const MaxTimestamp = 0x3fffffff // 0011 1111 1111 1111 1111 1111 1111 1111
+const MaxTimestamp = (7 * 24 * 3600 * 1000) - 1
+
+// MaxTimestampGlonass is the maximum timestamp value for Glonass -
+// a day value of 6 and a millisecond value of
+// ((24 hours worth of milliseconds) - 1)
+const MaxTimestampGlonass = (6 << 27) + ((24 * 3600 * 1000) - 1)
 
 // GPSLeapSeconds is the duration that GPS time is ahead of UTC
 // in seconds, correct from the start of 2017/01/01.  An extra leap
@@ -200,6 +211,12 @@ const CRCLengthBytes = 3
 // CRCLengthBits is the length of the Cyclic Redundancy check value in bits.
 const CRCLengthBits = CRCLengthBytes * 8
 
+// MillisIn24Hours is 24 hours in milliseconds.
+const MillisIn24Hours = 24 * 3600 * 1000
+
+// MillisIn7Days7 is 7 days in milliseconds.
+const MillisIn7Days = 7 * 24 * 3600 * 1000
+
 func init() {
 	LocationUTC, _ = time.LoadLocation("UTC")
 	LocationGMT, _ = time.LoadLocation("GMT")
@@ -227,25 +244,40 @@ func init() {
 	MSM7MessageTypes[MessageTypeMSM7NavicIrnss] = nil
 }
 
-// ParseGlonassTimestamp separates out the two parts of a Glonass
-// timestamp -3/27 day/milliseconds from start of day.
-func ParseGlonassTimestamp(timestamp uint) (uint, uint, error) {
+// ParseTimestamp returns the number of days and the remaining
+// number of milliseconds in a 30-bit timestamp.
+func ParseTimestamp(constellation string, timestamp uint) (uint, uint, error) {
 
-	// The timestamp must fit into 30 bits.
+	const errorMessage = "timestamp out of range"
+	const errorMessageMillis = "milliseconds in timestamp out of range"
+	if constellation == "Glonass" {
+		// A Glonass timestamp is a 3-bit number of days and a
+		// 27-bit number of milliseconds from the start of the day.
+		// Day zero is Sunday.  A days value of 7 is illegal.
+		if timestamp > MaxTimestampGlonass {
+			return 0, 0, errors.New(errorMessage)
+		}
+		days := timestamp >> 27
+		millis := timestamp &^ GlonassDayBitMask
+		if millis >= MillisIn24Hours {
+			return 0, 0, errors.New(errorMessageMillis)
+		}
+		return days, millis, nil
+	}
+
+	// For all other constellation the timestamp is milliseconds
+	// since the start of the week.
 	if timestamp > MaxTimestamp {
-		return 0, 0, errors.New("out of range")
+		return 0, 0, errors.New(errorMessage)
 	}
+	days := timestamp / MillisIn24Hours
+	millis := timestamp % MillisIn24Hours
 
-	day := timestamp >> 27
-	if day == GlonassInvalidDay {
-		return 0, 0, errors.New("illegal Glonass day")
-	}
-	millis := timestamp &^ GlonassDayBitMask
-	return day, millis, nil
+	return days, millis, nil
 }
 
-// ParseMilliseconds breaks a millisecond timestamp down into days, hours etc.
-func ParseMilliseconds(timestamp uint) (days, hours, minutes, seconds, milliseconds uint) {
+// ParseMilliseconds breaks a millisecond timestamp down into hours, minutes etc.
+func ParseMilliseconds(timestamp uint) (hours, minutes, seconds, milliseconds uint) {
 	milliseconds = timestamp % 1000
 	// Get the number of seconds.
 	totalSeconds := timestamp / 1000
@@ -256,10 +288,8 @@ func ParseMilliseconds(timestamp uint) (days, hours, minutes, seconds, milliseco
 	// Get the number of hours.
 	totalHours := totalMinutes / 60
 	hours = totalHours % 24
-	// Get the number of days.
-	days = totalHours / 24
 
-	return // days, hours, minutes, seconds, milliseconds
+	return // hours, minutes, seconds, milliseconds
 }
 
 // GetPhaseRangeLightMilliseconds gets the phase range of the signal in
@@ -408,7 +438,7 @@ func GetSignalWavelength(constellation string, signalID uint) float64 {
 		return getSignalWavelengthGPS(signalID)
 	case "Galileo":
 		return getSignalWavelengthGalileo(signalID)
-	case "GLONASS":
+	case "Glonass":
 		return getSignalWavelengthGlonass(signalID)
 	case "Beidou":
 		return getSignalWavelengthBeidou(signalID)
@@ -1131,4 +1161,12 @@ func EqualWithin(precision uint, f1, f2 float64) bool {
 	f2 = math.Round(f2 * scaleFactor)
 
 	return math.Abs(f1-f2) <= 0.1
+}
+
+// GetDailyLogger gets a daily log file which can be written to as a logger
+// (each line decorated with filename, date, time, etc).
+func GetDailyLogger() *log.Logger {
+	dailyLog := dailylogger.New("logs", "rtcmfilter.", ".log")
+	logFlags := log.LstdFlags | log.Lshortfile | log.Lmicroseconds
+	return log.New(dailyLog, "rtcmfilter", logFlags)
 }
