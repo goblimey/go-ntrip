@@ -3,7 +3,6 @@ package handler
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -1368,7 +1367,7 @@ func createRTCMWithMSM4(msm4 *msm4message.Message, startOfWeek time.Time) *Messa
 	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	message.Readable = msm4
 	// In the real world these values would be set by handler.GetMessage.
-	message.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	message.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	message.StartOfWeek =
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 
@@ -1473,9 +1472,12 @@ Frame length 14 bytes:
 message type 1024 currently cannot be displayed
 `
 
-	const resultTemplateMSM4Complete = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
+	// The satellite mask says that there are two satellites but
+	// the multiple message flag is set and not all satellites need
+	// to be included.  In this case there's only one satellite.
+	const wantCompleteMSM4 = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
 The type 4 Multiple Signal Message format for the American GPS system.
-Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Time 2023-02-11 23:59:42.002 +0000 UTC
 Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
@@ -1490,16 +1492,16 @@ Satellite mask:
 Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
 cell mask: fff fft
 2 satellites, 3 signal types, 1 signals
-Satellite ID {range ms}
- 8 {%.3f}
+Satellite ID {approx range - whole, frac, millis, metres}
+ 8 {9, 10, 9.010, 2701059.783}
 Signals:
-Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}
- 8 11 {%.3f, %.3f, 14, true, 15}
+Sat ID Sig ID {(range delta, delta m, range m), (phase range delta, cycles) lock time ind, half cycle ambiguity, Carrier Noise Ratio}
+ 8 11 {(12, 0.214, 2701059.997), (13, 168816.237), 14, true, 15}
 `
 
 	const wantIncompleteMSM4 = `Message type 1074, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
 The type 4 Multiple Signal Message format for the American GPS system.
-Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Time 2023-02-11 23:59:42.002 +0000 UTC
 Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
@@ -1519,7 +1521,7 @@ No Signals
 `
 
 	const wantComplete1077Display = testdata.MessageFrameType1077Heading +
-		"Sent at 2023-02-17 00:00:05 +0000 UTC\n" +
+		"Time 2023-02-17 00:00:05 +0000 UTC\n" +
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)\n" +
 		testdata.MessageFrameType1077HexDump +
 		testdata.WantHeaderFromMessageFrameType1077 + "\n" +
@@ -1549,7 +1551,7 @@ expected message type 1005 got 1077
 `
 	const wantCrazyMSM4 = `Message type 1124, BeiDou Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio
 The type 4 Multiple Signal Message format for China’s BeiDou system.
-Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Time 2023-02-11 23:59:42.002 +0000 UTC
 Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 225 bytes:
 00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
@@ -1573,7 +1575,7 @@ message type 1077 is not an MSM4
 
 	const wantCrazyMSM7 = `Message type 1097, Galileo Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
 The type 7 Multiple Signal Message format for Europe’s Galileo system.
-Sent at 2023-02-11 23:59:42.002 +0000 UTC
+Time 2023-02-11 23:59:42.002 +0000 UTC
 Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)
 Frame length 42 bytes:
 00000000  d3 04 32 43 20 01 00 00  00 04 00 00 08 00 00 00  |..2C ...........|
@@ -1616,24 +1618,7 @@ message type 1074 is not an MSM7
 	msm4 := createMSM4()
 	completeMSM4Message := createRTCMWithMSM4(msm4, startOfWeek)
 
-	// Work out the values for the template and produce the wanted string for the
-	// complete message.
-
-	approxRangeScaled := utils.GetScaledRange(wantRangeWhole, wantRangeFractional, 0)
-
 	const scaleFactor = 0x20000000
-	approxRangeInMillis := float64(approxRangeScaled) / float64(scaleFactor)
-
-	// Use the speed of light to convert that to the distance from the
-	// satellite to the receiver.
-	approxRangeInMetres := approxRangeInMillis * utils.OneLightMillisecond
-
-	rangeFromSignal := msm4.Signals[0][0].RangeInMetres()
-
-	phaseRangeFromSignal := msm4.Signals[0][0].PhaseRange()
-
-	wantCompleteMSM4 :=
-		fmt.Sprintf(resultTemplateMSM4Complete, approxRangeInMetres, rangeFromSignal, phaseRangeFromSignal)
 
 	// The MSM4 within incompleteMessage has just a header
 	incompleteMSM4 := createMSM4()
@@ -1642,7 +1627,7 @@ message type 1074 is not an MSM7
 
 	incompleteMessage := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
 	incompleteMessage.Readable = incompleteMSM4
-	incompleteMessage.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	incompleteMessage.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	incompleteMessage.StartOfWeek =
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 
@@ -1650,13 +1635,13 @@ message type 1074 is not an MSM7
 	// treated as special cases.
 	crazy1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1077)
 	crazyMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrameType1077)
-	crazyMSM4.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	crazyMSM4.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	crazyMSM4.StartOfWeek =
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 	// This one is an MSM4 but the message type is forced to be MSM7.
 	crazyMSM7 := NewMessage(utils.MessageTypeMSM7Galileo, "", testdata.MessageFrameType1074_1)
 	crazyMSM7.MessageType = utils.MessageTypeMSM7Galileo
-	crazyMSM7.SentAt = "Sent at 2023-02-11 23:59:42.002 +0000 UTC"
+	crazyMSM7.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	crazyMSM7.StartOfWeek =
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 
@@ -1796,8 +1781,8 @@ func TestGetTimeDisplayFromTimestamp(t *testing.T) {
 		wantError   string
 		wantDisplay string
 	}{
-		{utils.MessageTypeMSM7Galileo, 3 * 24 * 3600 * 1000, "", "Sent at 2023-02-14 23:59:42 +0000 UTC"},
-		{utils.MessageTypeMSM7GPS, timestampTooBig, "timestamp out of range", "Sent at (timestamp out of range)"},
+		{utils.MessageTypeMSM7Galileo, 3 * 24 * 3600 * 1000, "", "Time 2023-02-14 23:59:42 +0000 UTC"},
+		{utils.MessageTypeMSM7GPS, timestampTooBig, "timestamp out of range", "Time (timestamp out of range)"},
 	}
 	for _, td := range testData {
 

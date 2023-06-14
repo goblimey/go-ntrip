@@ -58,17 +58,20 @@ func New(id, wholeMillis, fractionalMillis uint) *Cell {
 }
 
 func (cell *Cell) String() string {
-
-	var approxRange string
+	var approxRangeDisplay string
 	if cell.RangeWholeMillis == utils.InvalidRange {
-		approxRange = "invalid"
+		approxRangeDisplay = "invalid"
 	} else {
 		// The range values are valid.
-		rangeMillis := utils.GetApproxRangeMetres(cell.RangeWholeMillis, cell.RangeFractionalMillis)
-		approxRange = fmt.Sprintf("%.3f", rangeMillis)
+		approxRangeMilliseconds := utils.GetApproxRangeMilliseconds(cell.RangeWholeMillis, cell.RangeFractionalMillis)
+		approxRangeMetres := utils.GetApproxRangeMetres(cell.RangeWholeMillis, cell.RangeFractionalMillis)
+		approxRangeDisplay = fmt.Sprintf("%d, %d, %.3f, %.3f",
+			cell.RangeWholeMillis, cell.RangeFractionalMillis,
+			approxRangeMilliseconds, approxRangeMetres)
 	}
 
-	return fmt.Sprintf("%2d {%s}", cell.ID, approxRange)
+	return fmt.Sprintf("%2d {%s}",
+		cell.ID, approxRangeDisplay)
 }
 
 // GetSatelliteCells extracts the satellite cell data from an MSM4 message.

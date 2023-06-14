@@ -75,7 +75,7 @@ It was sent on the 1st January 2021 in the early morning.
     000000b0  0d 04 70 ff 11 fe 00 89  c1 0e 6c 3e d8 c2 3a 04  |..p.......l>..:.|
     000000c0  73 e5 be db 70 60 71 93  5a                       |s...p`q.Z|
     
-    Sent at 2021-01-01 00:00:05.001 +0000 UTC
+    Time 2021-01-01 00:00:05.001 +0000 UTC
     Start of Galileo week 2020-12-26 23:59:42 +0000 UTC plus timestamp 432023001 (5d 0h 0m 23s 1ms)
     stationID 0, multiple message, issue of data station 0
     session transmit time 0, clock steering 0, external clock 0

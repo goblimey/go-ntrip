@@ -197,11 +197,11 @@ Satellite mask:
 Signal mask: 0000 0000 0000 0000  0000 0000 0000 0111
 cell mask: fff fft
 2 satellites, 3 signal types, 1 signals
-Satellite ID {range ms}
- 8 {2701059.783}
+Satellite ID {approx range - whole, frac, millis, metres}
+ 8 {9, 10, 9.010, 2701059.783}
 Signals:
-Sat ID Sig ID {range (delta), lock time ind, half cycle ambiguity, Carrier Noise Ratio}
- 8 11 {2701059.997, 168816.237, 14, true, 15}
+Sat ID Sig ID {(range delta, delta m, range m), (phase range delta, cycles) lock time ind, half cycle ambiguity, Carrier Noise Ratio}
+ 8 11 {(12, 0.214, 2701059.997), (13, 168816.237), 14, true, 15}
 `
 
 	const wantIncomplete = `stationID 1, multiple message, issue of data station 3

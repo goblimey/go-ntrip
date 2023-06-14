@@ -31,8 +31,8 @@ func TestNew(t *testing.T) {
 
 func TestString(t *testing.T) {
 
-	const want = `stationID 2, ITRF realisation year 3, ignored 0xf,
-x 12345, ignored 0x1, y 23456, ignored 0x2, z 34567,
+	const want = `stationID 2, ITRF realisation year 3, unknown bits 1111,
+x 12345, unknown bits 01, y 23456, unknown bits 10, z 34567,
 ECEF coords in metres (1.2345, 2.3456, 3.4567)
 `
 

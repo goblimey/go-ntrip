@@ -51,6 +51,20 @@ const MessageTypeMSM7NavicIrnss = 1137
 var MSM4MessageTypes map[int]interface{}
 var MSM7MessageTypes map[int]interface{}
 
+// Scale factors.
+// TwoToThePower10: 100 0000 0000
+const TwoToThePower10 = 0x400
+
+// TwoToThePower2: 1 0000 0000 0000 0000 0000 0000
+const TwoToThePower24 = 0x1000000
+
+// TwoToThePower29: 10 0000 0000 0000 0000 0000 0000 0000
+const TwoToThePower29 = 0x20000000
+
+// TwoToThePower31: 1000 0000 0000 0000 0000 0000 0000 0000
+const TwoToThePower31 = 0x80000000
+
+
 // Handling of timestamps and the equivalent times.
 
 // Multiple Signal Messages contain a thirty-bit timestamp which is the time
@@ -344,9 +358,9 @@ func GetScaledRange(wholeMillis, fractionalMillis uint, delta int) uint64 {
 	//
 	//
 	// The two parts of the approximate value are uint and much bigger than the
-	// delta when scaled, so the result is always positive - the transit time. The
-	// calculation is done on scaled integers rather tham floating point values to
-	// preserve accuracy for as long as possible.
+	// delta when scaled, so the result should be always positive - the transit time.
+	// The calculation is done on scaled integers rather than floating point values
+	// to preserve accuracy for as long as possible.
 	//
 	// Hiving off this part of the calculation into a separate function eases unit
 	// testing.
@@ -415,9 +429,8 @@ func GetScaledPhaseRangeRate(wholeMillis, fractionalMillis int) int64 {
 // GetApproxRangeMilliseconds takes an 8-bit whole value and a 10-bit fractional value (in 1/1024 units)
 // merges them and produces the approximate range in milliseconds.
 func GetApproxRangeMilliseconds(wholeMillis, fractionalMillis uint) float64 {
-	const twoToPowerTen = 0x400 // 100 0000 0000
 	scaledRange := wholeMillis<<10 | fractionalMillis
-	return float64(scaledRange) / twoToPowerTen
+	return float64(scaledRange) / TwoToThePower10
 }
 
 // GetApproxRangeMetres takes an 8-bit whole value and a 10-bit fractional value (in 1/1024 units)
@@ -1129,7 +1142,11 @@ func GetBitsAsInt64(buff []byte, pos uint, len uint) int64 {
 func getScaledValue(v1, shift1, v2, shift2 uint, delta int) uint64 {
 	scaledApprox := (uint64(v1) << shift1) | (uint64(v2) << shift2)
 	// Add the signed delta.
-	scaledResult := uint64(int64(scaledApprox) + int64(delta))
+	sa := int64(scaledApprox)
+	sd := int64(delta)
+	r := sa + sd
+	scaledResult := uint64(r)
+	// scaledResult := uint64(int64(scaledApprox) + int64(delta))
 	return scaledResult
 }
 

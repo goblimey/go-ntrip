@@ -470,7 +470,7 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 // are returned.
 func (rtcmHandler Handler) getTimeDisplayFromTimestamp(messageType int, timestamp uint) (string, error) {
 
-	result := "Sent at "
+	result := "Time "
 
 	sentAt, err := rtcmHandler.getTimeFromTimeStamp(messageType, timestamp)
 	if err != nil {

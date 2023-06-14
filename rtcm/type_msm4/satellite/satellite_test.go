@@ -117,11 +117,7 @@ func TestString(t *testing.T) {
 	// This value (10 0000 0110) represents 0.5.
 	const fracMillis = 0x200
 
-	const satRange = 2.5 * utils.OneLightMillisecond
-
-	const displayTemplate = " 1 {%.3f}"
-
-	wantDisplay := fmt.Sprintf(displayTemplate, satRange)
+	const wantDisplay = " 1 {2, 512, 2.500, 749481.145}"
 
 	satellite := New(1, 2, fracMillis)
 

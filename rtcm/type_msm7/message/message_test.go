@@ -1,7 +1,6 @@
 package message
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -19,25 +18,14 @@ func TestString(t *testing.T) {
 	const rangeWhole uint = 0x80       // 1000 0000 (128 millis)
 	const rangeFractional uint = 0x200 // 10 bits 1000 ... (0.5 millis)
 	const rangeDelta = int(0x40000)    // 20 bits 0100 ...
-	const approxRange = 128.5
-	const twoToPower11 = 0x800 // 1000 0000 0000
-	const twoToPowerMinus11 = 1 / float64(twoToPower11)
-	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
-	const twoToPowerMinus31 = 1 / float64(twoToPower31)
-	const rangeMilliseconds = approxRange + float64(twoToPowerMinus11)
-	const wantApproxRangeInMetres = approxRange * utils.OneLightMillisecond
-	const wantRangeInMetres = rangeMilliseconds * utils.OneLightMillisecond
 	const wavelength = utils.SpeedOfLightMS / utils.Freq2
 	const phaseRangeDelta = 1
-	const wantPhaseRange = (approxRange + (phaseRangeDelta * twoToPowerMinus31)) * utils.OneLightMillisecond / wavelength
 	const signalID1 uint = 16
 	const signalID2 uint = 5
 	const extendedInfo = 5
 
 	const wholePhaseRangeRate = 6
 	const phaseRangeRateDelta = 7000
-	const wantPhaseRangeRateMS = 6.7
-	const wantPhaseRangeDoppler = -1 * (wantPhaseRangeRateMS / wavelength)
 	const lockTimeIndicator = 4
 	const halfCycleAmbiguity = true
 
@@ -69,7 +57,7 @@ func TestString(t *testing.T) {
 	signalRow2 := []signal.Cell{*signalCell2, *signalCell3}
 	signals := [][]signal.Cell{signalRow1, signalRow2}
 
-	resultTemplate := `stationID 2, single message, issue of data station 1
+	const want = `stationID 2, single message, issue of data station 1
 session transmit time 5, clock steering 6, external clock 7
 divergence free smoothing true, smoothing interval 9
 Satellite mask:
@@ -77,18 +65,14 @@ Satellite mask:
 Signal mask: 0000 1000 0000 0001  0000 0000 0000 0000
 cell mask: ft tt
 2 satellites, 2 signal types, 3 signals
-Satellite ID {approx range m, extended info, phase range rate}:
- 1 {%.3f, 5, 6}
+Satellite ID {approx range - whole, frac, millis, metres, extended info, phase range rate}:
+ 1 {128, 512, 128.500, 38523330.853, 5, 6}
  2 {invalid, 5, invalid}
 Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio}:
- 1 16 {%.3f, %.3f, %.3f, %.3f, %d, true, 5}
+ 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), -27.435, (7000, 0.700, 6.700), 4, true, 5}
  2  5 {invalid, invalid, invalid, invalid, 4, true, 6}
  2  5 {invalid, invalid, invalid, invalid, 7, false, 8}
 `
-	want := fmt.Sprintf(resultTemplate,
-		wantApproxRangeInMetres, wantRangeInMetres,
-		wantPhaseRange, wantPhaseRangeDoppler, wantPhaseRangeRateMS,
-		lockTimeIndicator)
 
 	header :=
 		header.New(1077, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask)

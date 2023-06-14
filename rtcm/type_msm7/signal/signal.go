@@ -108,7 +108,14 @@ func (cell *Cell) String() string {
 	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		rangeMillisecs = "invalid"
 	} else {
-		rangeMillisecs = fmt.Sprintf("%.3f", cell.RangeInMetres())
+		// Convert the delta to float and divide by two to the power 29 to restore 
+		// the scale.  That gives the delta in milliseconds.
+		rangeDeltaInMillis := float64(cell.RangeDelta) / float64(utils.TwoToThePower29)
+
+		rangeDeltaInMetres := rangeDeltaInMillis * utils.OneLightMillisecond
+
+		rangeMillisecs = fmt.Sprintf("(%d, %.3f, %.3f)",
+			cell.RangeDelta, rangeDeltaInMetres, cell.RangeInMetres())
 	}
 
 	var phaseRangeMillisecs string
@@ -120,7 +127,8 @@ func (cell *Cell) String() string {
 		// so that must be non-zero.
 		phaseRangeMillisecs = "no wavelength"
 	default:
-		phaseRangeMillisecs = fmt.Sprintf("%.3f", cell.PhaseRange())
+		phaseRangeMillisecs = fmt.Sprintf("(%d, %.3f)",
+			cell.PhaseRangeDelta, cell.PhaseRange())
 	}
 
 	var phaseRangeRateMetresPerSecond string
@@ -132,7 +140,11 @@ func (cell *Cell) String() string {
 		// so that must be non-zero.
 		phaseRangeRateMetresPerSecond = "no wavelength"
 	default:
-		phaseRangeRateMetresPerSecond = fmt.Sprintf("%.3f", cell.PhaseRangeRate())
+		scaledDelta := utils.GetScaledPhaseRangeRate(0, cell.PhaseRangeRateDelta)
+		// The delta is metres per second  scaled up by 10,000.
+		deltaMPerSec := float64(scaledDelta) / 10000
+		phaseRangeRateMetresPerSecond = fmt.Sprintf("(%d, %.3f, %.3f)", 
+			cell.PhaseRangeRateDelta, deltaMPerSec,cell.PhaseRangeRate())
 	}
 
 	// The phase range rate doppler matches the doppler value in Rinex format.
@@ -195,10 +207,7 @@ func (cell *Cell) RangeInMetres() float64 {
 	scaledRange := cell.GetAggregateRange()
 
 	// Convert to float and divide by two to the power 29 to restore the scale.
-	// scaleFactor is two to the power of 29:
-	// 10 0000 0000 0000 0000 0000 0000 0000
-	const scaleFactor = 0x20000000
-	rangeInMillis := float64(scaledRange) / float64(scaleFactor)
+	rangeInMillis := float64(scaledRange) / float64(utils.TwoToThePower29)
 
 	// Use the speed of light to convert that to the distance from the
 	// satellite to the receiver.

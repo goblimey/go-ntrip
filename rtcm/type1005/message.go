@@ -81,9 +81,9 @@ func New(stationID, itrfRealisationYear, ignored1 uint,
 // String returns a text version of a message type 1005
 func (message *Message) String() string {
 
-	display := fmt.Sprintf("stationID %d, ITRF realisation year %d, ignored 0x%x,\n",
+	display := fmt.Sprintf("stationID %d, ITRF realisation year %d, unknown bits %04b,\n",
 		message.StationID, message.ITRFRealisationYear, message.Ignored1)
-	display += fmt.Sprintf("x %d, ignored 0x%x, y %d, ignored 0x%x, z %d,\n",
+	display += fmt.Sprintf("x %d, unknown bits %02b, y %d, unknown bits %02b, z %d,\n",
 		message.AntennaRefX, message.Ignored2, message.AntennaRefY,
 		message.Ignored3, message.AntennaRefZ)
 

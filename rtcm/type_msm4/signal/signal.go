@@ -107,15 +107,21 @@ func (cell *Cell) String() string {
 	if cell.Satellite == nil || cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		rangeM = "invalid"
 	} else {
-		r := cell.RangeInMetres()
-		rangeM = fmt.Sprintf("%.3f", r)
+		// Convert the delta to float and divide by two to the power 24 to restore
+		// the scale.  This gives the delta in milliseconds.
+		rangeDeltaInMillis := float64(cell.RangeDelta) / float64(utils.TwoToThePower24)
+
+		rangeDeltaInMetres := rangeDeltaInMillis * utils.OneLightMillisecond
+
+		rangeM = fmt.Sprintf("(%d, %.3f, %.3f)",
+			cell.RangeDelta, rangeDeltaInMetres, cell.RangeInMetres())
 	}
 	var phaseRange string
 	if cell.Satellite == nil || cell.Satellite.RangeWholeMillis == utils.InvalidRange {
 		phaseRange = "invalid"
 	} else {
-		pr := cell.PhaseRange()
-		phaseRange = fmt.Sprintf("%.3f", pr)
+		phaseRange = fmt.Sprintf("(%d, %.3f)",
+			cell.PhaseRangeDelta, cell.PhaseRange())
 	}
 	return fmt.Sprintf("%s %2d {%s, %s, %d, %v, %d}",
 		satID, cell.ID, rangeM, phaseRange,
@@ -351,10 +357,10 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 	return scaledPhaseRange
 }
 
-// RangeInMetres gives the distance from the satellite to the GPS device derived from
-// the satellite and signal cell, in metres.
-func (cell *Cell) RangeInMetres() float64 {
+// RangeInMillis gives the distance from the satellite to the GPS device derived from
+// the satellite and signal cell as the transit time in milliseconds.
 
+func (cell *Cell) RangeInMillis() float64 {
 	// Get the range as a 37-bit scaled integer, 8 bits whole, 29 bits fractional
 	// representing the transit time in milliseconds.
 	scaledRange := cell.GetAggregateRange()
@@ -365,6 +371,15 @@ func (cell *Cell) RangeInMetres() float64 {
 	const scaleFactor = 0x20000000
 	// Restore the scale to give the range in milliseconds.
 	rangeInMillis := float64(scaledRange) / float64(scaleFactor)
+
+	return rangeInMillis
+}
+
+// RangeInMetres gives the distance from the satellite to the GPS device derived from
+// the satellite and signal cell, in metres.
+func (cell *Cell) RangeInMetres() float64 {
+
+	rangeInMillis := cell.RangeInMillis()
 
 	// Use the speed of light to convert that to the distance from the
 	// satellite to the receiver.

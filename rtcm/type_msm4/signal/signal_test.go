@@ -130,7 +130,7 @@ func TestGetSignalCells(t *testing.T) {
 		satellite.New(wantSatelliteID[0], wantRangeWhole[0], wantRangeFractional[0]),
 		satellite.New(wantSatelliteID[1], wantRangeWhole[1], wantRangeFractional[1]),
 	}
-	
+
 	wantID := []uint{signalID0, signalID1, signalID0}
 	wantWavelength := []float64{wavelength0, wavelength1, wavelength0}
 	wantRangeDelta := []int{8193, -1, 0}
@@ -139,7 +139,6 @@ func TestGetSignalCells(t *testing.T) {
 	wantHalfCycleAmbiguity := []bool{true, false, true}
 	wantCarrierToNoiseRatio := []uint{33, 0, 32}
 
-	
 	want := make([]Cell, 0)
 
 	for i := range wantID {
@@ -183,7 +182,6 @@ func TestGetSignalCells(t *testing.T) {
 	if !cmp.Equal(got[0][1], want[1]) {
 		t.Errorf("expected [0][1]\n%v got\n%v", want[1], got[0][1])
 	}
-
 
 	if !cmp.Equal(got[1][0], want[2]) {
 		t.Errorf("expected [1][0]\n%v got\n%v", want[2], got[1][0])
@@ -574,6 +572,12 @@ func TestString(t *testing.T) {
 
 	wantPhaseRange := phaseRangeMetres / wavelength
 
+	const wantAllValuesTemplate = " 1  2 {(8192, 146.383, %.3f), (1048576, %.3f), 7, true, 8}"
+
+	wantAllValuesDisplay := fmt.Sprintf(wantAllValuesTemplate, wantRange, wantPhaseRange)
+
+	const wantNilSatelliteDisplay = "<nil>  2 {invalid, invalid, 7, true, 8}"
+
 	satCell := satellite.New(satelliteID, rangeWhole, rangeFractional)
 
 	var testData = []struct {
@@ -589,9 +593,9 @@ func TestString(t *testing.T) {
 		Want               string // expected result
 	}{
 		{"all values", 2, satCell, rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, wavelength,
-			fmt.Sprintf(" 1  2 {%.3f, %.3f, 7, true, 8}", wantRange, wantPhaseRange)},
+			wantAllValuesDisplay},
 		{"nil satellite", 2, nil, rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, 0.0,
-			"<nil>  2 {invalid, invalid, 7, true, 8}"},
+			wantNilSatelliteDisplay},
 	}
 	for _, td := range testData {
 		cell := *New(

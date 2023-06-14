@@ -96,8 +96,8 @@ Frame length 25 bytes:
 00000000  d3 00 13 3e d0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
 00000010  47 80 00 05 46 4e 5b 90  5f                       |G...FN[._|
 
-stationID 2, ITRF realisation year 3, ignored 0xf,
-x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
+stationID 2, ITRF realisation year 3, unknown bits 1111,
+x 123456, unknown bits 01, y 234567, unknown bits 10, z 345678,
 ECEF coords in metres (12.3456, 23.4567, 34.5678)
 `
 
@@ -132,8 +132,8 @@ Frame length 27 bytes:
 00000000  d3 00 15 3e e0 02 0f c0  00 01 e2 40 40 00 03 94  |...>.......@@...|
 00000010  47 80 00 05 46 4e 02 01  9f 72 f4                 |G...FN...r.|
 
-stationID 2, ITRF realisation year 3, ignored 0xf,
-x 123456, ignored 0x1, y 234567, ignored 0x2, z 345678,
+stationID 2, ITRF realisation year 3, unknown bits 1111,
+x 123456, unknown bits 01, y 234567, unknown bits 10, z 345678,
 ECEF coords in metres (12.3456, 23.4567, 34.5678)
 Antenna height 0.0513
 `
@@ -225,7 +225,7 @@ const MessageFrameType1077Heading = `Message type 1077, GPS Full Pseudoranges an
 The type 7 Multiple Signal Message format for the USA’s GPS system.
 `
 
-const MessageFrameType1077SentAt = "Sent at: 2023-05-13 23:59:42.002 +0000 UTC\n"
+const MessageFrameType1077SentAt = "Time: 2023-05-13 23:59:42.002 +0000 UTC\n"
 
 const MessageFrameType1077StartOfWeek = "Start of GPS week 2023-05-13 23:59:42.000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)\n"
 
@@ -260,32 +260,32 @@ cell mask: tt ft tf tt tt tt tt tt
 8 satellites, 2 signal types, 14 signals`
 
 // The expected display of the satellite list of the message in MessageFrameType1077.
-const WantSatelliteListFromMessageFrameType1077 = `Satellite ID {approx range m, extended info, phase range rate}:
- 4 {24410542.339, 0, -135}
- 9 {25264833.738, 0, 182}
-16 {22915678.774, 0, 597}
-18 {21506595.669, 0, 472}
-25 {23345166.602, 0, -633}
-26 {20661965.550, 0, 292}
-29 {21135953.821, 0, -383}
-31 {21670837.435, 0, -442}`
+const WantSatelliteListFromMessageFrameType1077 = `Satellite ID {approx range - whole, frac, millis, metres, extended info, phase range rate}:
+ 4 {81, 435, 81.425, 24410542.339, 0, -135}
+ 9 {84, 281, 84.274, 25264833.738, 0, 182}
+16 {76, 449, 76.438, 22915678.774, 0, 597}
+18 {71, 756, 71.738, 21506595.669, 0, 472}
+25 {77, 892, 77.871, 23345166.602, 0, -633}
+26 {68, 943, 68.921, 20661965.550, 0, 292}
+29 {70, 514, 70.502, 21135953.821, 0, -383}
+31 {72, 293, 72.286, 21670837.435, 0, -442}`
 
 // The expected display of the signal list of the message in MessageFrameType1077
 const WantSignalListFromMessageFrameType1077 = `Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio}:
- 4  2 {24410527.355, 128278179.264, 709.992, -135.107, 582, false, 640}
- 4 16 {24410523.313, 99956970.352, 553.242, -135.107, 581, false, 608}
- 9 16 {25264751.952, 103454935.508, -745.762, 182.123, 179, false, 464}
-16  2 {22915780.724, 120423177.179, -3139.070, 597.345, 529, false, 640}
-18  2 {21506547.550, 113017684.727, -2482.645, 472.432, 579, false, 704}
-18 16 {21506542.760, 88065739.822, -1934.473, 472.418, 578, false, 608}
-25  2 {23345103.037, 122679365.321, 3327.570, -633.216, 646, false, 640}
-25 16 {23345100.838, 95594272.692, 2592.793, -633.187, 623, false, 560}
-26  2 {20662003.308, 108579565.367, -1538.436, 292.755, 596, false, 736}
-26 16 {20662000.914, 84607418.613, -1198.760, 292.749, 596, false, 672}
-29  2 {21136079.188, 111070868.860, 2016.750, -383.775, 628, false, 736}
-29 16 {21136074.598, 86548719.034, 1571.474, -383.770, 628, false, 656}
-31  2 {21670772.711, 113880577.055, 2325.559, -442.539, 624, false, 736}
-31 16 {21670767.783, 88738155.231, 1812.168, -442.550, 624, false, 640}`
+ 4  2 {(-26835, -14.985, 24410527.355), (-117960, 128278179.264), 709.992, (-1070, -0.107, -135.107), 582, false, 640}
+ 4 16 {(-34073, -19.027, 24410523.313), (-209715, 99956970.352), 553.242, (-1074, -0.107, -135.107), 581, false, 608}
+ 9 16 {(-146464, -81.787, 25264751.952), (-586368, 103454935.508), -745.762, (1227, 0.123, 182.123), 179, false, 464}
+16  2 {(182573, 101.950, 22915780.724), (643982, 120423177.179), -3139.070, (3452, 0.345, 597.345), 529, false, 640}
+18  2 {(-86172, -48.119, 21506547.550), (-324858, 113017684.727), -2482.645, (4316, 0.432, 472.432), 579, false, 704}
+18 16 {(-94749, -52.909, 21506542.760), (-304805, 88065739.822), -1934.473, (4180, 0.418, 472.418), 578, false, 608}
+25  2 {(-113833, -63.565, 23345103.037), (-426921, 122679365.321), 3327.570, (-2155, -0.215, -633.216), 646, false, 640}
+25 16 {(-117772, -65.765, 23345100.838), (-493304, 95594272.692), 2592.793, (-1865, -0.186, -633.187), 623, false, 560}
+26  2 {(67617, 37.758, 20662003.308), (277463, 108579565.367), -1538.436, (7546, 0.755, 292.755), 596, false, 736}
+26 16 {(63330, 35.364, 20662000.914), (216377, 84607418.613), -1198.760, (7494, 0.749, 292.749), 596, false, 672}
+29  2 {(224508, 125.367, 21136079.188), (929467, 111070868.860), 2016.750, (-7747, -0.775, -383.775), 628, false, 736}
+29 16 {(216288, 120.777, 21136074.598), (912065, 86548719.034), 1571.474, (-7701, -0.770, -383.770), 628, false, 656}
+31  2 {(-115909, -64.724, 21670772.711), (-602908, 113880577.055), 2325.559, (-5391, -0.539, -442.539), 624, false, 736}
+31 16 {(-124734, -69.652, 21670767.783), (-527266, 88738155.231), 1812.168, (-5499, -0.550, -442.550), 624, false, 640}`
 
 const WantMessageFrameType1077Display = MessageFrameType1077Heading +
 	MessageFrameType1077SentAt +
@@ -521,7 +521,7 @@ var GlonassMSM7WithIllegalDay = []byte{
 
 const GlonassMSM7WithIllegalDayDisplay = `Message type 1087, GLONASS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
 The type 7 Multiple Signal Message format for the Russian GLONASS system.
-Sent at (timestamp out of range)
+Time (timestamp out of range)
 Start of Glonass week 2023-02-11 21:00:00 +0000 UTC plus timestamp out of range - 0x3c000001 (7/67108865)
 Frame length 201 bytes:
 00000000  d3 00 c3 43 f0 00 f0 00  00 06 00 00 04 0e 03 80  |...C............|

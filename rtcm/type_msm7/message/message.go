@@ -52,7 +52,7 @@ func (message *Message) DisplaySatelliteCells() string {
 
 	heading := ""
 
-	heading = "Satellite ID {approx range m, extended info, phase range rate}:\n"
+	heading = "Satellite ID {approx range - whole, frac, millis, metres, extended info, phase range rate}:\n"
 
 	body := ""
 	for i := range message.Satellites {

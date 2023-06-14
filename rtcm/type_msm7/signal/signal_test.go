@@ -1,7 +1,6 @@
 package signal
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -831,13 +830,6 @@ func TestGetSignalCellsWithShortBitStream(t *testing.T) {
 
 func TestString(t *testing.T) {
 
-	// Scale factors
-	const twoToPower29 = 0x20000000 // 0010 0000 0000 0000 0000 0000 0000 0000
-	const twoToPowerMinus29 = 1 / float64(twoToPower29)
-	const twoToPower31 = 0x80000000 // 1000 0000 0000 0000 0000 0000 0000 0000
-	const twoToPowerMinus31 = 1 / float64(twoToPower31)
-
-	// These values and results are copied from some of the above tests.
 	const signalID uint = 16
 	const extendedInfo = 5
 	const rangeWhole uint = 0x80       // 1000 0000 (128 millis)
@@ -852,14 +844,13 @@ func TestString(t *testing.T) {
 	const cnr = 5
 	const wavelength = utils.SpeedOfLightMS / utils.Freq2
 
-	const rangeMilliseconds = 128.5 + 1/float64(2048)
-	const wantRangeMetres float64 = rangeMilliseconds * utils.OneLightMillisecond
-	const wantPhaseRangeRateMetresPerSecond = 6.789
-	const wantPhaseRangeRateDoppler = -27.8
-	// Phase Range
-	const phaseRangeMilliseconds = 128.5 + float64(twoToPowerMinus31*float64(phaseRangeDelta))
-	phaseRangeLightMilliseconds := phaseRangeMilliseconds * utils.OneLightMillisecond
-	wantPhaseRangeWhenAllValid := phaseRangeLightMilliseconds / wavelength
+	const wantDisplayAllValid = " 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), -27.800, (7890, 0.789, 6.789), 4, true, 5}"
+
+	const wantDisplayInvalidRange = " 1 16 {invalid, invalid, -27.800, (7890, 0.789, 6.789), 4, true, 5}"
+
+	const wantInvalidPhaseRangeRate = " 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), invalid, invalid, 4, true, 5}"
+
+	const wantDisplayZeroWavelength = " 1 16 {(262144, 146.383, 38523477.236), no wavelength, no wavelength, no wavelength, 4, true, 5}"
 
 	invalidRangeDeltaBytes := []byte{0x80, 0x00, 0x00} // 20 bits plus filler: 1000 0000 0000 0000 0000 filler 0000
 	invalidRangeDelta := int(utils.GetBitsAsInt64(invalidRangeDeltaBytes, 0, 20))
@@ -900,29 +891,16 @@ func TestString(t *testing.T) {
 		want        string
 	}{
 		{
-			"all valid", signalCellAllValid,
-			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, %.3f, %.3f, %d, %v, %d}",
-				wantRangeMetres, wantPhaseRangeWhenAllValid,
-				wantPhaseRangeRateDoppler, wantPhaseRangeRateMetresPerSecond,
-				lockTimeIndicator, halfCycleAmbiguity, cnr),
+			"all valid", signalCellAllValid, wantDisplayAllValid,
 		},
 		{
-			"invalid range", signalCellWithInvalidRange,
-			fmt.Sprintf(" 1 16 {invalid, invalid, %.3f, %.3f, %d, %v, %d}",
-				wantPhaseRangeRateDoppler, wantPhaseRangeRateMetresPerSecond,
-				lockTimeIndicator, halfCycleAmbiguity,
-				cnr),
+			"invalid range", signalCellWithInvalidRange, wantDisplayInvalidRange,
 		},
 		{
-			"invalid phase range rate", signalCellWithInvalidPhaseRangeRate,
-			fmt.Sprintf(" 1 16 {%8.3f, %8.3f, invalid, invalid, %d, %v, %d}",
-				wantRangeMetres, wantPhaseRangeWhenAllValid,
-				lockTimeIndicator, halfCycleAmbiguity, cnr),
+			"invalid phase range rate", signalCellWithInvalidPhaseRangeRate, wantInvalidPhaseRangeRate,
 		},
 		{
-			"zero wavelength", signalCellWithZeroWavelength,
-			fmt.Sprintf(" 1 16 {%8.3f, no wavelength, no wavelength, no wavelength, %d, %v, %d}",
-				wantRangeMetres, lockTimeIndicator, halfCycleAmbiguity, cnr),
+			"zero wavelength", signalCellWithZeroWavelength, wantDisplayZeroWavelength,
 		},
 	}
 

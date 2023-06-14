@@ -140,11 +140,7 @@ func TestString(t *testing.T) {
 	const extendedInfo = 3
 	const phaseRangeRate = 4
 
-	const satRange = 2.5 * utils.OneLightMillisecond
-
-	const displayTemplate = " 1 {%.3f, 3, 4}"
-
-	wantDisplay := fmt.Sprintf(displayTemplate, satRange)
+	const wantDisplay = " 1 {2, 512, 2.500, 749481.145, 3, 4}"
 
 	satellite := New(1, wholeMillis, fracMillis, extendedInfo, phaseRangeRate)
 
@@ -187,11 +183,7 @@ func TestStringWithInvalidPhaseRangeRate(t *testing.T) {
 	invalidRangeBits := []byte{0x20, 0, 0} // 0010 0000 0000 0000
 	phaseRangeRate := int(utils.GetBitsAsInt64(invalidRangeBits, 2, 14))
 
-	const satRange = (2 + (float64(rangeFrac) * 1.0 / 1024)) * utils.OneLightMillisecond
-
-	const displayTemplate = " 1 {%.3f, 3, invalid}"
-
-	wantDisplay := fmt.Sprintf(displayTemplate, satRange)
+	const wantDisplay = " 1 {2, 1, 2.001, 599877.682, 3, invalid}"
 
 	satellite := New(1, rangeWhole, rangeFrac, extendedInfo, phaseRangeRate)
 

@@ -1,7 +1,5 @@
 github.com/goblimey/go-crc24q v0.0.0-20210107174841-6ea518daa3aa h1:crIt+q/C1L+lDNm3l7Dhptrx1iQFgpA528DweYPHguM=
 github.com/goblimey/go-crc24q v0.0.0-20210107174841-6ea518daa3aa/go.mod h1:lgg7ueDT7pHpbvSm/IscR1RwdZaGC0vls868slx6FS4=
-github.com/goblimey/go-ntrip/rtcm v0.0.0-20210805101218-5225a154e8da h1:uqEFIHDCAnxbVVO6Unt+T97SNFM8jJrxoWiQc1/+H6U=
-github.com/goblimey/go-ntrip/rtcm v0.0.0-20210805101218-5225a154e8da/go.mod h1:eLdBuX4QQlZNvXeuwcZL+KjXaDTxSys2Nym3DALFFUg=
 github.com/goblimey/go-tools v0.0.10 h1:uB625XRmYT/Pkov7XQCfYN7J6sfsHdGdngZ0sHnbjY8=
 github.com/goblimey/go-tools v0.0.10/go.mod h1:xj+Lwg218Sy2BpQs1+S3k/7XUBBl0s8b3L1OwfNFRHw=
 github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=

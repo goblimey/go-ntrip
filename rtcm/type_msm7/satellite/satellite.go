@@ -88,12 +88,15 @@ func New(id, wholeMillis, fractionalMillis, extendedInfo uint, phaseRangeRate in
 func (cell *Cell) String() string {
 
 	var approxRange string
-	if cell.RangeWholeMillis == InvalidRange {
+	if cell.RangeWholeMillis == utils.InvalidRange {
 		approxRange = "invalid"
 	} else {
 		// The range values are valid.
-		rangeMillis := utils.GetApproxRangeMetres(cell.RangeWholeMillis, cell.RangeFractionalMillis)
-		approxRange = fmt.Sprintf("%.3f", rangeMillis)
+		approxRangeMillis := utils.GetApproxRangeMilliseconds(cell.RangeWholeMillis, cell.RangeFractionalMillis)
+		approxRangeMetres := utils.GetApproxRangeMetres(cell.RangeWholeMillis, cell.RangeFractionalMillis)
+		approxRange = fmt.Sprintf("%d, %d, %.3f, %.3f",
+			cell.RangeWholeMillis, cell.RangeFractionalMillis,
+			approxRangeMillis, approxRangeMetres)
 	}
 
 	var phaseRangeRate string
