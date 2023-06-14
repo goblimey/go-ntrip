@@ -37,8 +37,8 @@ GNSS receivers are available that can use all satellites from those constellatio
 in any combination.
 
 A GNSS device's position can be expressed in all sorts of ways.
-This paper from the UK's mapping authority the Ordnance Survey
-gives an excellent introduction https://www.ordnancesurvey.co.uk/documents/resources/guide-coordinate-systems-great-britain.pdf
+[This paper](https://www.ordnancesurvey.co.uk/documents/resources/guide-coordinate-systems-great-britain.pdf) from the UK's mapping authority the Ordnance Survey
+gives an excellent introduction.
 
 Since the satellites are orbiting around the Earth,
 ECEF format is a fairly natural way to represent a position.
@@ -49,22 +49,44 @@ to the centre.  The Z axis is perpendicular to the other two.
 The Earth is almost a sphere,
 but not quite.
 It spins on its axis, which stretches it slightly at the Equator,
-making it a slightly irregular elipsoid.
-Geographers have defined a perfect elipsoid that's close to the earth's real shape.
-A position in ECEF format can be converted to Longitude, Latitude and the Height above or below this elipsoid.
+making it a slightly irregular ellipsoid.
+Geographers have defined a perfect ellipsoid that's close to the Earth's real shape.
 
 There's another solid shape called the Geoid
-which also approximates to the shape of the Earth.
-("Geiod" is just Latin for "Earth-shaped".)
-The height of a position can be expressed as the geoidal height, the distance above or below the Geoid.
+(which is just "Earth-shaped" in Latin).
+According to Wikipedia:
+"The geoid is the shape that the ocean surface would take under the influence of the gravity of Earth, including gravitational attraction and Earth's rotation, if other influences such as winds and tides were absent. This surface is extended through the continents."
+So the Ellipsoid is a regular solid that approximates to the shape of the Earth
+and the Geoid is an irregular solid that also approximates to the shape of the Earth.
+[This page](https://www.usgs.gov/faqs/what-geoid-why-do-we-use-it-and-where-does-its-shape-come)
+has more details, including a useful diagram.
 
-A GNSS device on the ground receives signals from the satellites and uses trigonometry to find its position.  It needs signals from 4 satellites to do that.  A multi-constellation receiver can use signals from all of the constellation.  In good conditions a receiver can see upwards of twenty satellites at any time.  
+A position on the earth's surface can be represented as a longitude, a latitude and a height.
+The height can be expressed as the geoidal height, the distance above or below the Geoid, the Ellipsoidal height, the distance above or below the Ellipsoid,
+or the height above local Mean Sea Level (MSL).
+The distance will be different in each case and it's easy to get confused between the three systems.
 
-Given signals from four satellites a single receiver can find its position to within a few metres.
-Seeing more satellites allow a faster fix but doesn't produce more accuracy.
-This is acceptable for vehicle navigation
+A GNSS device on the ground receives signals from the satellites and uses something like
+trigonometry to find its position.  
+Internally it uses ECEF notation,
+but that can be converted directly to Longitude, latitude
+and any of the three measures of height.
+The device needs signals from 4 satellites to do that.  A multi-constellation receiver can use signals from all of the constellation.  In good conditions a receiver can see upwards of twenty satellites at any time.  
+
+(I say "something like trigonometry" because the device uses the signals from the satellites
+to find its position and the precise time.
+You probably haven't noticed,
+but the SatNav in your car always knows the right time
+but you never have to set its clock.
+Actually, it's probably the most accurate timepiece that you own.)
+
+To do this, the device needs to receive signals from four satellites.
+(Four data inputs to calculate four numbers - X,Y,Z and Time.)
+On its own, the receiver can figure out its position to within a few metres.
+Seeing more satellites allows a faster calculation but doesn't produce more accuracy.
+This accuracy is acceptable for vehicle navigation
 but other purposes such as land surveying
-require greater accuracy.  
+require greater accuracy.
 
 More accuracy is possible using two receivers within a few kilometers of each other.
 The signals from the positioning satellites suffer distortion, particularly as they pass through the ionosphere on their way to the Earth.
@@ -80,15 +102,13 @@ https://nbmg.unr.edu/staff/pdfs/blewitt%20basics%20of%20gps.pdf
 or just search for title on Google.
 
 Some readers might find the maths in the paper a bit advanced,
-so here is a simple explanation
-(probably oversimplified):
+so here is a simplified (actually oversimplified) explanation:
 
 White light is composed of light of different colours,
 each at a different frequency.
 When a beam of white light passes through a prism,
-it's broken up into a spectrum of colours.
-This is because the different frequencies travel along different paths
-through the prism and emerge at different angles.
+the different beams are distorted in different ways
+and the result is a patch of light broken up into a spectrum of colours.
 
 When a signal from a satellite travels to a GNSS receiver on the ground
 it passes through the ionosphere
@@ -96,29 +116,27 @@ and is distorted,
 like the light passing through a prism.
 The receiver uses the transit time of the signal
 to calculate the distance to the satellite,
-but the signal didn't travel in a straight line,
+but the signal was distorted,
 so the resulting distance is slightly wrong.
 Without more information
 the receiver can only estimate its position to within a few metres
 
-The curent generation of GNSS satellites broadcast signals on two frequency bands.
+The current generation of GNSS satellites broadcast signals on two frequency bands.
 The ionosphere distorts signals on each frequency band differently,
-so two signals from the same satellite
-sent at the same time travel along different paths,
-neither a straight line,
-and arrive at the GNSS receiver at slightly different times.
-A GNSS receiver uses the transit time to calculate the distance to the satellite,
-so it ends up with two notions of that distance,
+so two signals sent by the satellite at the same time
+arrive at the receiver at slightly different times.
+So it ends up with two notions of that distance,
 both slightly wrong.
 
-Each base station is in a known fixed position.
-It has a dual-band receiver so it can receive signals on both frequency bands.
+Correcting the errors requires a receiver in a known fixed position
+(a base station)
+with a dual-band receiver so it can receive signals on both frequency bands.
 It scans for signals from all the satellites it can see
 and broadcasts
 those data, plus its correct position.
 
 Moving receivers (rovers) which are close to the base station receive signals from the same
-satellites
+satellites,
 distorted in the same way.
 A rover can use the information from the base station to correct its calculation of its own position.
 
@@ -127,11 +145,11 @@ and can only see some of the signals.
 That's useful because single-band receivers are cheaper.
 
 Some of the signals are sent in plain text,
-others are encrypted and meant for the owner's police force, military etc.
+others may be encrypted and meant for the owner's police force, military etc.
 A receiver that you and I can buy
-can't decrypt the encrypted signals but it can still see how the carrier wave is distorted
-and analysing that is enough to better estimate the effect of the ionosphere on the plain-text signals
-that it can make use of.
+can't decrypt the encrypted signals but it can still see how the carrier wave is distorted.
+Analysing those distortions is enough to better correct the effect of the ionosphere on the plain-text signals
+that it can make understand.
 
 In ideal conditions a rover within about 8km of a base station and receiving data from it
 can estimate its position to within 2cm.
@@ -141,16 +159,22 @@ within 24km an accuracy of 8cm, and so on.
 At about 64 km the RTCM data only allows about 2.5m accuracy,
 which is close to what the rover can achieve without help.
 
+The base station can send out its observations using Long Range Radio (LoRa)
+or over the Internet using NTRIP
+(Networked Transmission of RTCM over the Internet Protocol).
+A rover used for surveying typically uses the surveyor's mobile phone to act
+as an Internet modem.
+
 Unfortunately, we don't live in ideal conditions.
 Here in the real world we get less accuracy.
 I'm currently trying to figure out how accurate my equipment is,
 but that's work in progress.
 
 Accurate GNSS systems are also easier and faster to use than theodolites.
-The UK's mapping authority the Ordnance Survey has been using satellit positioning
+The UK's mapping authority the Ordnance Survey has been using satellite positioning
 for many years.
 In the early days the equipment was expensive but now
-a base and rover communicating via RTCM can cost as little as $2,000
+a base and rover set can cost less than $1,000
 and one base can support many rovers.
 
 For RTCM correction to work properly, the operator has to figure out the base station's precise position.
@@ -171,11 +195,11 @@ The Caster
 To avoid the rover or the base station needing a fixed Internet (IP) address,
 they communicate via an intermediate device called an NTRIP caster (broadcaster).
 The caster is just a web server on the Internet so
-it doesn't need to be close to the base station or the rover, 
+it doesn't need to be physically close to the base station or the rover, 
 it can be anywhere.
 
 The caster offers a set of named endpoints.
-each rover connects to the caster and subscribes to an NTRIP feed from one endpoint.
+Each rover connects to the caster and subscribes to an NTRIP feed from one endpoint.
 
 In the simple case, each endpoint is fed by a single base station,
 (so endpoint equals base station).
@@ -237,7 +261,8 @@ and passes it to the NTRIP server, which sends it on to my caster.
 My NTRIP caster is the free open source version from IGS.
 It runs on a Digital Ocean droplet which costs $5 per month to rent.
 
-My rover is an Emlid Reach M+, which costs about $300 and uses my smartphone to provide an Internet connection in the field. 
+My rover is an Emlid Reach M+, which costs about $300 including antenna
+and uses my smartphone to provide an Internet connection in the field. 
 
 
 RTCM
@@ -248,8 +273,8 @@ RTCM3 messages are in a
 compact binary form and not readable by eye.
 The format is described by RTCM STANDARD 10403.3
 Differential GNSS (Global Navigation Satellite Systems) Services –
-Version 3 (RTCM3 10403.3).  This is not an open source standard and
-it costs about $300 to buy a copy.  
+Version 3 (RTCM3 10403.3).  This is not an open source standard.
+It costs about $300 to buy a copy.  
 
 The standard defines a large number of message types,
 each with its own format.  Fortunately most of them are redundant.
@@ -258,8 +283,11 @@ A complete NTRIP service can be created using just six or seven types of message
 There is a little bit of useful information scattered around
 various public web pages.  
 There's also an open source library of C code to handle them, RTKLIB.
+This was my main source of information about RTCM
+and
 I've copied some of
-the more relevant RTKLIB source files into this repository as a handy reference.
+the more relevant RTKLIB source files into this repository as a handy reference
+for other programmers.
 
 There are already open-source tools available to convert an RTCM3 data stream into messages
 in another format called RINEX.  That's an open standard and the result is human readable. 
@@ -267,16 +295,17 @@ in another format called RINEX.  That's an open standard and the result is human
 To figure out the format of the RTCM message I'm
 interested in, I read what I could find, including the RTKLIB source code.
 Then I took the RTCM3 messages
-that my device produced, used the tools to convert them into RINEX format and examined
-the result. 
+that my device produced, used the tools to convert them into RINEX format
+and checked that I got the same numbers in both cases.
 These data form some of my unit and integration tests.
 
 There are many hundreds of RTCM3 message types,
 but they are not all required to find an accurate position,
 and some that can be used for that are redundant,
-replaced by Multiple Signal Messages (MSMs),
-which carry the observations of signals from satellites.
-There is an MSM for each constellation, so I'm interested in:
+replaced by Multiple Signal Messages (MSMs).
+MSMs carry the observations of signals from satellites.
+There is an MSM for each constellation, so I'm interested in
+these message types:
 
 * 1074 type 4 (low resolution) observations of signals from GPS satellites
 * 1077 type 7 (high resolution) observations of signals from GPS satellites
@@ -287,7 +316,7 @@ There is an MSM for each constellation, so I'm interested in:
 * 1124 type 4 for Beidou
 * 1127 type 7 for Beidou
 
-A base station should be configured to send either MSM4 or MSM7 messages.
+A base station should be configured to send out either MSM4 or MSM7 messages.
 Sending both just wastes bandwidth.
 
 MSM type 7 messages
@@ -300,15 +329,22 @@ and many operators use MSM4 instead of MSM7.
 I don't know if MSM7 messages have any operational advantage over MSM4
 for 2cm accurate working.
 
-UBlox advises that if a rover based on their technology uses GLONASS MSMs (type 4 or 7)
+UBlox advises that if a rover based on their technology uses GLONASS MSMs (mssage type 1084 or 1087)
 the base station should also send
 messages of type 1230
 GLONASS code-phase bias values.
 Unfortunately
-the RTKLIB software doesn't have functionality to decode one of those.
+the RTKLIB software doesn't have functionality to decode one of those,
+so I have no idea what's in them.
+(Mind you, the ones that my equipment receives
+seem to contain just a string of zeroes.)
 
-Apart from MSM material, a rover also needs type 1005 messages,
+
+Apart from MSM material, a rover also needs type 1005 or 1006 messages,
 which give the position of the base station.
+(1005 gives just the position,
+1006 gives the position plus the height of the base station above
+the ground.)
 
 The UBlox ZED-F9P Integration Manual (2022-02 edition) 
 section 3.1.5.5.3 'Base station: RTCM output conﬁguration'
@@ -321,33 +357,8 @@ recommends that the base station sends these messages:
 * RTCM 1124 BeiDou MSM4
 * RTCM 1230 GLONASS code-phase biases
 
-The RTKLIB software decodes all of these except for type 1230,
-so I can reverse-engineer the first five types.
-
-Types 1074, 1084, 1094 and 1134 are Type 4 Multiple Signal Messages (MSM4).
-Type 7 (MSM7) messages can be used instead - 1077, 1087, 1097 and 1127.
-Type 7 messages contain the same information as type 4 but some fields
-are of higher
-resolution.
-(The resolution of MSM4 is sufficient for 2cm accuracy.)
-
-The Integration Manual also mentions two 
-u-blox proprietary message types:
-
-* 4072.0 Reference station PVT and
-* 4072.1 Additional reference station information,
-
-It appears that these are only required to handle
-a moving base station,
-and 4072.1 is only used by old firmware.
-Type 4072.0 appears to give the base position
-(possibly because message type 1005 is intended to describe
-the position of a fixed base station and
-the values are not expected to change).
-The format of those two message types is not published
-so they are not handled by this software.
-
-So a working base station might be configured to send out messages of type 1005, 1074, 1084, 1094, 1124 and 1230.  Alternatively it could use high resolution MSMs, so 1005, 1077, 1087, 1097, 1127 and 1230.
+As I said, MSM7 messages can be used instead of MSM4 - message types 1077, 1087, 1097 and 1127.
+So a working fixed base station might be configured to send out messages of type 1005, 1074, 1084, 1094, 1124 and 1230.  Alternatively it could use high resolution MSMs, so 1005, 1077, 1087, 1097, 1127 and 1230.
 
 Ideally the base should send most of those messages once per second.
 Type 1005 can be sent out less often.
@@ -360,6 +371,21 @@ it will receive a type 1005 within a few seconds.
 It takes a while for it to download the information it needs from the satellites,
 so a short wait for a base position message is OK.
 
+The U-Blox Integration Manual also mentions two U-Blox proprietary message types:
+
+* 4072.0 Reference station PVT and
+* 4072.1 Additional reference station information,
+
+It appears that these are only required to handle
+a moving base station.
+Type 4072.1 is only used by old firmware,
+so we can ignore it.
+Type 4072.0 appears to give the position of a moving base station as it moves
+so if you have a fixed base station, it's irrelevant.
+
+UBlox doesn't publish the format of those two message types
+so my software doesn't interpret them.
+
 The RTKLIB source code has functionality to decode most RTCM messages,
 so if you need to understand other message types, go there.
 However, that code can be difficult to follow and comments are scant.
@@ -369,10 +395,14 @@ RTCM Format
 
 An RTCM3 message is binary and variable length.  Each message frame
 is composed of a three-byte header, an embedded message and 3 bytes of
-Cyclic Redundancy Check (CRC) data.  The header starts with 0xd3 and
-includes the length of the embedded message.  Each message starts with
+Cyclic Redundancy Check (CRC) data.  The header starts with a 0xd3 byte and
+includes the length of the embedded message.  Each embedded message starts with
 a 12-bit message number which defines the type.  Apart from that
 message number, each type of message is in a different format.
+
+To avoid confusion between the complete RTCM message (header, embedded message
+and trailing CRC) and the embedded message,
+I talk about message frames and embedded messages. 
 
 This is a hex dump of a complete RTCM3 message frame and the
 start of another:
@@ -392,17 +422,22 @@ d9 71 55 57 07 a0 00 d3  2e 0c 99 01 98 c4 fa 16
 d3 00 6d 46 40 00 33 f6  10 22 00 00 02 40 08 16
 ```
 
-The message starts at byte zero.  That byte has the value d3, which
+The fitst message starts at byte zero.  That byte has the value 0xd3
+(hexadecimal number d3),
+which
 announces the start of the message frame.  The frame is composed of a
 3-byte header, an embedded message and 3 bytes of Cyclic Redundancy
 Check (CRC) data.
 
-Byte 0 of an RTCM frame is always d3.  The top six bits of byte 1 are
-always zero.  The lower two bits of byte 1 and the bits of byte 2 form the 10-bit
+Byte 0 of an RTCM frame is always d3.  The top few bits of byte 1 are
+always zero.  
+The lower two bits of byte 1 and the bits of byte 2 form the 10-bit
 message length, in this case hex 0aa, decimal 176.  So the embedded
 message is 176 bytes long.  With the header and CRC
 the whole message frame is 182
-bytes long.  
+bytes long.
+
+The first twelve bits of the embedded message are the message type.
 
 The bit string in the embedded message may end with some
 zero padding bits to complete the last byte and that can be followed
@@ -435,7 +470,7 @@ may come into the data stream part-way through and blunder into a d3 byte.
 You can't assume that it's the start of a message.
 
 The CRC data is also used to check that the message has not been corrupted in
-transit.  If the CRC check fails, the mesage must be discarded.
+transit.  If the CRC check fails, the message must be discarded.
 
 RTCM3 message frames in the NTRIP data stream are contiguous with no separators or
 newlines.
@@ -453,14 +488,9 @@ be visible.  Signals from some of those may be too weak to register, so the
 resulting
 message may contain readings of just some signals from just some satellites.
 My base stations are dual band
-and can receive up to two signals from each satellite.  They typically see signals from 6-8 satellites
+and receive up to two signals from each satellite.  They typically see signals from 6-8 satellites
 from each of the four constellations in each scan. 
 
-By careful reading of the RTKLIB software,
-it's possible to reverse-engineer the format of the messages.
-(I include copies of the relevant C code in this repository as a handy reference.)
-More clues can be found in the source code of the IGS reference software
-such as the BNC tool.
 
 Type 1005 - Stationary RTK Reference Station ARP
 ----------------
@@ -524,7 +554,7 @@ Multiple Signal Messages (MSMs)
 contain the data from the signals received (observed) from the satellites.
 Each message gives the signals observed from a particular constellation.
 My equipment is configured to send four every second,
-on for GPS, one for Galilaeo, etc. 
+on for GPS, one for Galileo, etc. 
 
 Distance information (range) in the message is giving as
 the transit time from the satellite to the base station in milliseconds.
@@ -609,7 +639,7 @@ One may be added in 2025.
 
 Galileo time is the same as GPS time.
 
-At prsent (2022) the Beidou timestamp rolls over in UTC terms on Saturday at 23:59:56,
+At present (2022) the Beidou timestamp rolls over in UTC terms on Saturday at 23:59:56,
 4 seconds before 
 midnight.
 
