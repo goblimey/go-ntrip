@@ -572,11 +572,11 @@ func TestString(t *testing.T) {
 
 	wantPhaseRange := phaseRangeMetres / wavelength
 
-	const wantAllValuesTemplate = " 1  2 {(8192, 146.383, %.3f), (1048576, %.3f), 7, true, 8}"
+	const wantAllValuesTemplate = " 1  2 {(8192, 146.383, %.3f), (1048576, %.3f), 7, true, 8, 0.244}"
 
 	wantAllValuesDisplay := fmt.Sprintf(wantAllValuesTemplate, wantRange, wantPhaseRange)
 
-	const wantNilSatelliteDisplay = "<nil>  2 {invalid, invalid, 7, true, 8}"
+	const wantNilSatelliteDisplay = "<nil>  2 {invalid, invalid, 7, true, 8, 0.244}"
 
 	satCell := satellite.New(satelliteID, rangeWhole, rangeFractional)
 

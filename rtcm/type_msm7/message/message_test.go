@@ -68,10 +68,10 @@ cell mask: ft tt
 Satellite ID {approx range - whole, frac, millis, metres, extended info, phase range rate}:
  1 {128, 512, 128.500, 38523330.853, 5, 6}
  2 {invalid, 5, invalid}
-Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio}:
- 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), -27.435, (7000, 0.700, 6.700), 4, true, 5}
- 2  5 {invalid, invalid, invalid, invalid, 4, true, 6}
- 2  5 {invalid, invalid, invalid, invalid, 7, false, 8}
+Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength}:
+ 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), -27.435, (7000, 0.700, 6.700), 4, true, 5, 0.244}
+ 2  5 {invalid, invalid, invalid, invalid, 4, true, 6, 0.244}
+ 2  5 {invalid, invalid, invalid, invalid, 7, false, 8, 0.244}
 `
 
 	header :=

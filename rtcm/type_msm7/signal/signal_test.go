@@ -844,13 +844,13 @@ func TestString(t *testing.T) {
 	const cnr = 5
 	const wavelength = utils.SpeedOfLightMS / utils.Freq2
 
-	const wantDisplayAllValid = " 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), -27.800, (7890, 0.789, 6.789), 4, true, 5}"
+	const wantDisplayAllValid = " 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), -27.800, (7890, 0.789, 6.789), 4, true, 5, 0.244}"
 
-	const wantDisplayInvalidRange = " 1 16 {invalid, invalid, -27.800, (7890, 0.789, 6.789), 4, true, 5}"
+	const wantDisplayInvalidRange = " 1 16 {invalid, invalid, -27.800, (7890, 0.789, 6.789), 4, true, 5, 0.244}"
 
-	const wantInvalidPhaseRangeRate = " 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), invalid, invalid, 4, true, 5}"
+	const wantInvalidPhaseRangeRate = " 1 16 {(262144, 146.383, 38523477.236), (1, 157746600.001), invalid, invalid, 4, true, 5, 0.244}"
 
-	const wantDisplayZeroWavelength = " 1 16 {(262144, 146.383, 38523477.236), no wavelength, no wavelength, no wavelength, 4, true, 5}"
+	const wantDisplayZeroWavelength = " 1 16 {(262144, 146.383, 38523477.236), no wavelength, no wavelength, no wavelength, 4, true, 5, 0.000}"
 
 	invalidRangeDeltaBytes := []byte{0x80, 0x00, 0x00} // 20 bits plus filler: 1000 0000 0000 0000 0000 filler 0000
 	invalidRangeDelta := int(utils.GetBitsAsInt64(invalidRangeDeltaBytes, 0, 20))

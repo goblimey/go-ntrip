@@ -68,7 +68,7 @@ func (message *Message) DisplaySignalCells() string {
 		return "No Signals\n"
 	}
 
-	heading := "Signals:\nSat ID Sig ID {(range delta, delta m, range m), (phase range delta, cycles) lock time ind, half cycle ambiguity, Carrier Noise Ratio}\n"
+	heading := "Signals:\nSat ID Sig ID {(range delta, delta m, range m), (phase range delta, cycles) lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength}\n"
 
 	body := ""
 

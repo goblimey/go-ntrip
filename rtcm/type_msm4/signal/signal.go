@@ -123,10 +123,10 @@ func (cell *Cell) String() string {
 		phaseRange = fmt.Sprintf("(%d, %.3f)",
 			cell.PhaseRangeDelta, cell.PhaseRange())
 	}
-	return fmt.Sprintf("%s %2d {%s, %s, %d, %v, %d}",
+	return fmt.Sprintf("%s %2d {%s, %s, %d, %v, %d, %.3f}",
 		satID, cell.ID, rangeM, phaseRange,
 		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
-		cell.CarrierToNoiseRatio)
+		cell.CarrierToNoiseRatio, cell.Wavelength)
 }
 
 // GetSignalCells gets the data from the signal cells of an MSM4 message.

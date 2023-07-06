@@ -100,10 +100,10 @@ func (message *Message) String() string {
 	x := float64(message.AntennaRefX) * scaleFactor
 	y := float64(message.AntennaRefY) * scaleFactor
 	z := float64(message.AntennaRefZ) * scaleFactor
-	height := float64(message.AntennaHeight) * 0.0001
+	height := float64(message.AntennaHeight) * scaleFactor
 
-	display += fmt.Sprintf("ECEF coords in metres (%.4f, %.4f, %.4f)\n", x, y, z)
-	display += fmt.Sprintf("Antenna height %.4f\n", height)
+	display += fmt.Sprintf("ECEF coords in meters (%.4f, %.4f, %.4f)\n", x, y, z)
+	display += fmt.Sprintf("Antenna height %.4f meters\n", height)
 	return display
 }
 
