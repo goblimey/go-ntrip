@@ -7,6 +7,100 @@ import (
 	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
 )
 
+func TestParseConfig(t *testing.T) {
+
+	j := `{
+		"remote_host": "remote:1001",
+		"local_host": "local",
+		"local_port": 42,
+		"control_port": 43,
+		"tls": {
+			"country": ["GB"],
+			"org": ["some org"],
+			"common_name": "*.domain.com"
+			},
+		"cert_file": "certFile",
+		"record_messages": true,
+    	"message_log_directory": "./logs"
+	}`
+
+	jsonData := []byte(j)
+
+	var config Config
+
+	err := parseConfig(jsonData, &config)
+
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	if config.Remotehost != "remote:1001" {
+		t.Errorf("want remote:1001 got %s", config.Remotehost)
+	}
+
+	if config.Localhost != "local" {
+		t.Errorf("want local got %s", config.Localhost)
+	}
+
+	if config.Localport != 42 {
+		t.Errorf("want 42 got %d", config.Localport)
+	}
+
+	if config.ControlPort != 43 {
+		t.Errorf("want 43 got %d", config.ControlPort)
+	}
+
+	if len(config.TLS.Country) != 1 {
+		t.Errorf("want 1 country, got %d", len(config.TLS.Country))
+		return
+	}
+
+	if config.TLS.Country[0] != "GB" {
+		t.Errorf("want GB got %s", config.TLS.Country[0])
+	}
+
+	if len(config.TLS.Org) != 1 {
+		t.Errorf("want 1 organisation, got %d", len(config.TLS.Org))
+		return
+	}
+
+	if config.TLS.Org[0] != "some org" {
+		t.Errorf("want some org got %s", config.TLS.Org[0])
+	}
+
+	if config.TLS.CommonName != "*.domain.com" {
+		t.Errorf("want *.domain.com got %s", config.TLS.CommonName)
+	}
+
+	if config.CertFile != "certFile" {
+		t.Errorf("want certFile got %s", config.CertFile)
+	}
+
+	if !config.RecordMessages {
+		t.Errorf("RecordMessages should be true")
+	}
+
+	if config.MessageLogDirectory != "./logs" {
+		t.Errorf("want ./logs got %s", config.MessageLogDirectory)
+	}
+}
+
+func TestParseConfigWithError(t *testing.T) {
+
+	j := "{junk}"
+
+	jsonData := []byte(j)
+
+	var config Config
+
+	err := parseConfig(jsonData, &config)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
 func TestCircularBuffer(t *testing.T) {
 	m1 := rtcm.Message{MessageType: 1074}
 	m2 := rtcm.Message{MessageType: 1077}

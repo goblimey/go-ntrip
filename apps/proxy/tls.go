@@ -14,18 +14,21 @@ import (
 
 // TLS LINT
 type TLS struct {
-	Country    []string "GB"
-	Org        []string ""
-	CommonName string   "*.domain.com"
+	Country    []string `json:"country"` // "GB"
+	Org        []string `json:"org"`
+	CommonName string   `json:"common_name"` // "*.domain.com"
 }
 
 // Config lint
 type Config struct {
-	Remotehost string
-	Localhost  string
-	Localport  int
-	TLS        *TLS
-	CertFile   string ""
+	Remotehost          string `json:"remote_host"`
+	Localhost           string `json:"local_host"`
+	Localport           int    `json:"local_port"`
+	ControlPort         int    `json:"control_port"`
+	TLS                 *TLS   `json:"tls"`
+	CertFile            string `json:"cert_file"`
+	RecordMessages      bool   `json:"record_messages"`
+	MessageLogDirectory string `json:"message_log_directory"`
 }
 
 var config Config
@@ -43,9 +46,9 @@ func genCert() ([]byte, *rsa.PrivateKey) {
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		SubjectKeyId:          []byte{1, 2, 3, 4, 5},
 		BasicConstraintsValid: true,
-		IsCA:        true,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		IsCA:                  true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 	}
 
 	priv, _ := rsa.GenerateKey(rand.Reader, 1024)

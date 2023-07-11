@@ -1,0 +1,8 @@
+{
+	"remote_host": "machine.running.the.caster:2101",
+	"local_host": "machine.running.the.proxy",
+	"local_port": 2101,
+	"control_port": 8080,
+	"record_messages": true,
+	"message_log_directory": "./logs"
+}

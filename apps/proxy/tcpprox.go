@@ -74,14 +74,14 @@ func main() {
 	rtcmLog = dailylogger.New("./logs", "data.", ".rtcm")
 
 	// Handle command line arguments.
-	localPortPtr := flag.Int("p", 0, "Local Port to listen on")
-	localHostPtr := flag.String("l", "", "Local address to listen on")
+	localPortPtr := flag.Int("p", 2101, "Local Port to listen on")
+	nameOfLocalHostPtr := flag.String("l", "", "Local address to listen on")
 	remoteHostPtr := flag.String("r", "", "Remote Server address host:port")
 	configFilePtr := flag.String("c", "", "Use a config file (set TLS ect) - Commandline params overwrite config file")
 	tlsPtr := flag.Bool("s", false, "Create a TLS Proxy")
 	certFilePtr := flag.String("cert", "", "Use a specific certificate file")
 
-	controlHostPtr := flag.String("ca", "localhost", "hostname to listen on for status requests")
+	controlHostPtr := flag.String("ca", "", "hostname to listen on for status requests")
 	controlPortPtr := flag.Int("cp", 8080, "port to listen on for status requests")
 
 	verbose := false
@@ -94,14 +94,21 @@ func main() {
 
 	flag.Parse()
 
-	localPort := *localPortPtr     // Local Port to listen on.
-	localHost := *localHostPtr     // Local address to listen on.
-	remoteHost := *remoteHostPtr   // Remote Server address host:port.
-	certFile := *certFilePtr       // cert file to support https.
-	configFile := *configFilePtr   // Config file for TLS connection.
-	controlHost := *controlHostPtr // Hostname for status requests
-	controlPort := *controlPortPtr // Port for status requests.
-	isTLS := *tlsPtr               // If true, offer HTTPS, otherwise http.
+	localPort := *localPortPtr             // Local Port to listen on.
+	nameOfLocalHost := *nameOfLocalHostPtr // Local address to listen on.
+	remoteHost := *remoteHostPtr           // Remote Server address host:port.
+	certFile := *certFilePtr               // cert file to support https.
+	configFile := *configFilePtr           // Config file for TLS connection.
+	controlPort := *controlPortPtr         // Port for status requests.
+	isTLS := *tlsPtr                       // If true, offer HTTPS, otherwise http.
+
+	// The hostname for status requests.  Usually not specified and
+	// defaults to the same value as nameOfLocalHost.
+	nameOfControlHost := nameOfLocalHost
+	if len(*controlHostPtr) != 0 {
+		// The -ca option was specified.
+		nameOfControlHost = *controlHostPtr
+	}
 
 	// Set up the logging.  It should be either quiet or verbose.
 	if verbose {
@@ -129,16 +136,18 @@ func main() {
 	// Create a circular queue to hold the recent messages from the message
 	// channel and start the goroutine that keeps it up to date. The goroutine
 	// reads messages from the message channel and puts them into the queue.
-	// The report feed displays the messages currently in the queue.
+	// If the queue is full, the earliest message is discarded to make way
+	// for the new one.  The report feed displays the messages currently in
+	// the queue.
 	recentMessages = circularQueue.NewCircularQueue(maxNumberOfMessagesStored)
 	go keepCircularQueueUpdated(messageChan, recentMessages)
 
 	// Set up the status reporter and the proxy server
 	fmt.Fprintf(log, "setting up status reporter")
-	SetReportFeed(makeReporter(controlHost, controlPort, recentMessages))
+	SetReportFeed(makeReporter(nameOfControlHost, controlPort, recentMessages))
 
 	fmt.Fprintf(log, "setting up routes\n")
-	SetConfig(configFile, localPort, localHost, remoteHost, certFile)
+	SetConfig(configFile, localPort, nameOfLocalHost, remoteHost, certFile)
 
 	if config.Remotehost == "" {
 		fmt.Fprintf(os.Stderr, "[x] Remote host required")
@@ -272,11 +281,17 @@ func SetConfig(configFile string, localPort int, localHost, remoteHost string, c
 			fmt.Fprintf(os.Stderr, "[-] Not a valid config file: %s\n", err.Error())
 			os.Exit(1)
 		}
-		err = json.Unmarshal(data, &config)
+		err = parseConfig(data, &config)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[-] Not a valid config file: %s\n", err.Error())
 			os.Exit(1)
 		}
+
+		// Default settings.
+		if config.ControlPort == 0 {
+			config.ControlPort = 8080
+		}
+
 	} else {
 		config = Config{TLS: &TLS{}}
 	}
@@ -294,6 +309,15 @@ func SetConfig(configFile string, localPort int, localHost, remoteHost string, c
 	if remoteHost != "" {
 		config.Remotehost = remoteHost
 	}
+}
+
+func parseConfig(data []byte, config *Config) error {
+	err := json.Unmarshal(data, config)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func makeReporter(controlHost string, controlPort int, queue *circularQueue.CircularQueue) *reportfeed.ReportFeed {
