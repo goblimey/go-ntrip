@@ -16,7 +16,6 @@ import (
 	reportfeed "github.com/goblimey/go-ntrip/apps/proxy/reportfeed"
 	rtcm "github.com/goblimey/go-ntrip/rtcm/handler"
 	"github.com/goblimey/go-tools/dailylogger"
-	"github.com/goblimey/go-tools/logger"
 	reporter "github.com/goblimey/go-tools/statusreporter"
 )
 
@@ -38,8 +37,6 @@ import (
 // The /status/report request displays the timestamp and contents of the last
 // input and output buffers.
 
-var log *logger.LoggerT
-
 var reportFeed *reportfeed.ReportFeed
 
 var byteChan chan byte
@@ -54,24 +51,7 @@ var recentMessages *circularQueue.CircularQueue
 
 var rtcmLog *dailylogger.Writer
 
-func init() {
-	log = logger.New()
-}
-
 func main() {
-
-	// Ensure that the logs directory exists.
-	_, err := os.Stat("./logs")
-	if err != nil {
-		if os.IsNotExist(err) {
-			createError := os.Mkdir("./logs", os.ModePerm)
-			if createError != nil {
-				panic(createError)
-			}
-		}
-	}
-
-	rtcmLog = dailylogger.New("./logs", "data.", ".rtcm")
 
 	// Handle command line arguments.
 	localPortPtr := flag.Int("p", 2101, "Local Port to listen on")
@@ -110,14 +90,34 @@ func main() {
 		nameOfControlHost = *controlHostPtr
 	}
 
-	// Set up the logging.  It should be either quiet or verbose.
-	if verbose {
-		log.SetLogLevel(1)
-	}
-	if quiet {
-		log.SetLogLevel(0) // quiet trumps verbose.
+	fmt.Printf("setting up routes\n")
+	SetConfig(configFile, localPort, nameOfLocalHost, remoteHost, certFile)
+
+	// Ensure that the logging directory exists.
+	_, err := os.Stat(config.MessageLogDirectory)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// The logging directory does not exist.  create it.
+			createError := os.Mkdir(config.MessageLogDirectory, os.ModePerm)
+			if createError != nil {
+				panic(createError)
+			}
+		} else {
+			// Some other error.
+			panic(err)
+		}
 	}
 
+	// Create the logger.
+	rtcmLog = dailylogger.New(config.MessageLogDirectory, "data.", ".rtcm")
+
+	// Set the logging level.  It should be either quiet or verbose.
+	if verbose {
+		rtcmLog.EnableLogging()
+	}
+	if quiet {
+		rtcmLog.DisableLogging() // quiet trumps verbose.
+	}
 	byteChan = make(chan byte)
 	// Ensure that the byte channel is closed on return.
 	defer close(byteChan)
@@ -143,11 +143,8 @@ func main() {
 	go keepCircularQueueUpdated(messageChan, recentMessages)
 
 	// Set up the status reporter and the proxy server
-	fmt.Fprintf(log, "setting up status reporter")
+	rtcmLog.Write([]byte("setting up status reporter"))
 	SetReportFeed(makeReporter(nameOfControlHost, controlPort, recentMessages))
-
-	fmt.Fprintf(log, "setting up routes\n")
-	SetConfig(configFile, localPort, nameOfLocalHost, remoteHost, certFile)
 
 	if config.Remotehost == "" {
 		fmt.Fprintf(os.Stderr, "[x] Remote host required")
@@ -170,7 +167,7 @@ func StartClientListener(isTLS bool) {
 	client := connectToClient(isTLS)
 	defer func() { client.Close() }()
 
-	fmt.Fprintf(log, "[*] Listening for Client call ...\n")
+	rtcmLog.Write([]byte("[*] Listening for Client call ...\n"))
 
 	for {
 		call, err := client.Accept()
@@ -180,10 +177,12 @@ func StartClientListener(isTLS bool) {
 		}
 		id := ids
 		ids++
-		fmt.Fprintf(log, "[*][%d]connection Accepted from: client %s\n", id, call.RemoteAddr())
+		trace1 := []byte(fmt.Sprintf("[*][%d]connection Accepted from: client %s\n", id, call.RemoteAddr()))
+		rtcmLog.Write(trace1)
 
 		server := connectToServer(isTLS)
-		fmt.Fprintf(log, "[*][%d] Connected to server: %s\n", id, server.RemoteAddr())
+		trace2 := fmt.Sprintf("[*][%d] Connected to server: %s\n", id, server.RemoteAddr())
+		rtcmLog.Write([]byte(trace2))
 
 		go handleMessages(server, call, isTLS, id)
 	}
@@ -195,7 +194,8 @@ func connectToClient(isTLS bool) (conn net.Listener) {
 	if isTLS {
 		conn, err = tlsListen()
 	} else {
-		fmt.Fprintf(log, "listening on %s\n", fmt.Sprint(config.Localhost, ":", config.Localport))
+		trace := fmt.Sprintf("listening on %s\n", fmt.Sprint(config.Localhost, ":", config.Localport))
+		rtcmLog.Write([]byte(trace))
 		conn, err = net.Listen("tcp", fmt.Sprint(config.Localhost, ":", config.Localport))
 	}
 
@@ -236,8 +236,8 @@ func handleClientMessages(server, client net.Conn, id int) {
 		data := make([]byte, 2048)
 		n, err := client.Read(data)
 		if n > 0 {
-			fmt.Fprintf(log, "From Client [%d]:\n%s\n", id, hex.Dump(data[:n]))
-			//fmt.Fprintf("From Client:\n%s\n",hex.EncodeToString(data[:n]))
+			trace := fmt.Sprintf("From Client [%d]:\n%s\n", id, hex.Dump(data[:n]))
+			rtcmLog.Write([]byte(trace))
 
 			// Send contents of the buffer to the RTCM handler.
 			for i := 0; i < n; i++ {
@@ -260,7 +260,8 @@ func handleServerMessages(server, client net.Conn, id int) {
 		data := make([]byte, 2048)
 		n, err := server.Read(data)
 		if n > 0 {
-			fmt.Fprintf(log, "From Server [%d]:\n%s\n", id, hex.Dump(data[:n]))
+			trace := fmt.Sprintf("From Server [%d]:\n%s\n", id, hex.Dump(data[:n]))
+			rtcmLog.Write([]byte(trace))
 			//fmt.Fprintf("From Server:\n%s\n",hex.EncodeToString(data[:n]))
 			// Hang onto the buffer for reporting until the next one arrives
 			reportFeed.RecordServerBuffer(&data, uint64(id), n)
@@ -321,9 +322,9 @@ func parseConfig(data []byte, config *Config) error {
 }
 
 func makeReporter(controlHost string, controlPort int, queue *circularQueue.CircularQueue) *reportfeed.ReportFeed {
-	fmt.Fprintf(log, "setting up the status reporter\n")
+	rtcmLog.Write([]byte("setting up the status reporter\n"))
 
-	rf := reportfeed.New(log, queue)
+	rf := reportfeed.New(rtcmLog, queue)
 
 	proxyReporter := reporter.MakeReporter(rf, controlHost, controlPort)
 

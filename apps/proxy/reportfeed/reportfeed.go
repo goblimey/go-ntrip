@@ -9,7 +9,7 @@ import (
 	"time"
 
 	circularQueue "github.com/goblimey/go-ntrip/apps/proxy/circular_queue"
-	"github.com/goblimey/go-tools/logger"
+	"github.com/goblimey/go-tools/dailylogger"
 	"github.com/goblimey/go-tools/statusreporter"
 )
 
@@ -23,7 +23,7 @@ type Buffer struct {
 
 // ReportFeed satisfies the status-reporter ReportFeedT interface.
 type ReportFeed struct {
-	logger           *logger.LoggerT
+	logger           *dailylogger.Writer
 	lastClientBuffer *Buffer
 	lastServerBuffer *Buffer
 
@@ -39,7 +39,7 @@ var _ statusreporter.ReportFeedT = (*ReportFeed)(nil)
 // New creates and returns a new ReportFeed object.
 // The ReportFeed object contains a pointer to a mutex so always use this
 // method to create one.
-func New(lgr *logger.LoggerT, queue *circularQueue.CircularQueue) *ReportFeed {
+func New(lgr *dailylogger.Writer, queue *circularQueue.CircularQueue) *ReportFeed {
 	var mu sync.Mutex
 	reportFeed := ReportFeed{logger: lgr, RecentMessages: queue, Mutex: &mu}
 
@@ -48,7 +48,11 @@ func New(lgr *logger.LoggerT, queue *circularQueue.CircularQueue) *ReportFeed {
 
 // SetLogLevel satisfies the ReportFeedT interface.
 func (rf *ReportFeed) SetLogLevel(level uint8) {
-	rf.logger.SetLogLevel(level)
+	if level == 0 {
+		rf.logger.DisableLogging()
+	} else {
+		rf.logger.EnableLogging()
+	}
 }
 
 // Status satisfies the ReportFeedT interface.
@@ -96,7 +100,7 @@ func (rf *ReportFeed) Status() []byte {
 }
 
 // SetLogger sets the logger.
-func (rf *ReportFeed) SetLogger(logger *logger.LoggerT) {
+func (rf *ReportFeed) SetLogger(logger *dailylogger.Writer) {
 	rf.logger = logger
 }
 
