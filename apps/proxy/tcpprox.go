@@ -54,7 +54,7 @@ var rtcmLog *dailylogger.Writer
 func main() {
 
 	// Handle command line arguments.
-	localPortPtr := flag.Int("p", 2101, "Local Port to listen on")
+	localPortPtr := flag.Int("p", 0, "Local Port to listen on")
 	nameOfLocalHostPtr := flag.String("l", "", "Local address to listen on")
 	remoteHostPtr := flag.String("r", "", "Remote Server address host:port")
 	configFilePtr := flag.String("c", "", "Use a config file (set TLS ect) - Commandline params overwrite config file")
@@ -62,7 +62,7 @@ func main() {
 	certFilePtr := flag.String("cert", "", "Use a specific certificate file")
 
 	controlHostPtr := flag.String("ca", "", "hostname to listen on for status requests")
-	controlPortPtr := flag.Int("cp", 8080, "port to listen on for status requests")
+	controlPortPtr := flag.Int("cp", 0, "port to listen on for status requests")
 
 	verbose := false
 	flag.BoolVar(&verbose, "v", true, "verbose logging (shorthand)")
@@ -73,6 +73,15 @@ func main() {
 	flag.BoolVar(&quiet, "quiet", false, "quiet logging")
 
 	flag.Parse()
+
+	// Non-zero config values from the command line override any config file.
+	configFromCommandLine := Config{
+		Localhost:   *nameOfLocalHostPtr,
+		Localport:   *localPortPtr,
+		Remotehost:  *remoteHostPtr,
+		ControlPort: *controlPortPtr,
+		CertFile:    *certFilePtr,
+	}
 
 	localPort := *localPortPtr             // Local Port to listen on.
 	nameOfLocalHost := *nameOfLocalHostPtr // Local address to listen on.
@@ -91,7 +100,8 @@ func main() {
 	}
 
 	fmt.Printf("setting up routes\n")
-	SetConfig(configFile, localPort, nameOfLocalHost, remoteHost, certFile)
+	SetConfig(configFile, localPort, nameOfLocalHost, remoteHost, certFile,
+		nameOfControlHost, controlPort)
 
 	// Ensure that the logging directory exists.
 	_, err := os.Stat(config.MessageLogDirectory)
@@ -275,7 +285,8 @@ func handleServerMessages(server, client net.Conn, id int) {
 }
 
 // SetConfig sets the proxy config - the server for which it acts as a proxy etc.
-func SetConfig(configFile string, localPort int, localHost, remoteHost string, certFile string) {
+func SetConfig(configFile string, localPort int, localHost, remoteHost,
+	certFile, controlHost string, controlPort int) {
 	if configFile != "" {
 		data, err := ioutil.ReadFile(configFile)
 		if err != nil {
@@ -288,27 +299,37 @@ func SetConfig(configFile string, localPort int, localHost, remoteHost string, c
 			os.Exit(1)
 		}
 
-		// Default settings.
-		if config.ControlPort == 0 {
-			config.ControlPort = 8080
-		}
-
 	} else {
 		config = Config{TLS: &TLS{}}
 	}
 
-	if certFile != "" {
+	// Non-Zero command line values override values in any config file.
+
+	if len(certFile) > 0 {
 		config.CertFile = certFile
 	}
-
+	if len(localHost) > 0 {
+		config.Localhost = localHost
+	}
 	if localPort != 0 {
 		config.Localport = localPort
 	}
-	if localHost != "" {
-		config.Localhost = localHost
-	}
-	if remoteHost != "" {
+	if len(remoteHost) > 0 {
 		config.Remotehost = remoteHost
+	}
+	if len(controlHost) > 0 {
+		config.ControlHost = controlHost
+	}
+	if controlPort > 0 {
+		config.ControlPort = controlPort
+	}
+
+	// Default settings.
+	if config.Localport == 0 {
+		config.Localport = 2101
+	}
+	if config.ControlPort == 0 {
+		config.ControlPort = 8080
 	}
 }
 

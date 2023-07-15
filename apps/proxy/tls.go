@@ -24,6 +24,7 @@ type Config struct {
 	Remotehost          string `json:"remote_host"`
 	Localhost           string `json:"local_host"`
 	Localport           int    `json:"local_port"`
+	ControlHost         string `json: "control_host"`
 	ControlPort         int    `json:"control_port"`
 	TLS                 *TLS   `json:"tls"`
 	CertFile            string `json:"cert_file"`
