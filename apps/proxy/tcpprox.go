@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"time"
@@ -57,7 +56,7 @@ func main() {
 	localPortPtr := flag.Int("p", 0, "Local Port to listen on")
 	nameOfLocalHostPtr := flag.String("l", "", "Local address to listen on")
 	remoteHostPtr := flag.String("r", "", "Remote Server address host:port")
-	configFilePtr := flag.String("c", "", "Use a config file (set TLS ect) - Commandline params overwrite config file")
+	configFilePtr := flag.String("c", "", "Use a config file (set TLS etc) - Commandline params overwrite config file")
 	tlsPtr := flag.Bool("s", false, "Create a TLS Proxy")
 	certFilePtr := flag.String("cert", "", "Use a specific certificate file")
 
@@ -79,14 +78,12 @@ func main() {
 		Localhost:   *nameOfLocalHostPtr,
 		Localport:   *localPortPtr,
 		Remotehost:  *remoteHostPtr,
+		ControlHost: *controlHostPtr,
 		ControlPort: *controlPortPtr,
 		CertFile:    *certFilePtr,
 	}
 
-	localPort := *localPortPtr             // Local Port to listen on.
 	nameOfLocalHost := *nameOfLocalHostPtr // Local address to listen on.
-	remoteHost := *remoteHostPtr           // Remote Server address host:port.
-	certFile := *certFilePtr               // cert file to support https.
 	configFile := *configFilePtr           // Config file for TLS connection.
 	controlPort := *controlPortPtr         // Port for status requests.
 	isTLS := *tlsPtr                       // If true, offer HTTPS, otherwise http.
@@ -100,27 +97,29 @@ func main() {
 	}
 
 	fmt.Printf("setting up routes\n")
-	SetConfig(configFile, localPort, nameOfLocalHost, remoteHost, certFile,
-		nameOfControlHost, controlPort)
-
-	// Ensure that the logging directory exists.
-	_, err := os.Stat(config.MessageLogDirectory)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// The logging directory does not exist.  create it.
-			createError := os.Mkdir(config.MessageLogDirectory, os.ModePerm)
-			if createError != nil {
-				panic(createError)
-			}
-		} else {
-			// Some other error.
-			panic(err)
-		}
+	if len(configFile) > 0 {
+		SetConfig(configFile, &configFromCommandLine)
 	}
 
-	// Create the logger.
-	rtcmLog = dailylogger.New(config.MessageLogDirectory, "data.", ".rtcm")
+	// Ensure that the logging directory exists.
+	if config.RecordMessages {
+		_, err := os.Stat(config.MessageLogDirectory)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// The logging directory does not exist.  create it.
+				createError := os.Mkdir(config.MessageLogDirectory, os.ModePerm)
+				if createError != nil {
+					panic(createError)
+				}
+			} else {
+				// Some other error.
+				panic(err)
+			}
+		}
 
+		// Create the logger.
+		rtcmLog = dailylogger.New(config.MessageLogDirectory, "data.", ".rtcm")
+	}
 	// Set the logging level.  It should be either quiet or verbose.
 	if verbose {
 		rtcmLog.EnableLogging()
@@ -285,43 +284,65 @@ func handleServerMessages(server, client net.Conn, id int) {
 }
 
 // SetConfig sets the proxy config - the server for which it acts as a proxy etc.
-func SetConfig(configFile string, localPort int, localHost, remoteHost,
-	certFile, controlHost string, controlPort int) {
-	if configFile != "" {
-		data, err := ioutil.ReadFile(configFile)
+func SetConfig(configFile string, configFromCommandLine *Config) {
+	if len(configFile) > 0 {
+		file, err := os.Open(configFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[-] Not a valid config file: %s\n", err.Error())
+			fmt.Fprintf(os.Stderr, "[-] Cannot open config file: %s\n", err.Error())
 			os.Exit(1)
 		}
-		err = parseConfig(data, &config)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[-] Not a valid config file: %s\n", err.Error())
-			os.Exit(1)
+
+		parseError := SetConfigFromReader(file, configFromCommandLine)
+
+		if parseError != nil {
+			os.Exit(-1)
 		}
 
 	} else {
-		config = Config{TLS: &TLS{}}
+		config = Config{
+			Localhost:  configFromCommandLine.Localhost,
+			Localport:  configFromCommandLine.Localport,
+			Remotehost: configFromCommandLine.Remotehost,
+			TLS:        &TLS{},
+		}
+	}
+}
+
+// SetConfigFrom Reader sets the proxy config from data on a reader.
+func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) error {
+
+	data := make([]byte, 4096)
+	n, err := configReader.Read(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[-] Error reading config file: %s\n", err.Error())
+		return err
 	}
 
-	// Non-Zero command line values override values in any config file.
+	parseError := parseConfig(data[:n], &config)
+	if parseError != nil {
+		fmt.Fprintf(os.Stderr, "[-] Not a valid config file: %s\n", parseError.Error())
+		return err
+	}
 
-	if len(certFile) > 0 {
-		config.CertFile = certFile
+	// Non-Zero command line values override values in the config file.
+
+	if len(configFromCommandLine.CertFile) > 0 {
+		config.CertFile = configFromCommandLine.CertFile
 	}
-	if len(localHost) > 0 {
-		config.Localhost = localHost
+	if len(configFromCommandLine.Localhost) > 0 {
+		config.Localhost = configFromCommandLine.Localhost
 	}
-	if localPort != 0 {
-		config.Localport = localPort
+	if configFromCommandLine.Localport != 0 {
+		config.Localport = configFromCommandLine.Localport
 	}
-	if len(remoteHost) > 0 {
-		config.Remotehost = remoteHost
+	if len(configFromCommandLine.Remotehost) > 0 {
+		config.Remotehost = configFromCommandLine.Remotehost
 	}
-	if len(controlHost) > 0 {
-		config.ControlHost = controlHost
+	if len(configFromCommandLine.ControlHost) > 0 {
+		config.ControlHost = configFromCommandLine.ControlHost
 	}
-	if controlPort > 0 {
-		config.ControlPort = controlPort
+	if configFromCommandLine.ControlPort > 0 {
+		config.ControlPort = configFromCommandLine.ControlPort
 	}
 
 	// Default settings.
@@ -331,6 +352,8 @@ func SetConfig(configFile string, localPort int, localHost, remoteHost,
 	if config.ControlPort == 0 {
 		config.ControlPort = 8080
 	}
+
+	return nil
 }
 
 func parseConfig(data []byte, config *Config) error {
