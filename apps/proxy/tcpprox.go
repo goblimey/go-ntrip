@@ -132,7 +132,7 @@ func main() {
 	defer close(byteChan)
 
 	messageChan = make(chan rtcm.Message)
-	// Ensure that the byte channel is closed on return.
+	// Ensure that the message channel is closed on return.
 	defer close(messageChan)
 
 	// Set up an RTCM handler and start it running.  It takes bytes
