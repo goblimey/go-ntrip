@@ -83,23 +83,11 @@ func main() {
 		CertFile:    *certFilePtr,
 	}
 
-	nameOfLocalHost := *nameOfLocalHostPtr // Local address to listen on.
-	configFile := *configFilePtr           // Config file for TLS connection.
-	controlPort := *controlPortPtr         // Port for status requests.
-	isTLS := *tlsPtr                       // If true, offer HTTPS, otherwise http.
+	configFile := *configFilePtr // Config file for TLS connection.
+	isTLS := *tlsPtr             // If true, offer HTTPS, otherwise http.
 
-	// The hostname for status requests.  Usually not specified and
-	// defaults to the same value as nameOfLocalHost.
-	nameOfControlHost := nameOfLocalHost
-	if len(*controlHostPtr) != 0 {
-		// The -ca option was specified.
-		nameOfControlHost = *controlHostPtr
-	}
-
-	fmt.Printf("setting up routes\n")
-	if len(configFile) > 0 {
-		SetConfig(configFile, &configFromCommandLine)
-	}
+	fmt.Printf("setting up config\n")
+	SetConfig(configFile, &configFromCommandLine)
 
 	// Ensure that the logging directory exists.
 	if config.RecordMessages {
@@ -152,8 +140,9 @@ func main() {
 	go keepCircularQueueUpdated(messageChan, recentMessages)
 
 	// Set up the status reporter and the proxy server
-	rtcmLog.Write([]byte("setting up status reporter"))
-	SetReportFeed(makeReporter(nameOfControlHost, controlPort, recentMessages))
+	m := fmt.Sprintf("setting up status reporter - %s:%d", config.ControlHost, config.ControlPort)
+	rtcmLog.Write([]byte(m))
+	SetReportFeed(makeReporter(config.ControlHost, config.ControlPort, recentMessages))
 
 	if config.Remotehost == "" {
 		fmt.Fprintf(os.Stderr, "[x] Remote host required")
@@ -306,6 +295,8 @@ func SetConfig(configFile string, configFromCommandLine *Config) {
 			TLS:        &TLS{},
 		}
 	}
+	fmt.Printf("remote %s local host %s local port %d\n",
+		config.Remotehost, config.Localhost, config.Localport)
 }
 
 // SetConfigFrom Reader sets the proxy config from data on a reader.
@@ -317,6 +308,8 @@ func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) 
 		fmt.Fprintf(os.Stderr, "[-] Error reading config file: %s\n", err.Error())
 		return err
 	}
+
+	fmt.Printf("data\n%s", string(data))
 
 	parseError := parseConfig(data[:n], &config)
 	if parseError != nil {
@@ -351,6 +344,9 @@ func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) 
 	}
 	if config.ControlPort == 0 {
 		config.ControlPort = 8080
+	}
+	if len(config.ControlHost) == 0 {
+		config.ControlHost = config.Localhost
 	}
 
 	return nil
