@@ -43,12 +43,20 @@ ECEF coords in metres (1.2345, 2.3456, 3.4567)
 
 `
 
-	message := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567, slog.LevelDebug)
+	messageDebug := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567, slog.LevelDebug)
 
-	got := message.String()
+	gotDebug := messageDebug.String()
 
-	if wantDebug != got {
-		t.Error(diff.Diff(wantDebug, got))
+	if wantDebug != gotDebug {
+		t.Error(diff.Diff(wantDebug, gotDebug))
+	}
+
+	messageInfo := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567, slog.LevelInfo)
+
+	gotInfo := messageInfo.String()
+
+	if wantInfo != gotInfo {
+		t.Error(diff.Diff(wantInfo, gotInfo))
 	}
 }
 
