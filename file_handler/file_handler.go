@@ -3,6 +3,7 @@ package filehandler
 import (
 	"bufio"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -76,7 +77,7 @@ func (handler *Handler) Handle(startTime time.Time, reader *bufio.Reader) error 
 
 	// Set up an RTCM handler connected to the input and output channels
 	// and start it running.
-	handler.RTCMHandler = rtcm.New(startTime)
+	handler.RTCMHandler = rtcm.New(startTime, slog.LevelDebug)
 	go handler.RTCMHandler.HandleMessages(byteChan, handler.MessageChan)
 
 	// Read the file and send the data to the byte channel.
