@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ message type 1024 currently cannot be displayed
 
 	messageChan := make(chan rtcm.Message, 10)
 
-	rtcmHandler := rtcm.New(time.Now())
+	rtcmHandler := rtcm.New(time.Now(), slog.LevelDebug)
 
 	rtcmHandler.HandleMessages(byteChan, messageChan)
 
@@ -64,7 +65,7 @@ func TestWriteRTCMMessages(t *testing.T) {
 
 	var testData = []struct {
 		description    string
-		fun            func(ch chan rtcm.Message, writer io.Writer)
+		fun            func(ch MessageChannel, writer io.Writer)
 		inputBitStream []byte
 		wantBitStream  []byte
 	}{
@@ -93,7 +94,7 @@ func TestWriteRTCMMessages(t *testing.T) {
 
 		startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
 
-		rtcmHandler := rtcm.New(startTime)
+		rtcmHandler := rtcm.New(startTime, slog.LevelDebug)
 
 		rtcmHandler.HandleMessages(byteChan, messageChan)
 

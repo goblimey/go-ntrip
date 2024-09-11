@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -85,7 +86,7 @@ func TestDisplayMessages(t *testing.T) {
 	// adding a trailing newline.  In this test, we send just one message.
 	const want = testdata.MessageFrameType1005Display + "\n"
 
-	rtcmHandler := rtcm.New(time.Now())
+	rtcmHandler := rtcm.New(time.Now(), slog.LevelDebug)
 	message, gotError := rtcmHandler.GetMessage(testdata.MessageFrameType1005)
 	if gotError != nil {
 		t.Error(gotError)
