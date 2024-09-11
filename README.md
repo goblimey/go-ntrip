@@ -88,7 +88,7 @@ This accuracy is acceptable for vehicle navigation
 but other purposes such as land surveying
 require greater accuracy.
 
-More accuracy is possible using two receivers within a few kilometers of each other.
+More accuracy is possible using two receivers within a few kilometres of each other.
 The signals from the positioning satellites suffer distortion, particularly as they pass through the ionosphere on their way to the Earth.
 The receivers on the ground use these signals to figure out their position,
 but the distortions produce inaccuracies.
@@ -538,8 +538,8 @@ If you need to know what's in them,
 you will have to buy a copy of the standard.)
 
 The 38 bit values are the distance from the centre of the Earth 
-along the axis (positive or negative) in tenth millimeters.
-to convert to meters, divide by 0.0001.
+along the axis (positive or negative) in tenth millimetres.
+to convert to metres, divide by 0.0001.
 
 That granularity is much smaller than the accuracy
 that the current equipment provides - 2cm.
