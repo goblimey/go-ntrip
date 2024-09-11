@@ -1,0 +1,5 @@
+{
+    "display_messages": true,
+    "record_messages": true,
+    "log_directory": "rtcmlog"
+}

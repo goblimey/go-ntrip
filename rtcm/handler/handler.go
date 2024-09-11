@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -109,11 +110,18 @@ type Handler struct {
 	// glonassDayFromPreviousMessage is the day number from the previous Glonass
 	// multiple signal message (MSM).
 	glonassDayFromPreviousMessage uint
+
+	// logLevel is a slog-style logging level (Debug, info
+	// etc).  It controls the data that String produces.
+	logLevel slog.Level
 }
 
 // New creates a handler using the given year, month and day to
-// identify which week the times in the messages refer to.
-func New(startTime time.Time) *Handler {
+// identify which week the times in the messages refer to.  The
+// log level controls the String functions.
+func New(startTime time.Time, logLevel slog.Level) *Handler {
+
+	level := logLevel
 
 	// GPS, Galileo and Beidou.  The week for each starts a few leap seconds
 	// before midnight at the end of Saturday in UTC so most of Saturday UTC
@@ -163,6 +171,7 @@ func New(startTime time.Time) *Handler {
 		timestampFromPreviousGPSMessage:     timestampFromPreviousGPSMessage,
 		timestampFromPreviousGalileoMessage: timestampFromPreviousGalileoMessage,
 		timestampFromPreviousBeidouMessage:  timestampFromPreviousBeidouMessage,
+		logLevel:                            level,
 	}
 
 	return &handler
@@ -395,7 +404,9 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 
 	messageLength, messageType, formatError := rtcmHandler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
-		return NewMessage(messageType, formatError.Error(), bitStream), formatError
+		return NewMessage(
+				messageType, formatError.Error(), bitStream, rtcmHandler.logLevel),
+			formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -418,14 +429,19 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 	// We have a complete message.
 
 	// Check the CRC.
-	if !CheckCRC(bitStream) {
+	errorCRC := CheckCRC(messageType, messageLength, bitStream)
+	if errorCRC != nil {
 		message := NewNonRTCM(bitStream)
-		message.ErrorMessage = "CRC is not valid"
-		return message, errors.New(message.ErrorMessage)
+
+		return message, errorCRC
 	}
 
 	// The message is complete and the CRC check passes, so it's valid.
-	message := NewMessage(messageType, "", bitStream[:expectedFrameLength])
+	message := NewMessage(
+		messageType,
+		"",
+		bitStream[:expectedFrameLength],
+		slog.LevelDebug)
 
 	// If the message is an MSM7, get the timestamp (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
@@ -543,10 +559,10 @@ func Analyse(message *Message) {
 		analyseMSM7(message.RawData, message)
 
 	case message.MessageType == 1005:
-		analyse1005(message.RawData, message)
+		analyse1005(message.RawData, message, message.logLevel)
 
 	case message.MessageType == 1006:
-		analyse1006(message.RawData, message)
+		analyse1006(message.RawData, message, message.logLevel)
 
 	case message.MessageType == 1230:
 		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this)"
@@ -579,8 +595,8 @@ func analyseMSM7(messageBitStream []byte, message *Message) {
 	message.Readable = msm7Message
 }
 
-func analyse1005(messageBitStream []byte, message *Message) {
-	message1005, message1005Error := type1005.GetMessage(messageBitStream)
+func analyse1005(messageBitStream []byte, message *Message, logLevel slog.Level) {
+	message1005, message1005Error := type1005.GetMessage(messageBitStream, logLevel)
 	if message1005Error != nil {
 		message.ErrorMessage = message1005Error.Error()
 		return
@@ -589,8 +605,8 @@ func analyse1005(messageBitStream []byte, message *Message) {
 	message.Readable = message1005
 }
 
-func analyse1006(messageBitStream []byte, message *Message) {
-	message1006, message1006Error := type1006.GetMessage(messageBitStream)
+func analyse1006(messageBitStream []byte, message *Message, logLevel slog.Level) {
+	message1006, message1006Error := type1006.GetMessage(messageBitStream, logLevel)
 	if message1006Error != nil {
 		message.ErrorMessage = message1006Error.Error()
 		return
@@ -869,15 +885,19 @@ type Message struct {
 	// Readable is a broken out version of the RTCM message.  It's accessed
 	// via the Readable method.
 	Readable interface{}
+
+	// logLevel controls the data produced by String.
+	logLevel slog.Level
 }
 
 // NewMessage creates a new message.
-func NewMessage(messageType int, errorMessage string, bitStream []byte) *Message {
+func NewMessage(messageType int, errorMessage string, bitStream []byte, logLevel slog.Level) *Message {
 
 	message := Message{
 		MessageType:  messageType,
 		RawData:      bitStream,
 		ErrorMessage: errorMessage,
+		logLevel:     logLevel,
 	}
 
 	return &message
@@ -1008,10 +1028,12 @@ func PrepareForDisplay(message *Message) interface{} {
 	return message.Readable
 }
 
-// CheckCRC checks the CRC of a message frame.
-func CheckCRC(frame []byte) bool {
+// CheckCRC checks the CRC of a message frame and returns an error
+// if the calculated CRC does not match the CRC bytes in the frame.
+// The error message contains the message type and length.
+func CheckCRC(messageType int, messageLength uint, frame []byte) error {
 	if len(frame) < (utils.LeaderLengthBytes + utils.CRCLengthBytes) {
-		return false
+		return errors.New("cannot check CRC - frame is too short")
 	}
 	// The CRC is the last three bytes of the message frame.
 	// The rest of the frame should produce the same CRC.
@@ -1028,11 +1050,17 @@ func CheckCRC(frame []byte) bool {
 		crc24q.LoByte(newCRC) != crcLoByte {
 
 		// The calculated CRC does not match the one at the end of the message frame.
-		return false
+		em := fmt.Sprintf(
+			"CRC check failed on message type %d, length 0x%x - given %2x %2x %2x, calculated %2x %2x %2x",
+			messageType, messageLength,
+			crcHiByte, crcMiByte, crcLoByte,
+			crc24q.HiByte(newCRC), crc24q.MiByte(newCRC), crc24q.LoByte(newCRC),
+		)
+		return errors.New(em)
 	}
 
 	// We have a valid frame.
-	return true
+	return nil
 }
 
 // getUTCFromTimestamp converts a GPS, Galileo or Beidou timestamp to UTC

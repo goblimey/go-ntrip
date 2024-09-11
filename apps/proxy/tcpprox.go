@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"time"
@@ -53,9 +54,9 @@ var rtcmLog *dailylogger.Writer
 func main() {
 
 	// Handle command line arguments.
-	localPortPtr := flag.Int("p", 0, "Local Port to listen on")
-	nameOfLocalHostPtr := flag.String("l", "", "Local address to listen on")
-	remoteHostPtr := flag.String("r", "", "Remote Server address host:port")
+	proxyPortPtr := flag.Int("p", 0, "Local Port to listen on")
+	proxyHostnamePtr := flag.String("l", "", "proxy hostname to listen on")
+	remoteHostnameAndPortPtr := flag.String("r", "", "Remote Server address host:port")
 	configFilePtr := flag.String("c", "", "Use a config file (set TLS etc) - Commandline params overwrite config file")
 	tlsPtr := flag.Bool("s", false, "Create a TLS Proxy")
 	certFilePtr := flag.String("cert", "", "Use a specific certificate file")
@@ -75,9 +76,9 @@ func main() {
 
 	// Non-zero config values from the command line override any config file.
 	configFromCommandLine := Config{
-		Localhost:   *nameOfLocalHostPtr,
-		Localport:   *localPortPtr,
-		Remotehost:  *remoteHostPtr,
+		ProxyHost:   *proxyHostnamePtr,
+		ProxyPort:   *proxyPortPtr,
+		RemoteHost:  *remoteHostnameAndPortPtr,
 		ControlHost: *controlHostPtr,
 		ControlPort: *controlPortPtr,
 		CertFile:    *certFilePtr,
@@ -86,7 +87,7 @@ func main() {
 	configFile := *configFilePtr // Config file for TLS connection.
 	isTLS := *tlsPtr             // If true, offer HTTPS, otherwise http.
 
-	fmt.Printf("setting up config\n")
+	slog.Info("setting up config\n")
 	SetConfig(configFile, &configFromCommandLine)
 
 	// Ensure that the logging directory exists.
@@ -140,12 +141,12 @@ func main() {
 	go keepCircularQueueUpdated(messageChan, recentMessages)
 
 	// Set up the status reporter and the proxy server
-	m := fmt.Sprintf("setting up status reporter - %s:%d", config.ControlHost, config.ControlPort)
-	rtcmLog.Write([]byte(m))
+	m := fmt.Sprintf("setting up status reporter - %s:%d\n", config.ControlHost, config.ControlPort)
+	slog.Info(m)
 	SetReportFeed(makeReporter(config.ControlHost, config.ControlPort, recentMessages))
 
-	if config.Remotehost == "" {
-		fmt.Fprintf(os.Stderr, "[x] Remote host required")
+	if config.RemoteHost == "" {
+		slog.Error("[x] Remote host required")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -170,17 +171,18 @@ func StartClientListener(isTLS bool) {
 	for {
 		call, err := client.Accept()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to accept call from client: %s\n", err)
+			em := fmt.Sprintf("failed to accept call from client: %s\n", err.Error())
+			slog.Error(em)
 			break
 		}
 		id := ids
 		ids++
-		trace1 := []byte(fmt.Sprintf("[*][%d]connection Accepted from: client %s\n", id, call.RemoteAddr()))
-		rtcmLog.Write(trace1)
+		trace1 := fmt.Sprintf("[*][%d]connection Accepted from: client %s\n", id, call.RemoteAddr())
+		slog.Info(trace1)
 
 		server := connectToServer(isTLS)
 		trace2 := fmt.Sprintf("[*][%d] Connected to server: %s\n", id, server.RemoteAddr())
-		rtcmLog.Write([]byte(trace2))
+		slog.Info(trace2)
 
 		go handleMessages(server, call, isTLS, id)
 	}
@@ -192,9 +194,9 @@ func connectToClient(isTLS bool) (conn net.Listener) {
 	if isTLS {
 		conn, err = tlsListen()
 	} else {
-		trace := fmt.Sprintf("listening on %s\n", fmt.Sprint(config.Localhost, ":", config.Localport))
-		rtcmLog.Write([]byte(trace))
-		conn, err = net.Listen("tcp", fmt.Sprint(config.Localhost, ":", config.Localport))
+		trace := fmt.Sprintf("listening on %s\n", fmt.Sprint(config.ProxyHost, ":", config.ProxyPort))
+		slog.Info(trace)
+		conn, err = net.Listen("tcp", fmt.Sprint(config.ProxyHost, ":", config.ProxyPort))
 	}
 
 	if err != nil {
@@ -209,9 +211,9 @@ func connectToServer(isTLS bool) (conn net.Conn) {
 
 	if isTLS {
 		conf := tls.Config{InsecureSkipVerify: true}
-		conn, err = tls.Dial("tcp", config.Remotehost, &conf)
+		conn, err = tls.Dial("tcp", config.RemoteHost, &conf)
 	} else {
-		conn, err = net.Dial("tcp", config.Remotehost)
+		conn, err = net.Dial("tcp", config.RemoteHost)
 	}
 
 	if err != nil {
@@ -235,7 +237,7 @@ func handleClientMessages(server, client net.Conn, id int) {
 		n, err := client.Read(data)
 		if n > 0 {
 			trace := fmt.Sprintf("From Client [%d]:\n%s\n", id, hex.Dump(data[:n]))
-			rtcmLog.Write([]byte(trace))
+			slog.Info(trace)
 
 			// Send contents of the buffer to the RTCM handler.
 			for i := 0; i < n; i++ {
@@ -259,7 +261,7 @@ func handleServerMessages(server, client net.Conn, id int) {
 		n, err := server.Read(data)
 		if n > 0 {
 			trace := fmt.Sprintf("From Server [%d]:\n%s\n", id, hex.Dump(data[:n]))
-			rtcmLog.Write([]byte(trace))
+			slog.Info(trace)
 			//fmt.Fprintf("From Server:\n%s\n",hex.EncodeToString(data[:n]))
 			// Hang onto the buffer for reporting until the next one arrives
 			reportFeed.RecordServerBuffer(&data, uint64(id), n)
@@ -277,7 +279,8 @@ func SetConfig(configFile string, configFromCommandLine *Config) {
 	if len(configFile) > 0 {
 		file, err := os.Open(configFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[-] Cannot open config file: %s\n", err.Error())
+			em := fmt.Sprintf("[-] Cannot open config file: %s\n", err.Error())
+			slog.Error(em)
 			os.Exit(1)
 		}
 
@@ -289,14 +292,14 @@ func SetConfig(configFile string, configFromCommandLine *Config) {
 
 	} else {
 		config = Config{
-			Localhost:  configFromCommandLine.Localhost,
-			Localport:  configFromCommandLine.Localport,
-			Remotehost: configFromCommandLine.Remotehost,
+			ProxyHost:  configFromCommandLine.ProxyHost,
+			ProxyPort:  configFromCommandLine.ProxyPort,
+			RemoteHost: configFromCommandLine.RemoteHost,
 			TLS:        &TLS{},
 		}
 	}
 	fmt.Printf("remote %s local host %s local port %d\n",
-		config.Remotehost, config.Localhost, config.Localport)
+		config.RemoteHost, config.ProxyHost, config.ProxyPort)
 }
 
 // SetConfigFrom Reader sets the proxy config from data on a reader.
@@ -305,7 +308,8 @@ func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) 
 	data := make([]byte, 4096)
 	n, err := configReader.Read(data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[-] Error reading config file: %s\n", err.Error())
+		em := fmt.Sprintf("[-] Error reading config file: %s\n", err.Error())
+		slog.Error(em)
 		return err
 	}
 
@@ -313,7 +317,8 @@ func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) 
 
 	parseError := parseConfig(data[:n], &config)
 	if parseError != nil {
-		fmt.Fprintf(os.Stderr, "[-] Not a valid config file: %s\n", parseError.Error())
+		em := fmt.Sprintf("[-] Not a valid config file: %s\n", parseError.Error())
+		slog.Error(em)
 		return err
 	}
 
@@ -322,14 +327,14 @@ func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) 
 	if len(configFromCommandLine.CertFile) > 0 {
 		config.CertFile = configFromCommandLine.CertFile
 	}
-	if len(configFromCommandLine.Localhost) > 0 {
-		config.Localhost = configFromCommandLine.Localhost
+	if len(configFromCommandLine.ProxyHost) > 0 {
+		config.ProxyHost = configFromCommandLine.ProxyHost
 	}
-	if configFromCommandLine.Localport != 0 {
-		config.Localport = configFromCommandLine.Localport
+	if configFromCommandLine.ProxyPort != 0 {
+		config.ProxyPort = configFromCommandLine.ProxyPort
 	}
-	if len(configFromCommandLine.Remotehost) > 0 {
-		config.Remotehost = configFromCommandLine.Remotehost
+	if len(configFromCommandLine.RemoteHost) > 0 {
+		config.RemoteHost = configFromCommandLine.RemoteHost
 	}
 	if len(configFromCommandLine.ControlHost) > 0 {
 		config.ControlHost = configFromCommandLine.ControlHost
@@ -339,14 +344,14 @@ func SetConfigFromReader(configReader io.Reader, configFromCommandLine *Config) 
 	}
 
 	// Default settings.
-	if config.Localport == 0 {
-		config.Localport = 2101
+	if config.ProxyPort == 0 {
+		config.ProxyPort = 2101
 	}
 	if config.ControlPort == 0 {
 		config.ControlPort = 8080
 	}
 	if len(config.ControlHost) == 0 {
-		config.ControlHost = config.Localhost
+		config.ControlHost = config.ProxyHost
 	}
 
 	return nil

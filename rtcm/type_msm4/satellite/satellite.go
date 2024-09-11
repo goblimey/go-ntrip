@@ -41,7 +41,7 @@ type Cell struct {
 	RangeWholeMillis uint
 
 	// RangeFractionalMillis - unit10.  The fractional part of the range
-	// in milliseconds.
+	// in units of 1/1024 milliseconds.
 	RangeFractionalMillis uint
 }
 

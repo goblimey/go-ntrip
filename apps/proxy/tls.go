@@ -21,9 +21,9 @@ type TLS struct {
 
 // Config lint
 type Config struct {
-	Remotehost          string `json:"remote_host"`
-	Localhost           string `json:"local_host"`
-	Localport           int    `json:"local_port"`
+	RemoteHost          string `json:"remote_host"`
+	ProxyHost           string `json:"proxy_host"`
+	ProxyPort           int    `json:"proxy_port"`
 	ControlHost         string `json:"control_host"`
 	ControlPort         int    `json:"control_port"`
 	TLS                 *TLS   `json:"tls"`
@@ -80,6 +80,6 @@ func tlsListen() (conn net.Listener, err error) {
 	}
 	conf.Rand = rand.Reader
 
-	conn, err = tls.Listen("tcp", fmt.Sprint(config.Localhost, ":", config.Localport), &conf)
+	conn, err = tls.Listen("tcp", fmt.Sprint(config.ProxyHost, ":", config.ProxyPort), &conf)
 	return
 }

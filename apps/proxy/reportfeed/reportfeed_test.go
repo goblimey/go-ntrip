@@ -6,7 +6,8 @@ import (
 
 	circularQueue "github.com/goblimey/go-ntrip/apps/proxy/circular_queue"
 
-	"github.com/goblimey/go-tools/logger"
+	"github.com/goblimey/go-tools/dailylogger"
+	"github.com/goblimey/go-tools/testsupport"
 )
 
 // TestSanitise tests the Sanitise function.
@@ -50,9 +51,17 @@ func TestStatus(t *testing.T) {
 	clientBuffer := []byte("foo")
 	serverBuffer := []byte("<bar>")
 
-	log := logger.New()
 	q := circularQueue.NewCircularQueue(1)
-	reportFeed := New(log, q)
+
+	workingDirectory, err := testsupport.CreateWorkingDirectory()
+	if err != nil {
+		t.Errorf("createWorkingDirectory failed - %v", err)
+	}
+	defer testsupport.RemoveWorkingDirectory(workingDirectory)
+
+	name := "abc."
+	dailyLog := dailylogger.New("logs", name, ".log")
+	reportFeed := New(dailyLog, q)
 
 	// Record only two characters of the client buffer.
 	reportFeed.RecordClientBuffer(&clientBuffer, 0, 2)

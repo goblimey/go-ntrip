@@ -225,6 +225,9 @@ func (config *Config) WaitAndConnectToInput() io.Reader {
 // connection returned has a read deadline set given by the configuration.
 func (config *Config) getInputFile() io.Reader {
 	for _, name := range config.Filenames {
+
+		// Use https://github.com/tarm/serial
+
 		file, err := os.Open(name)
 		if err == nil {
 			logEntry := fmt.Sprintf("getInputFile: found %s", name)

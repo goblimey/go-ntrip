@@ -11,8 +11,8 @@ func TestParseConfig(t *testing.T) {
 
 	j := `{
 		"remote_host": "remote:1001",
-		"local_host": "local",
-		"local_port": 42,
+		"proxy_host": "local",
+		"proxy_port": 42,
 		"control_port": 43,
 		"tls": {
 			"country": ["GB"],
@@ -35,16 +35,16 @@ func TestParseConfig(t *testing.T) {
 		return
 	}
 
-	if config.Remotehost != "remote:1001" {
-		t.Errorf("want remote:1001 got %s", config.Remotehost)
+	if config.RemoteHost != "remote:1001" {
+		t.Errorf("want remote:1001 got %s", config.RemoteHost)
 	}
 
-	if config.Localhost != "local" {
-		t.Errorf("want local got %s", config.Localhost)
+	if config.ProxyHost != "local" {
+		t.Errorf("want local got %s", config.ProxyHost)
 	}
 
-	if config.Localport != 42 {
-		t.Errorf("want 42 got %d", config.Localport)
+	if config.ProxyPort != 42 {
+		t.Errorf("want 42 got %d", config.ProxyPort)
 	}
 
 	if config.ControlPort != 43 {

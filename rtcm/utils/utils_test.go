@@ -133,7 +133,7 @@ func TestParseMilliseconds(t *testing.T) {
 // TestGetScaledRange checks GetScaledRange.
 func TestGetScaledRange(t *testing.T) {
 
-	// GetcaledRange combine the 8-bit unsigned whole range, the 10-bit
+	// GetScaledRange combine the 8-bit unsigned whole range, the 10-bit
 	// unsigned fractional range and the 20-bit signed delta to get a
 	// scaled integer with 18 bits whole and 19 bits fractional.  The whole
 	// and the delta may both have values indicating that they are invalid
@@ -1177,7 +1177,7 @@ func TestGetDailyLogger(t *testing.T) {
 
 	wantDir := workingDirectory + "/logs"
 
-	logger := GetDailyLogger()
+	logger := GetDailyLogger("abc")
 
 	if logger == nil {
 		t.Error("expected a logger")
@@ -1192,10 +1192,10 @@ func TestGetDailyLogger(t *testing.T) {
 		t.Errorf("want 1 file got %d", len(fileInfo))
 	}
 
-	if !strings.Contains(fileInfo[0].Name(), "rtcmfilter.") ||
+	if !strings.Contains(fileInfo[0].Name(), "abc.") ||
 		!strings.Contains(fileInfo[0].Name(), ".log") {
 
-		t.Errorf("want rtcmfilter.yyyy-mm-dd.log, got %s", fileInfo[0].Name())
+		t.Errorf("want abc.yyyy-mm-dd.log, got %s", fileInfo[0].Name())
 	}
 
 }

@@ -64,7 +64,6 @@ const TwoToThePower29 = 0x20000000
 // TwoToThePower31: 1000 0000 0000 0000 0000 0000 0000 0000
 const TwoToThePower31 = 0x80000000
 
-
 // Handling of timestamps and the equivalent times.
 
 // Multiple Signal Messages contain a thirty-bit timestamp which is the time
@@ -1181,9 +1180,11 @@ func EqualWithin(precision uint, f1, f2 float64) bool {
 }
 
 // GetDailyLogger gets a daily log file which can be written to as a logger
-// (each line decorated with filename, date, time, etc).
-func GetDailyLogger() *log.Logger {
-	dailyLog := dailylogger.New("logs", "rtcmfilter.", ".log")
+// (each line decorated with filename, date, time, etc).  The name argument
+// is used to form the log file name.
+func GetDailyLogger(leader string) *log.Logger {
+	name := leader + "."
+	dailyLog := dailylogger.New("logs", name, ".log")
 	logFlags := log.LstdFlags | log.Lshortfile | log.Lmicroseconds
-	return log.New(dailyLog, "rtcmfilter", logFlags)
+	return log.New(dailyLog, leader, logFlags)
 }

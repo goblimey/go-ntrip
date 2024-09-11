@@ -28,21 +28,12 @@ type Cell struct {
 	// Wavelength is the wavelength of the signal
 	Wavelength float64
 
-	// RangeWholeMillis from the satellite cell is
-	// Whole milliseconds of range 0-255. It's used to calculate the range and the phase
-	// range.  0xff indicates an invalid value, meaning that all range values should be
-	// ignored.
-	// RangeWholeMillisFromSatelliteCell uint
-
-	// RangeFractionalMillisFromSatelliteCell is the RangeFractionalMillis value for the
-	// satellite cell.  The units are 1/1024 milliseconds.  The values is used to
-	// calculate the range and phase range.
-	// RangeFractionalMillisFromSatelliteCell uint
-
 	// RangeDelta - int15.  A scaled value representing a small signed delta to be added to
-	// the range values from the satellite to get the range as the transit time of the signal.
-	// To get the range in metres, multiply the result by one light millisecond, the distance
-	// light travels in a millisecond.
+	// the range values from the satellite to get the range as the transit time of the
+	// signal.  The value is in units of (two to the power of -24) milliseconds.  To get
+	// the range in metres, multiply the result by one light millisecond (the distance
+	// light travels in a millisecond).  The function RangeInMetres combines the 3 values
+	// and returns th result in metres.
 	RangeDelta int
 
 	// PhaseRangeDelta - int22.  Invalid if the top bit is set and the others are all zero
@@ -280,7 +271,7 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 // GetAggregateRange takes the range values from an MSM4 signal cell (including some
 // copied from the MSM4satellite cell) and returns the range as a 37-bit scaled unsigned
 // integer with 8 bits whole part and 29 bits fractional part.  This is the transit time
-// of the signal in milliseconds.  Use getRangeInMetres to convert it to a distance in
+// of the signal in milliseconds.  Use RangeInMetres to convert it to a distance in
 // metres.  The whole millis value and/or the delta value can indicate that the
 // measurement was invalid.  If the approximate range value in the satellite cell is
 // invalid, the result is 0.  If the delta in the signal cell is invalid, the result is
@@ -359,7 +350,6 @@ func (cell *Cell) GetAggregatePhaseRange() uint64 {
 
 // RangeInMillis gives the distance from the satellite to the GPS device derived from
 // the satellite and signal cell as the transit time in milliseconds.
-
 func (cell *Cell) RangeInMillis() float64 {
 	// Get the range as a 37-bit scaled integer, 8 bits whole, 29 bits fractional
 	// representing the transit time in milliseconds.

@@ -61,10 +61,11 @@ var Fake1230 = []byte{0xd3, 0x00, 0x08,
 	0xa8, 0xf7, 0x2a,
 }
 
-var MessageFrameWithCRCFailure = []byte{0xd3, 0, 0x08,
+var MessageFrameWithCRCFailure = []byte{
+	0xd3, 0, 0x08,
 	0x4c, 0xe0, 0x00,
 	0x8a, 0, 0, 0, 0,
-	// For a legal CRC the next line would be 0xa8, 0xf7, 0x2a,
+	// The legal CRC is 0xa8, 0xf7, 0x2a,
 	0xa8, 0xf7, 0x2b,
 }
 
@@ -134,8 +135,8 @@ Frame length 27 bytes:
 
 stationID 2, ITRF realisation year 3, unknown bits 1111,
 x 123456, unknown bits 01, y 234567, unknown bits 10, z 345678,
-ECEF coords in meters (12.3456, 23.4567, 34.5678)
-Antenna height 0.0513 meters
+ECEF coords in metres (12.3456, 23.4567, 34.5678)
+Antenna height 0.0513 metres
 `
 
 var MessageFrameType1077 = []byte{

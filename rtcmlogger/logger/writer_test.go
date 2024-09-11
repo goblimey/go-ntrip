@@ -1,20 +1,22 @@
 package logger
 
 import (
+	"crypto/rand"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/goblimey/go-ntrip/rtcm/utils"
 	"github.com/goblimey/go-tools/clock"
+
+	"github.com/goblimey/go-ntrip/rtcm/utils"
+	"github.com/goblimey/go-ntrip/rtcmlogger/config"
 )
 
 // TestGetStartOfDay tests the getStartOfDay method.
-func TestGetStartOfday(t *testing.T) {
+func TestGetStartOfDay(t *testing.T) {
 	// This replicates the logic of the function under test, so it's
 	// really just a round trip test.
 	now := time.Date(2020, time.February, 14, 22, 12, 0, 0, utils.LocationUTC)
@@ -193,7 +195,13 @@ func TestWriteWhenLoggingEnabled(t *testing.T) {
 	// create a daily logger with a real clock, so that will create a log file with
 	// a datestamp that we can't easily predict.  However, there should only be one
 	// logfile so we can just look for it.
-	writer := NewRTCMWriter(clock, loggingDirectory)
+	var m sync.Mutex
+	writer := NewRTCMWriter(clock, loggingDirectory, &m)
+	// This is only testing the write capability, so turn off the log
+	// pusher.
+	writer.YearOfLastWrite = time.Now().Year()
+	writer.MonthOfLastWrite = time.Now().Month()
+	writer.DayOfLastWrite = time.Now().Day()
 
 	buffer := []byte("hello ")
 
@@ -225,7 +233,7 @@ func TestWriteWhenLoggingEnabled(t *testing.T) {
 
 	// Find the log file.
 	logDirectoryPathName := wd + "/" + loggingDirectory
-	fileInfoList, err := ioutil.ReadDir(logDirectoryPathName)
+	fileInfoList, err := os.ReadDir(logDirectoryPathName)
 	if err != nil {
 		t.Fatalf("Cannot scan directory %s - %v", logDirectoryPathName, err)
 	}
@@ -301,7 +309,13 @@ func TestNoWriteWhenLoggingDisabled(t *testing.T) {
 	// create a daily logger with a real clock, so that will create a log file with
 	// a datestamp that we can't easily predict.  However, there should only be one
 	// logfile so we can just look for it.
-	writer := NewRTCMWriter(clock, loggingDirectory)
+	var m sync.Mutex
+	writer := NewRTCMWriter(clock, loggingDirectory, &m)
+	// turn off the log
+	// pusher.
+	writer.YearOfLastWrite = time.Now().Year()
+	writer.MonthOfLastWrite = time.Now().Month()
+	writer.DayOfLastWrite = time.Now().Day()
 
 	buffer := []byte("hello")
 
@@ -339,7 +353,7 @@ func TestNoWriteWhenLoggingDisabled(t *testing.T) {
 
 	// Check that the log file is empty.
 	logDirectoryPathName := wd + "/" + loggingDirectory
-	fileInfoList, err := ioutil.ReadDir(logDirectoryPathName)
+	fileInfoList, err := os.ReadDir(logDirectoryPathName)
 
 	if err != nil {
 		t.Fatalf("Cannot scan directory %s - %v", logDirectoryPathName, err)
@@ -360,9 +374,14 @@ func TestNoWriteWhenLoggingDisabled(t *testing.T) {
 	}
 
 	fileInfo := fileInfoList[0]
-	if fileInfo.Size() > 0 {
+	fi, err := fileInfo.Info()
+	if err != nil {
+		t.Error(err)
+	}
+	size := fi.Size()
+	if size > 0 {
 		t.Fatalf("log file %s contains %d bytes.  Should be empty",
-			fileInfo.Name(), fileInfo.Size())
+			fileInfo.Name(), size)
 	}
 }
 
@@ -411,12 +430,21 @@ func TestPushOldLogs(t *testing.T) {
 	}
 	file.Close()
 
+	var m sync.Mutex
+	writer := NewRTCMWriter(nil, loggingDirectory, &m)
+	// turn off the log
+	// pusher.
+	writer.YearOfLastWrite = time.Now().Year()
+	writer.MonthOfLastWrite = time.Now().Month()
+	writer.DayOfLastWrite = time.Now().Day()
+	cfg := config.Config{MessageLogDirectory: loggingDirectory}
+	writer.CFG = &cfg
 	// Push the non-matching files into the subdirectory
-	pushOldLogs(loggingDirectory, now)
+	writer.pushOldLogs(loggingDirectory, now)
 
 	// The current directory should contain the logfile and the subdirectory
 	// for old log files, containing files "foo" and "bar".
-	files, err := ioutil.ReadDir(loggingDirectory)
+	files, err := os.ReadDir(loggingDirectory)
 	if err != nil {
 		t.Fatalf("cannot scan directory %s - %v", loggingDirectory, err)
 	}
@@ -425,23 +453,23 @@ func TestPushOldLogs(t *testing.T) {
 			len(files))
 	}
 
-	if files[0].Name() != subDirectoryForOldLogs &&
+	if files[0].Name() != writer.CFG.DirectoryForOldLogs &&
 		files[0].Name() != todaysLogFileName {
 
 		t.Fatalf("expected file %s or %s, actually found %s",
-			subDirectoryForOldLogs, todaysLogFileName, files[0].Name())
+			writer.CFG.DirectoryForOldLogs, todaysLogFileName, files[0].Name())
 	}
 
-	if files[1].Name() != subDirectoryForOldLogs &&
+	if files[1].Name() != writer.CFG.DirectoryForOldLogs &&
 		files[1].Name() != todaysLogFileName {
 
 		t.Fatalf("expected file %s or %s, actually found %s",
-			subDirectoryForOldLogs, todaysLogFileName, files[1].Name())
+			writer.CFG.DirectoryForOldLogs, todaysLogFileName, files[1].Name())
 	}
 
 	// Check that the destination contains the file
-	pathname = loggingDirectory + "/" + subDirectoryForOldLogs
-	files, err = ioutil.ReadDir(pathname)
+	pathname = writer.CFG.DirectoryForOldLogs
+	files, err = os.ReadDir(pathname)
 	if err != nil {
 		t.Fatalf("cannot scan directory %s - %v", pathname, err)
 	}

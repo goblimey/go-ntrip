@@ -1,6 +1,7 @@
 package type1005
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/testdata"
@@ -20,9 +21,10 @@ func TestNew(t *testing.T) {
 		AntennaRefY:         5,
 		Ignored3:            2,
 		AntennaRefZ:         6,
+		logLevel:            slog.LevelDebug,
 	}
 
-	got := New(2, 3, 0xf, 4, 1, 5, 2, 6)
+	got := New(2, 3, 0xf, 4, 1, 5, 2, 6, slog.LevelDebug)
 
 	if want != *got {
 		t.Errorf("want: %v\n got: %v\n", want, *got)
@@ -31,15 +33,22 @@ func TestNew(t *testing.T) {
 
 func TestString(t *testing.T) {
 
-	const want = `stationID 2, ITRF realisation year 3, unknown bits 1111,
+	const wantDebug = `stationID 2, ITRF realisation year 3, unknown bits 1111,
 x 12345, unknown bits 01, y 23456, unknown bits 10, z 34567,
 ECEF coords in metres (1.2345, 2.3456, 3.4567)
 `
 
-	got := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567)
+	const wantInfo = `stationID 2, ITRF realisation year 3
+ECEF coords in metres (1.2345, 2.3456, 3.4567)
 
-	if want != got.String() {
-		t.Error(diff.Diff(want, got.String()))
+`
+
+	message := New(2, 3, 0xf, 12345, 1, 23456, 2, 34567, slog.LevelDebug)
+
+	got := message.String()
+
+	if wantDebug != got {
+		t.Error(diff.Diff(wantDebug, got))
 	}
 }
 
@@ -61,11 +70,12 @@ func TestGetMessage(t *testing.T) {
 		{"short", testdata.MessageFrameType1005[:24], "overrun - expected 152 bits in a message type 1005, got 144", nil},
 		// This contains a 3 byte leader, 19 bytes of embedded message and a 3 byte CRC,
 		// 25 bytes (160 bits) in all.
-		{"complete", testdata.MessageFrameType1005, "", New(2, 3, 0xf, 123456, 1, 234567, 2, 345678)},
+		{"complete", testdata.MessageFrameType1005, "",
+			New(2, 3, 0xf, 123456, 1, 234567, 2, 345678, slog.LevelDebug)},
 	}
 
 	for _, td := range testData {
-		gotMessage, gotError := GetMessage(td.bitStream)
+		gotMessage, gotError := GetMessage(td.bitStream, slog.LevelDebug)
 		if len(td.wantError) > 0 {
 			// Expect an error.
 			if gotMessage != nil {
@@ -102,7 +112,7 @@ func TestGetMessage(t *testing.T) {
 // on a bit stream that doesn't contain a message of type 1005.
 func TestIncorrectMessageType(t *testing.T) {
 	const want = "expected message type 1005 got 1077"
-	message, err := GetMessage(testdata.MessageFrameType1077)
+	message, err := GetMessage(testdata.MessageFrameType1077, slog.LevelDebug)
 	if err == nil {
 		t.Error("expected an error")
 		return

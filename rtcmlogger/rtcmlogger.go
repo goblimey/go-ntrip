@@ -22,15 +22,16 @@
 // collected within a 24-hour period.  This only applies to the messages written to the
 // logfile, not the ones written to the stdout.  All incoming messages are written to
 // stdout regardless of the time of day.
-//
 package main
 
 import (
+	"flag"
+	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 
-	"github.com/goblimey/go-ntrip/jsonconfig"
+	"github.com/goblimey/go-ntrip/rtcmlogger/config"
 	rtcmLogger "github.com/goblimey/go-ntrip/rtcmlogger/logger"
 	"github.com/goblimey/go-tools/dailylogger"
 )
@@ -39,109 +40,149 @@ const bufferLength = 8096
 
 var ch chan []byte
 
-// controlFileName is the name of the JSON control file that defines
-// the names of the potential input files.
-const controlFileName = "./ntrip.json"
-
 // logDirectory is the directory for RTCM logs.  The default is ".".
 var logDirectory string
 
 // eventLogger writes to the daily event log.
-var eventLog *log.Logger
+var eventLogger *slog.Logger
 
-// These control the logging of failures - a stream of failures is only
-// logged once.
+// These control the logging of failures.  To avoid flooding the file system,
+// a stream of failures with no successes is only logged once.
 var reportingWriteErrors = true
 var reportingChannelErrors = true
-var reportingLogWriteFailures = true
-
-func init() {
-	// Create the event log.
-	eventLogger := dailylogger.New(".", "rtcmlogger.", ".log")
-	eventLog = log.New(eventLogger, "rtcmlogger",
-		log.LstdFlags|log.Lshortfile)
-}
+var reportingWriteFailures = true
 
 func main() {
 
-	jsonConfig, err := jsonconfig.GetJSONConfigFromFile(controlFileName, eventLog)
+	// First get the config.  This defines the name and location of the
+	// system log (if any) so until we have it, we log any errors to stderr.
 
-	if err != nil {
-		// There is no JSON config file.  We can't continue.
-		eventLog.Fatalf("cannot find config %s", controlFileName)
-		os.Exit(1)
+	// Get the name of the config file (mandatory).
+	var configFileName string
+	flag.StringVar(&configFileName, "c", "", "JSON config file")
+	flag.StringVar(&configFileName, "config", "", "JSON config file")
+
+	flag.Parse()
+
+	if len(configFileName) == 0 {
+		os.Stderr.Write([]byte("missing config file: -c or --config"))
+		os.Exit(-1)
 	}
 
-	// The directory in which to record messages is defined in the JSON control
-	// file, or "." by default.
-	if len(jsonConfig.MessageLogDirectory) == 0 {
-		jsonConfig.MessageLogDirectory = "."
+	// Get the config.
+	cfg, errConfig := config.GetConfig(configFileName)
+
+	if errConfig != nil {
+		os.Stderr.Write([]byte((errConfig.Error())))
+		os.Exit(-1)
 	}
 
-	ch = make(chan []byte)
-	defer close(ch)
-
-	go recorder(jsonConfig.MessageLogDirectory)
-
-	buffer := make([]byte, bufferLength)
-
-	if jsonConfig.RecordMessages {
-		ch = make(chan []byte)
-	defer close(ch)
-	go recorder(jsonConfig.MessageLogDirectory)
+	// The directory in which to record messages is defined in the
+	// JSON config file, or "." by default.
+	if len(cfg.MessageLogDirectory) == 0 {
+		cfg.MessageLogDirectory = "."
 	}
+
+	if cfg.LogEvents {
+		// Create the event logger.  It uses structured logging and
+		// switches to a new file each day with a datestamped name.
+		dailyEventLogger := dailylogger.New(cfg.MessageLogDirectory, "rtcmlogger.", ".log")
+		eventLogger = slog.New(slog.NewTextHandler(dailyEventLogger, nil))
+	}
+
+	if cfg.RecordMessages {
+		cfg.RecorderChannel = make(chan []byte)
+		defer close(cfg.RecorderChannel)
+		dailyRecorder := dailylogger.New(".", "rtcmlogger.", ".rtcm")
+		// Run the recorder.  It runs until cfg.RecorderChannel is closed,
+		// which happens as this function returns.
+		go recorder(dailyRecorder, cfg)
+	}
+
+	// readAndWrite runs until the input is exhausted (which may never
+	// happen).  If it returns, the defer above closes the recorder
+	// channel which stops the recorder goroutine.
+	readAndWrite(cfg)
+}
+
+func readAndWrite(cfg *config.Config) {
+
+	readBuffer := make([]byte, bufferLength)
+
+	// Loop reading from stdin, writing to stdout and, if
+	// directed by the config, recording the data.
 
 	for {
 
-		// Read a block from stdin, send a copy to the recorder and
-		// write the block to stdout.
+		// Read a block from stdin, and write it to stdout.  If
+		// configured, send a copy to the recorder.
 
-		n, err := os.Stdin.Read(buffer)
-		if err == io.EOF {
+		n, errRead := os.Stdin.Read(readBuffer)
+		if errRead == io.EOF {
 			break
 		}
-		if err != nil {
+		if errRead != nil {
 			if reportingWriteErrors {
-				reportingWriteErrors = false // stop logging write failures
-				eventLog.Println(err)
+				eventLogger.Error(errRead.Error())
+				// Only report repeated failures once.
+				reportingWriteErrors = false
 			}
 		} else {
-			reportingWriteErrors = true // start logging write failures
+			// After a successful read, re-enable reporting.
+			reportingWriteErrors = true
 		}
 
 		// Write the data to stdout
-		_, err = os.Stdout.Write(buffer[:n])
+		_, errRead = os.Stdout.Write(readBuffer[:n])
 
-		if jsonConfig.RecordMessages {
-			// Copy the data and send it to the logging channel.
-			copyBuffer := make([]byte, n)
-			copy(copyBuffer, buffer[:n])
-			ch <- copyBuffer
-			if err != nil {
-				if reportingChannelErrors {
-					reportingChannelErrors = false // Stop logging channel failures.
-					eventLog.Printf("write failed %v\n", err)
-				}
-			} else {
-				reportingChannelErrors = true // Start logging channel failures.
+		if errRead != nil {
+			if cfg.LogEvents && reportingChannelErrors {
+				em := fmt.Sprintf("read failed - %v\n", errRead)
+				eventLogger.Error(em)
+				// Only report repeated failures once.
+				reportingChannelErrors = false
 			}
+		} else {
+			// After a successful fetch attempt, re-enable reporting.
+			reportingChannelErrors = true
 		}
+
+		if cfg.RecorderChannel != nil {
+			// Recording is on.  Copy the data and send it to the
+			// recorder channel.
+			copyBuffer := make([]byte, n)
+			copy(copyBuffer, readBuffer[:n])
+			cfg.RecorderChannel <- copyBuffer
+		}
+	}
+
+	if cfg.LogEvents {
+		eventLogger.Info("end of file")
 	}
 }
 
-// recorder loops, reading buffers from the channel and writing them to the daily log file.
-func recorder(logDirectory string) {
-	// The logWriter handles the timing and naming rules for logging.  It creates a new log
-	// file each morning and over the day it appends to that file.  When logging is disabled
-	// it discards anything written to it.
-	logWriter := newLogWriter(logDirectory)
+// recorder loops, reading buffers from the channel and writing them
+// to the daily log file.
+func recorder(writer io.Writer, cfg *config.Config) {
 
-	// Receive and write messages the program exits.
+	if writer == nil {
+		return
+	}
+
+	if cfg.RecorderChannel == nil {
+		return
+	}
+
+	// Receive and write messages until cfg.RecorderChannel
+	// is closed.
 	for {
-		buffer, ok := <-ch
-		if ok {
-			writeBuffer(&buffer, logWriter)
+		buffer, ok := <-cfg.RecorderChannel
+		if !ok {
+			// We're done!
+			break
 		}
+
+		writeBuffer(&buffer, writer, cfg)
 	}
 }
 
@@ -151,20 +192,30 @@ func newLogWriter(logDirectory string) io.Writer {
 	return rtcmLogger.New(logDirectory)
 }
 
-// writeBuffer writes the buffer to the RTCM log file.  It's separated out to
-// support integration testing.
-//
-func writeBuffer(buffer *[]byte, writer io.Writer) {
+// writeBuffer writes the buffer to the writer and, if configured, to
+// the log file.  It's separated out to support unit testing.
+func writeBuffer(buffer *[]byte, writer io.Writer, cfg *config.Config) {
+
 	n, err := writer.Write(*buffer)
+
 	if err != nil {
-		reportingLogWriteFailures = false // Stop logging failures.
-		log.Printf("write to daily RTCM log failed - %s\n", err.Error())
-	} else {
-		reportingLogWriteFailures = true // Start logging failures.
+		if cfg.LogEvents && reportingWriteFailures {
+			em := fmt.Sprintf("write to daily RTCM log failed - %s", err.Error())
+			eventLogger.Error(em)
+			// Only report repeated failures once.
+			reportingWriteFailures = false
+		} else {
+			// After a successful attempt, re-enable reporting.
+			reportingWriteFailures = true
+		}
 	}
 
 	if n != len(*buffer) {
-		log.Printf("warning: only wrote %d of %d bytes to the daily RTCM log\n",
-			n, len(*buffer))
+		if cfg.LogEvents && reportingWriteFailures {
+			em := fmt.Sprintf(
+				"warning: only wrote %d of %d bytes to the daily RTCM log",
+				n, len(*buffer))
+			eventLogger.Error(em)
+		}
 	}
 }

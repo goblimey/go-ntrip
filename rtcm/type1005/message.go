@@ -3,6 +3,7 @@ package type1005
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
@@ -58,10 +59,15 @@ type Message struct {
 
 	// AntennaRefZ is the antenna Reference Point coordinate X in ECEF - int38.
 	AntennaRefZ int64 `json:"antenna_ref_z,omitempty"`
+
+	// logLevel is s slog-style logging level.
+	logLevel slog.Level
 }
 
+// New creates a new type 1005 message.
 func New(stationID, itrfRealisationYear, ignored1 uint,
-	antennaRefX int64, ignored2 uint, antennaRefY int64, ignored3 uint, antennaRefZ int64) *Message {
+	antennaRefX int64, ignored2 uint, antennaRefY int64,
+	ignored3 uint, antennaRefZ int64, logLevel slog.Level) *Message {
 
 	message := Message{
 		MessageType:         utils.MessageType1005,
@@ -73,6 +79,7 @@ func New(stationID, itrfRealisationYear, ignored1 uint,
 		AntennaRefY:         antennaRefY,
 		Ignored3:            ignored3,
 		AntennaRefZ:         antennaRefZ,
+		logLevel:            logLevel,
 	}
 
 	return &message
@@ -81,11 +88,18 @@ func New(stationID, itrfRealisationYear, ignored1 uint,
 // String returns a text version of a message type 1005
 func (message *Message) String() string {
 
-	display := fmt.Sprintf("stationID %d, ITRF realisation year %d, unknown bits %04b,\n",
-		message.StationID, message.ITRFRealisationYear, message.Ignored1)
-	display += fmt.Sprintf("x %d, unknown bits %02b, y %d, unknown bits %02b, z %d,\n",
-		message.AntennaRefX, message.Ignored2, message.AntennaRefY,
-		message.Ignored3, message.AntennaRefZ)
+	display := fmt.Sprintf("stationID %d, ITRF realisation year %d, ",
+		message.StationID, message.ITRFRealisationYear)
+
+	if message.logLevel == slog.LevelInfo {
+		display += "\n"
+	} else {
+		display += fmt.Sprintf("unknown bits %04b,\n",
+			message.Ignored1)
+		display += fmt.Sprintf("x %d, unknown bits %02b, y %d, unknown bits %02b, z %d,\n",
+			message.AntennaRefX, message.Ignored2, message.AntennaRefY,
+			message.Ignored3, message.AntennaRefZ)
+	}
 
 	// The Antenna Reference coordinates are in units of 1/10,000 of a metre.
 	const scaleFactor = 0.0001
@@ -99,7 +113,7 @@ func (message *Message) String() string {
 }
 
 // GetMessage returns a text version of a message type 1005
-func GetMessage(bitStream []byte) (*Message, error) {
+func GetMessage(bitStream []byte, logLevel slog.Level) (*Message, error) {
 
 	// The bit stream contains a 3-byte leader, an embedded message and a 3-byte CRC.
 	// Here we are only concerned with the embedded message.
@@ -145,6 +159,7 @@ func GetMessage(bitStream []byte) (*Message, error) {
 	pos += lenAntennaRefZ
 
 	message := New(stationID, itrfRealisationYear, ignored1,
-		antennaRefX, ignored2, antennaRefY, ignored3, antennaRefZ)
+		antennaRefX, ignored2, antennaRefY, ignored3,
+		antennaRefZ, logLevel)
 	return message, nil
 }

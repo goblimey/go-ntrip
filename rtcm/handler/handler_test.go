@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"log/slog"
 	"math"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestHandleMessagesFromChannel(t *testing.T) {
 	// Expect the resulting messages on this channel.
 	ch_result := make(chan Message, 10)
 
-	rtcmHandler := New(time.Now())
+	rtcmHandler := New(time.Now(), slog.LevelDebug)
 
 	// Test
 	rtcmHandler.HandleMessages(ch_source, ch_result)
@@ -152,7 +153,8 @@ func TestFetchNextMessageFrame(t *testing.T) {
 		{"incomplete", testdata.IncompleteMessage, utils.NonRTCMMessage, ""},
 		// The message length must be no more than 1024 bytes.
 		{"Length too big", testdata.MessageFrameWithLengthTooBig, utils.NonRTCMMessage, ""},
-		{"bad CRC", testdata.MessageFrameWithCRCFailure, utils.NonRTCMMessage, "CRC is not valid"},
+		{"bad CRC", testdata.MessageFrameWithCRCFailure, utils.NonRTCMMessage,
+			"CRC check failed on message type 1230, length 0x8 - given a8 f7 2b, calculated a8 f7 2a"},
 		{"junk followed by RTCM", testdata.JunkAtStart, utils.NonRTCMMessage, ""},
 		{"all junk", testdata.AllJunk, utils.NonRTCMMessage, ""},
 		{"1077", testdata.MessageFrameType1077, utils.MessageTypeMSM7GPS, ""},
@@ -171,7 +173,7 @@ func TestFetchNextMessageFrame(t *testing.T) {
 
 		// Tuesday 29/8/23.
 		startDate := time.Date(2023, time.August, 29, 00, 00, 00, 0, utils.LocationUTC)
-		handler := New(startDate)
+		handler := New(startDate, slog.LevelDebug)
 
 		gotMessage, gotError := handler.FetchNextMessageFrame(bc)
 
@@ -220,7 +222,7 @@ func TestFetchNextMessageFrameWithNilOrEmptyFrame(t *testing.T) {
 
 		// Tuesday 29/8/23.
 		startDate := time.Date(2023, time.August, 29, 00, 00, 00, 0, utils.LocationUTC)
-		handler := New(startDate)
+		handler := New(startDate, slog.LevelDebug)
 
 		gotMessage, gotError := handler.FetchNextMessageFrame(bc)
 
@@ -262,7 +264,7 @@ func TestGetMessageLengthAndType(t *testing.T) {
 			"bits 8-13 of header are 63, must be 0"},
 	}
 	for _, td := range testData {
-		handler := New(time.Now())
+		handler := New(time.Now(), slog.LevelDebug)
 		gotMessageLength, gotMessageType, gotError := handler.getMessageLengthAndType(td.bitStream)
 		if td.wantError != "" {
 			if td.wantError != gotError.Error() {
@@ -295,7 +297,7 @@ func TestGetMessage(t *testing.T) {
 	}
 	for _, td := range testData {
 		startTime := time.Date(2020, time.December, 9, 0, 0, 0, 0, utils.LocationUTC)
-		handler := New(startTime)
+		handler := New(startTime, slog.LevelDebug)
 
 		got, messageFetchError := handler.GetMessage(td.bitStream)
 		if messageFetchError != nil {
@@ -337,7 +339,7 @@ func TestGetMessageWithErrors(t *testing.T) {
 	}
 	for _, td := range testData {
 		startTime := time.Now()
-		handler := New(startTime)
+		handler := New(startTime, slog.LevelDebug)
 		gotMessage, gotError := handler.GetMessage(td.frame)
 		if td.want == "" {
 			if gotMessage == nil {
@@ -394,7 +396,7 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 	}
 	for _, td := range testData {
 		startTime := time.Now()
-		handler := New(startTime)
+		handler := New(startTime, slog.LevelDebug)
 		gotMessage, gotError := handler.GetMessage(td.frame)
 
 		if len(td.wantError) > 0 {
@@ -461,7 +463,7 @@ func TestPrepareForDisplayWithRealData(t *testing.T) {
 	ch_result := make(chan Message, 10)
 
 	startTime := time.Date(2020, time.November, 13, 0, 0, 0, 0, utils.LocationUTC)
-	rtcmHandler := New(startTime)
+	rtcmHandler := New(startTime, slog.LevelDebug)
 
 	// Test
 	rtcmHandler.HandleMessages(ch_source, ch_result)
@@ -727,7 +729,7 @@ func TestStartTimes(t *testing.T) {
 
 	for _, td := range testData {
 
-		h := New(td.startTime)
+		h := New(td.startTime, slog.LevelDebug)
 		startOfWeek, err := h.getStartOfWeek(td.messageType)
 		if err != nil {
 			t.Error(err)
@@ -797,7 +799,7 @@ func TestGlonassStartTimes(t *testing.T) {
 
 	for _, td := range testData {
 
-		handler := New(td.startTime)
+		handler := New(td.startTime, slog.LevelDebug)
 
 		if !td.wantStartOfWeek.Equal(handler.startOfGlonassWeek) {
 			t.Errorf("start - %s: want %s got %s\n",
@@ -857,7 +859,12 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 
 	shortBitStream := testdata.MessageBatchWithJunk[:16]
 
-	message := NewMessage(utils.MessageTypeMSM7GPS, "", shortBitStream)
+	message := NewMessage(
+		utils.MessageTypeMSM7GPS,
+		"",
+		shortBitStream,
+		slog.LevelDebug,
+	)
 
 	PrepareForDisplay(message)
 
@@ -878,7 +885,12 @@ func TestPrepareForDisplayWithErrorMessage(t *testing.T) {
 // TestAnalyseWithMSM4 checks that Analyse correctly handles an MSM4.
 func TestAnalyseWithMSM4(t *testing.T) {
 
-	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_2)
+	message := NewMessage(
+		utils.MessageTypeMSM4GPS,
+		"",
+		testdata.MessageFrameType1074_2,
+		slog.LevelDebug,
+	)
 
 	Analyse(message)
 
@@ -901,7 +913,12 @@ func TestAnalyseWithMSM4(t *testing.T) {
 // TestAnalyseWithMSM7 checks that Analyse correctly handles an MSM7.
 func TestAnalyseWithMSM7(t *testing.T) {
 
-	message := NewMessage(utils.MessageTypeMSM7GPS, "", testdata.MessageFrame1077)
+	message := NewMessage(
+		utils.MessageTypeMSM7GPS,
+		"",
+		testdata.MessageFrame1077,
+		slog.LevelDebug,
+	)
 
 	Analyse(message)
 
@@ -924,7 +941,12 @@ func TestAnalyseWithMSM7(t *testing.T) {
 // TestAnalyseWith1005 checks that Analyse correctly handles a message type 1005 (base position).
 func TestAnalyseWith1005(t *testing.T) {
 
-	message := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
+	message := NewMessage(
+		utils.MessageType1005,
+		"",
+		testdata.MessageFrameType1005,
+		slog.LevelDebug,
+	)
 
 	Analyse(message)
 
@@ -943,7 +965,12 @@ func TestAnalyseWith1005(t *testing.T) {
 // TestAnalyseWith1006 checks that Analyse correctly handles a message type 1006 (base position and height).
 func TestAnalyseWith1006(t *testing.T) {
 
-	message := NewMessage(utils.MessageType1006, "", testdata.MessageFrameType1006)
+	message := NewMessage(
+		utils.MessageType1006,
+		"",
+		testdata.MessageFrameType1006,
+		slog.LevelDebug,
+	)
 
 	Analyse(message)
 
@@ -963,7 +990,12 @@ func TestAnalyseWith1006(t *testing.T) {
 // (the correct behaviour being to set the Readable field to a string).
 func TestAnalyseWith1230(t *testing.T) {
 
-	message := NewMessage(utils.MessageTypeGCPB, "", testdata.Fake1230)
+	message := NewMessage(
+		utils.MessageTypeGCPB,
+		"",
+		testdata.Fake1230,
+		slog.LevelDebug,
+	)
 
 	Analyse(message)
 
@@ -1089,7 +1121,7 @@ func TestConversionOfTimeToUTC(t *testing.T) {
 	}
 	for _, td := range testData {
 
-		handler := New(td.startTime)
+		handler := New(td.startTime, slog.LevelDebug)
 
 		_, err1 := handler.getTimeFromTimeStamp(td.messageType, td.timestamp1)
 
@@ -1204,7 +1236,7 @@ func TestGetTimeFromTimeStampWithError(t *testing.T) {
 	for _, td := range testData {
 		// The start time is irrelevant so any will do.
 		startTime := time.Now()
-		handler := New(startTime)
+		handler := New(startTime, slog.LevelDebug)
 		var zeroTime time.Time // zeroTime is the default time value.
 
 		gotTime, gotError := handler.getTimeFromTimeStamp(td.hdr.MessageType, td.hdr.Timestamp)
@@ -1244,7 +1276,7 @@ func TestGetUTCFromGlonassTimeWithIllegalDay(t *testing.T) {
 		{"day/timestamp", illegal2},
 	}
 	for _, td := range testData {
-		handler := New(time.Now())
+		handler := New(time.Now(), slog.LevelDebug)
 		utcTime, err := handler.getUTCFromGlonassTime(td.timestamp)
 
 		if !utcTime.Equal(zeroTimeValue) {
@@ -1272,11 +1304,13 @@ func TestCheckCRC(t *testing.T) {
 	var testData = []struct {
 		description string
 		bitStream   []byte
-		want        bool
+		want        string
 	}{
-		{"valid", testdata.MessageBatchWith1077, true},
-		{"CRC failure", testdata.MessageFrameWithCRCFailure, false},
-		{"short", shortFrame, false},
+		{"valid", testdata.MessageBatchWith1077, ""},
+		{"CRC failure", testdata.MessageFrameWithCRCFailure,
+			"CRC check failed on message type 1230, length 0x8 - given a8 f7 2b, calculated a8 f7 2a"},
+		{"short frame", shortFrame,
+			"cannot check CRC - frame is too short"},
 	}
 	for _, td := range testData {
 		r := bytes.NewReader(td.bitStream)
@@ -1302,7 +1336,7 @@ func TestCheckCRC(t *testing.T) {
 		// Expect the resulting messages on this channel.
 		ch_result := make(chan Message, 10)
 
-		rtcmHandler := New(time.Now())
+		rtcmHandler := New(time.Now(), slog.LevelDebug)
 
 		// Test
 		rtcmHandler.HandleMessages(ch_source, ch_result)
@@ -1313,12 +1347,40 @@ func TestCheckCRC(t *testing.T) {
 		if !ok {
 			// Done - chan is drained.
 			t.Errorf("%s: expected a message", td.description)
+			continue
 		}
 
-		got := CheckCRC(message.RawData)
+		var gotError error
 
-		if td.want != got {
-			t.Errorf("%s: want %v got %v", td.description, td.want, got)
+		if td.description == "short frame" {
+			// The message is junk so getMessageLengthAndType
+			// would fail.
+			gotError = CheckCRC(0, 0, message.RawData)
+
+		} else {
+			messageLength, messageType, formatError :=
+				rtcmHandler.getMessageLengthAndType(td.bitStream)
+
+			if formatError != nil {
+				t.Error(formatError)
+				continue
+
+			}
+			gotError = CheckCRC(messageType, messageLength, message.RawData)
+		}
+
+		if len(td.want) == 0 {
+			// We do not expect an error.
+			if gotError != nil {
+				t.Errorf("%s: unexpected error - %s", td.description, gotError.Error())
+				continue
+			}
+		} else {
+			// We expect an error with a contents matching want.
+			if td.want != gotError.Error() {
+				t.Errorf("%s: want %v got %v", td.description, td.want, gotError.Error())
+				continue
+			}
 		}
 	}
 }
@@ -1364,7 +1426,12 @@ func createMSM4() *msm4message.Message {
 // createRTCMWithMSM4 creates an RTCM message containing the given MSM4,
 // setting the time to utcTime.  The Readable doesn't match the RawData.
 func createRTCMWithMSM4(msm4 *msm4message.Message, startOfWeek time.Time) *Message {
-	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
+	message := NewMessage(
+		utils.MessageTypeMSM4GPS,
+		"",
+		testdata.MessageFrameType1074_1,
+		slog.LevelDebug,
+	)
 	message.Readable = msm4
 	// In the real world these values would be set by handler.GetMessage.
 	message.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
@@ -1382,7 +1449,12 @@ func TestNewMessage(t *testing.T) {
 	wantBitstream := testdata.UnhandledMessageType1024
 	var wantReadable interface{} = nil
 
-	message := NewMessage(wantType, wantWarning, wantBitstream)
+	message := NewMessage(
+		wantType,
+		wantWarning,
+		wantBitstream,
+		slog.LevelDebug,
+	)
 
 	if wantType != message.MessageType {
 		t.Errorf("want %d got %d", wantType, message.MessageType)
@@ -1592,23 +1664,47 @@ message type 1074 is not an MSM7
 	// messageFromShort1005Frame is a message built from a type 1005 frame too
 	// short to make sense of - the embedded message is only one byte long so
 	// the message length is incomplete.  The display will contain an error message.
-	messageFromShort1005Frame := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005[:7])
+	messageFromShort1005Frame := NewMessage(
+		utils.MessageType1005,
+		"",
+		testdata.MessageFrameType1005[:7],
+		slog.LevelDebug,
+	)
 
 	// messageFromShort1006Frame is a message built from a type 1005 frame too
 	// short to make sense of - the embedded message is only one byte long so
 	// the message length is incomplete.  The display will contain an error message.
-	messageFromShort1006Frame := NewMessage(utils.MessageType1006, "", testdata.MessageFrameType1006[:7])
+	messageFromShort1006Frame := NewMessage(
+		utils.MessageType1006,
+		"",
+		testdata.MessageFrameType1006[:7],
+		slog.LevelDebug,
+	)
 
 	// message1024 is a message of type 1024.  It's not handled and
 	// displaying it produces a Readable field which is just a
 	// string containing a warning message.
-	message1024 := NewMessage(1024, "", testdata.UnhandledMessageType1024)
+	message1024 := NewMessage(
+		1024,
+		"",
+		testdata.UnhandledMessageType1024,
+		slog.LevelDebug,
+	)
 
 	// message1005 is a message type 1005 - base position.
-	message1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1005)
+	message1005 := NewMessage(
+		utils.MessageType1005,
+		"",
+		testdata.MessageFrameType1005,
+		slog.LevelDebug,
+	)
 
 	// message1006 is a message type 1006 - base position and height.
-	message1006 := NewMessage(utils.MessageType1006, "", testdata.MessageFrameType1006)
+	message1006 := NewMessage(
+		utils.MessageType1006,
+		"",
+		testdata.MessageFrameType1006,
+		slog.LevelDebug)
 
 	// The start times for MSM messages.
 	startTime := time.Date(2023, time.February, 14, 1, 2, 3, 0, utils.LocationUTC)
@@ -1625,7 +1721,12 @@ message type 1074 is not an MSM7
 	incompleteMSM4.Satellites = nil
 	incompleteMSM4.Signals = nil
 
-	incompleteMessage := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_1)
+	incompleteMessage := NewMessage(
+		utils.MessageTypeMSM4GPS,
+		"",
+		testdata.MessageFrameType1074_1,
+		slog.LevelDebug,
+	)
 	incompleteMessage.Readable = incompleteMSM4
 	incompleteMessage.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	incompleteMessage.StartOfWeek =
@@ -1633,19 +1734,34 @@ message type 1074 is not an MSM7
 
 	// These messages have the wrong message type, which are
 	// treated as special cases.
-	crazy1005 := NewMessage(utils.MessageType1005, "", testdata.MessageFrameType1077)
-	crazyMSM4 := NewMessage(utils.MessageTypeMSM4Beidou, "", testdata.MessageFrameType1077)
+	crazy1005 := NewMessage(
+		utils.MessageType1005,
+		"",
+		testdata.MessageFrameType1077,
+		slog.LevelDebug,
+	)
+	crazyMSM4 := NewMessage(
+		utils.MessageTypeMSM4Beidou,
+		"",
+		testdata.MessageFrameType1077,
+		slog.LevelDebug,
+	)
 	crazyMSM4.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	crazyMSM4.StartOfWeek =
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 	// This one is an MSM4 but the message type is forced to be MSM7.
-	crazyMSM7 := NewMessage(utils.MessageTypeMSM7Galileo, "", testdata.MessageFrameType1074_1)
+	crazyMSM7 := NewMessage(
+		utils.MessageTypeMSM7Galileo,
+		"",
+		testdata.MessageFrameType1074_1,
+		slog.LevelDebug,
+	)
 	crazyMSM7.MessageType = utils.MessageTypeMSM7Galileo
 	crazyMSM7.SentAt = "Time 2023-02-11 23:59:42.002 +0000 UTC"
 	crazyMSM7.StartOfWeek =
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)"
 
-	rtcmHandler := New(startTime)
+	rtcmHandler := New(startTime, slog.LevelDebug)
 
 	completeMSM7Message, err := rtcmHandler.GetMessage(testdata.MessageFrameType1077)
 	if err != nil {
@@ -1690,7 +1806,12 @@ message type 1074 is not an MSM7
 // TestStringWithNilReadable checks that a String fills in the Readable field
 // of a message when it's nil.
 func TestStringWithNilReadable(t *testing.T) {
-	message := NewMessage(utils.MessageTypeMSM4GPS, "", testdata.MessageFrameType1074_2)
+	message := NewMessage(
+		utils.MessageTypeMSM4GPS,
+		"",
+		testdata.MessageFrameType1074_2,
+		slog.LevelDebug,
+	)
 
 	if message.Readable != nil {
 		t.Error("expected the Readable part to be nil")
@@ -1712,7 +1833,12 @@ func TestCopy(t *testing.T) {
 	var wantReadable interface{} = nil
 	wantBitstream := testdata.UnhandledMessageType1024
 
-	firstMessage := NewMessage(wantType, wantWarning, wantBitstream)
+	firstMessage := NewMessage(
+		wantType,
+		wantWarning,
+		wantBitstream,
+		slog.LevelDebug,
+	)
 
 	message := firstMessage.Copy()
 
@@ -1762,7 +1888,12 @@ func TestDisplayable(t *testing.T) {
 		{1138, false},
 	}
 	for _, td := range testData {
-		message := NewMessage(td.messageType, "", nil)
+		message := NewMessage(
+			td.messageType,
+			"",
+			nil,
+			slog.LevelDebug,
+		)
 		got := message.displayable()
 		if got != td.want {
 			t.Errorf("%d: want %v, got %v", td.messageType, td.want, got)
@@ -1788,7 +1919,7 @@ func TestGetTimeDisplayFromTimestamp(t *testing.T) {
 
 		startTime := time.Date(2023, time.February, 14, 0, 0, 0, 0, utils.LocationUTC)
 
-		h := New(startTime)
+		h := New(startTime, slog.LevelDebug)
 
 		display, displayErr := h.getTimeDisplayFromTimestamp(td.messageType, td.timestamp)
 
@@ -1839,7 +1970,7 @@ func TestGetStartTimeDisplay(t *testing.T) {
 
 		startTime := time.Date(2023, time.February, 14, 0, 0, 0, 0, utils.LocationUTC)
 
-		h := New(startTime)
+		h := New(startTime, slog.LevelDebug)
 
 		display := h.getStartTimeDisplay(td.messageType, td.timestamp)
 

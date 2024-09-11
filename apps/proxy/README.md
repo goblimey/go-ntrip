@@ -28,8 +28,8 @@ For example, create a file proxy.json containing:
 ```
 {
 	"remote_host": "localhost:2101",
-	"local_host": "example.com",
-	"local_port": 2102,
+	"proxy_host": "example.com",
+	"proxy_port": 2102,
     "control_port": 4001,
 	"record_messages": true,
 	"message_log_directory": "./logs"
@@ -54,8 +54,8 @@ The laptop has no domain name, just the IP address 172.20.10.6.  The proxy runs 
 ```
 {
 	"remote_host": "example.com:2101",
-	"local_host": "172.20.10.6",
-	"local_port": 2101,
+	"proxy_host": "172.20.10.6",
+	"proxy_port": 2101,
     "control_port": 4001,
 	"record_messages": true,
 	"message_log_directory": "./logs"
