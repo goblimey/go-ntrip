@@ -38,7 +38,7 @@ x 12345, unknown bits 01, y 23456, unknown bits 10, z 34567,
 ECEF coords in metres (1.2345, 2.3456, 3.4567)
 `
 
-	const wantInfo = `stationID 2, ITRF realisation year 3
+	const wantInfo = `stationID 2, ITRF realisation year 3,
 ECEF coords in metres (1.2345, 2.3456, 3.4567)
 
 `

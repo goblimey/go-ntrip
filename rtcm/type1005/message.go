@@ -88,17 +88,17 @@ func New(stationID, itrfRealisationYear, ignored1 uint,
 // String returns a text version of a message type 1005
 func (message *Message) String() string {
 
-	display := fmt.Sprintf("stationID %d, ITRF realisation year %d, ",
+	display := fmt.Sprintf("stationID %d, ITRF realisation year %d,",
 		message.StationID, message.ITRFRealisationYear)
 
-	if message.logLevel == slog.LevelInfo {
-		display += "\n"
-	} else {
-		display += fmt.Sprintf("unknown bits %04b,\n",
+	if message.logLevel == slog.LevelDebug {
+		display += fmt.Sprintf(" unknown bits %04b,\n",
 			message.Ignored1)
 		display += fmt.Sprintf("x %d, unknown bits %02b, y %d, unknown bits %02b, z %d,\n",
 			message.AntennaRefX, message.Ignored2, message.AntennaRefY,
 			message.Ignored3, message.AntennaRefZ)
+	} else {
+		display += "\n"
 	}
 
 	// The Antenna Reference coordinates are in units of 1/10,000 of a metre.
@@ -109,6 +109,9 @@ func (message *Message) String() string {
 	display += fmt.Sprintf("ECEF coords in metres (%.4f, %.4f, %.4f)\n",
 		x, y, z)
 
+	if message.logLevel != slog.LevelDebug {
+		display += "\n"
+	}
 	return display
 }
 
