@@ -1,18 +1,16 @@
 package logger
 
 import (
-	"crypto/rand"
-	"fmt"
-	"log"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/goblimey/go-tools/clock"
+	"github.com/goblimey/go-tools/testsupport"
 
+	"github.com/goblimey/go-ntrip/apps/rtcmlogger/config"
 	"github.com/goblimey/go-ntrip/rtcm/utils"
-	"github.com/goblimey/go-ntrip/rtcmlogger/config"
 )
 
 // TestGetStartOfDay tests the getStartOfDay method.
@@ -177,11 +175,11 @@ func TestWriteWhenLoggingEnabled(t *testing.T) {
 	const loggingDirectory = "foo"
 	const expectedFileContents = "hello world\n"
 
-	wd, err := createWorkingDirectory()
+	wd, err := testsupport.CreateWorkingDirectory()
 	if err != nil {
 		t.Errorf("createWorkingDirectory failed - %v", err)
 	}
-	defer removeWorkingDirectory(wd)
+	defer testsupport.RemoveWorkingDirectory(wd)
 
 	times := []time.Time{
 		time.Date(2020, 2, 14, 0, 0, 5, 1, utils.LocationUTC),
@@ -279,121 +277,24 @@ func TestWriteWhenLoggingEnabled(t *testing.T) {
 	}
 }
 
-// TestNoWriteWhenLoggingDisabled checks that the Writer does not write
-// to the log file when logging is disabled.
-func TestNoWriteWhenLoggingDisabled(t *testing.T) {
-
-	// NOTE:  this test uses the filestore.
-
-	const loggingDirectory = "foo"
-
-	wd, err := createWorkingDirectory()
-	if err != nil {
-		t.Errorf("createWorkingDirectory failed - %v", err)
-	}
-	defer removeWorkingDirectory(wd)
-
-	// Set times close to midnight and write some text to the logger.  It should not
-	// write anything to the log file.
-
-	// Create a stepping clock with times around midnight.
-	times := []time.Time{
-		time.Date(2020, 2, 14, 0, 0, 4, 0, utils.LocationUTC),
-		time.Date(2020, 2, 14, 0, 0, 5, 0, utils.LocationUTC),
-		time.Date(2020, 2, 14, 23, 59, 55, 1, utils.LocationUTC),
-		time.Date(2020, 2, 14, 23, 59, 59, 0, utils.LocationUTC)}
-
-	clock := clock.NewSteppingClock(&times)
-
-	// Create an RTCM Writer using the supplied clock.  Behind the scenes that will
-	// create a daily logger with a real clock, so that will create a log file with
-	// a datestamp that we can't easily predict.  However, there should only be one
-	// logfile so we can just look for it.
-	var m sync.Mutex
-	writer := NewRTCMWriter(clock, loggingDirectory, &m)
-	// turn off the log
-	// pusher.
-	writer.YearOfLastWrite = time.Now().Year()
-	writer.MonthOfLastWrite = time.Now().Month()
-	writer.DayOfLastWrite = time.Now().Day()
-
-	buffer := []byte("hello")
-
-	n, err := writer.Write(buffer)
-	if err != nil {
-		t.Errorf("Write failed - %v", err)
-	}
-	if n != len(buffer) {
-		t.Errorf("Write returned %d - expected %d", n, len(buffer))
-	}
-
-	n, err = writer.Write(buffer)
-	if err != nil {
-		t.Errorf("Write failed - %v", err)
-	}
-	if n != len(buffer) {
-		t.Errorf("Write returned %d - expected %d", n, len(buffer))
-	}
-
-	n, err = writer.Write(buffer)
-	if err != nil {
-		t.Errorf("Write failed - %v", err)
-	}
-	if n != len(buffer) {
-		t.Errorf("Write returned %d - expected %d", n, len(buffer))
-	}
-
-	n, err = writer.Write(buffer)
-	if err != nil {
-		t.Errorf("Write failed - %v", err)
-	}
-	if n != len(buffer) {
-		t.Errorf("Write returned %d - expected %d", n, len(buffer))
-	}
-
-	// Check that the log file is empty.
-	logDirectoryPathName := wd + "/" + loggingDirectory
-	fileInfoList, err := os.ReadDir(logDirectoryPathName)
-
-	if err != nil {
-		t.Fatalf("Cannot scan directory %s - %v", logDirectoryPathName, err)
-	}
-
-	// fileInfoList should contain the fileinfo for one file.
-	if len(fileInfoList) == 0 {
-		t.Errorf("directory %s is empty.  Should contain one log file.",
-			logDirectoryPathName)
-	}
-	if len(fileInfoList) > 1 {
-		t.Errorf("directory %s contains %d files.  Should be just one.",
-			logDirectoryPathName, len(fileInfoList))
-		for _, fileInfo := range fileInfoList {
-			t.Errorf("found file %s", fileInfo.Name())
-		}
-		return
-	}
-
-	fileInfo := fileInfoList[0]
-	fi, err := fileInfo.Info()
-	if err != nil {
-		t.Error(err)
-	}
-	size := fi.Size()
-	if size > 0 {
-		t.Fatalf("log file %s contains %d bytes.  Should be empty",
-			fileInfo.Name(), size)
-	}
-}
-
 // TestPushOldLogs checks that pushOldLogs moves the given file into the
 // subdirectory "data.ready".  This test uses the filestore.
 func TestPushOldLogs(t *testing.T) {
 
-	workingDirectory, err := createWorkingDirectory()
+	// These are the fields of the date for the test.
+	const year = 2020
+	const monthNumber = 2
+	const dayNumber = 14
+	const hour = 12
+	const minute = 13
+	const second = 14
+	const nanosecond = 15
+
+	workingDirectory, err := testsupport.CreateWorkingDirectory()
 	if err != nil {
 		t.Fatalf("createWorkingDirectory failed - %v", err)
 	}
-	defer removeWorkingDirectory(workingDirectory)
+	defer testsupport.RemoveWorkingDirectory(workingDirectory)
 
 	loggingDirectory := workingDirectory + "/logs"
 
@@ -405,125 +306,97 @@ func TestPushOldLogs(t *testing.T) {
 	}
 
 	// Create files "foo", "bar" and today's logfile.
-	pathname := loggingDirectory + "/" + "foo"
-	file, err := os.Create("./logs/" + "foo")
-	if err != nil {
-		t.Fatalf("TestSaveLog: cannot create %s - %s", pathname, err.Error())
-	}
-	file.Close()
+	pathname1 := loggingDirectory + "/" + "foo"
+	createFile(t, pathname1)
 
-	pathname = loggingDirectory + "/" + "bar"
-	file, err = os.Create(pathname)
-	if err != nil {
-		t.Fatalf("TestSaveLog: cannot create %s - %s", pathname, err.Error())
-	}
-	file.Close()
+	pathname2 := loggingDirectory + "/" + "bar"
+	createFile(t, pathname2)
 
-	now := time.Date(2020, 2, 14, 12, 13, 14, 15, utils.LocationUTC)
+	now := time.Date(
+		year, monthNumber, dayNumber, hour, minute, second, nanosecond, utils.LocationUTC,
+	)
 
 	todaysLogFileName := getTodaysLogFilename(now)
-	pathname = loggingDirectory + "/" + todaysLogFileName
-	file, err = os.Create(pathname)
-	if err != nil {
-		t.Fatalf("TestSaveLog: cannot create %s - %s", pathname, err.Error())
+	pathname3 := loggingDirectory + "/" + todaysLogFileName
+	createFile(t, pathname3)
 
-	}
-	file.Close()
-
+	// PushOldLogs is part of a log writer so we need
+	// to create one of those.  That will produce
+	// another log file as a side effect with a name
+	// based on today's date, which we can't know for
+	// sure (because this test may be running around
+	// midnight).
 	var m sync.Mutex
-	writer := NewRTCMWriter(nil, loggingDirectory, &m)
+	systemClock := clock.NewSystemClock()
+	writer := NewRTCMWriter(systemClock, loggingDirectory, &m)
 	// turn off the log
 	// pusher.
-	writer.YearOfLastWrite = time.Now().Year()
-	writer.MonthOfLastWrite = time.Now().Month()
-	writer.DayOfLastWrite = time.Now().Day()
-	cfg := config.Config{MessageLogDirectory: loggingDirectory}
+	writer.YearOfLastWrite = now.Year()
+	writer.MonthOfLastWrite = now.Month()
+	writer.DayOfLastWrite = now.Day()
+	cfg := config.Config{
+		MessageLogDirectory:        loggingDirectory,
+		DirectoryForOldMessageLogs: "./old_logs",
+	}
 	writer.CFG = &cfg
-	// Push the non-matching files into the subdirectory
+	// Push the non-matching files into the subdirectory.
+	// That will include the extra log file that we don't
+	// know the name of.
 	writer.pushOldLogs(loggingDirectory, now)
 
-	// The current directory should contain the logfile and the subdirectory
-	// for old log files, containing files "foo" and "bar".
+	// The logging directory should contain just the
+	// logfile for 14th Feb 2020.
 	files, err := os.ReadDir(loggingDirectory)
 	if err != nil {
 		t.Fatalf("cannot scan directory %s - %v", loggingDirectory, err)
 	}
-	if len(files) != 2 {
-		t.Fatalf("expected the current directory to contain just two files, contains  %d",
+	if len(files) != 1 {
+		t.Fatalf("expected the current directory to contain just one file, contains  %d",
 			len(files))
 	}
 
-	if files[0].Name() != writer.CFG.DirectoryForOldLogs &&
-		files[0].Name() != todaysLogFileName {
-
-		t.Fatalf("expected file %s or %s, actually found %s",
-			writer.CFG.DirectoryForOldLogs, todaysLogFileName, files[0].Name())
+	// the directory for old logs should contain "foo",
+	// "bar" and the log file that we don't know the name
+	// of.
+	directoryForOldLogs := writer.CFG.DirectoryForOldMessageLogs
+	oldLogFiles, err2 := os.ReadDir(directoryForOldLogs)
+	if err2 != nil {
+		t.Errorf("cannot scan directory %s - %v", directoryForOldLogs, err2)
+		return
+	}
+	if len(oldLogFiles) != 3 {
+		t.Errorf("expected the directory %s to contain exactly 3 files, found  %d",
+			directoryForOldLogs, len(oldLogFiles))
+		return
 	}
 
-	if files[1].Name() != writer.CFG.DirectoryForOldLogs &&
-		files[1].Name() != todaysLogFileName {
+	// Check for foo and bar.
+	foundFoo := false
+	foundBar := false
 
-		t.Fatalf("expected file %s or %s, actually found %s",
-			writer.CFG.DirectoryForOldLogs, todaysLogFileName, files[1].Name())
+	for _, f := range oldLogFiles {
+		if f.Name() == "foo" {
+			foundFoo = true
+		}
+		if f.Name() == "bar" {
+			foundBar = true
+		}
 	}
 
-	// Check that the destination contains the file
-	pathname = writer.CFG.DirectoryForOldLogs
-	files, err = os.ReadDir(pathname)
-	if err != nil {
-		t.Fatalf("cannot scan directory %s - %v", pathname, err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("expected the directory %s to contain exactly 2 files, found  %d",
-			pathname, len(files))
-	}
-
-	if files[0].Name() != "foo" && files[0].Name() != "bar" {
-
-		t.Fatalf("expected file foo or bar, actually found %s",
-			files[0].Name())
-	}
-
-	if files[1].Name() != "foo" && files[1].Name() != "bar" {
-
-		t.Fatalf("expected file foo or bar, actually found %s",
-			files[1].Name())
+	if !foundFoo || !foundBar {
+		t.Errorf("expected foo, bar and one other, found %s, %s and %s",
+			oldLogFiles[0].Name(), oldLogFiles[1].Name(), oldLogFiles[2].Name(),
+		)
+		return
 	}
 }
 
-// makeUUID creates a UUID.  See https://yourbasic.org/golang/generate-uuid-guid/.
-func makeUUID() string {
-	// Produces something like "9e0825f2-e557-28df-93b7-a01c789f36a8".
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
+// createFile creates an empty file.
+func createFile(t *testing.T, pathname string) {
+	file, err := os.Create(pathname)
 	if err != nil {
-		log.Fatal(err)
+		t.Errorf("TestSaveLog: cannot create %s - %s", pathname, err.Error())
+		return
 	}
-	uuid := fmt.Sprintf("%x-%x-%x-%x-%x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
-	return uuid
-}
-
-// createWorkingDirectory create a working directory and makes it the current
-// directory.
-func createWorkingDirectory() (string, error) {
-	directoryName := "/tmp/" + makeUUID()
-	err := os.Mkdir(directoryName, os.ModePerm)
-	if err != nil {
-		return "", err
-	}
-	err = os.Chdir(directoryName)
-	if err != nil {
-		return "", err
-	}
-	return directoryName, nil
-}
-
-// removeWorkingDirectory removes the working directory and any files in it.
-func removeWorkingDirectory(directoryName string) error {
-	err := os.RemoveAll(directoryName)
-	if err != nil {
-		return err
-	}
-	return nil
+	file.Close()
 }

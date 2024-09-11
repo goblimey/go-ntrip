@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goblimey/go-ntrip/rtcmlogger/config"
+	"github.com/goblimey/go-ntrip/apps/rtcmlogger/config"
 	"github.com/goblimey/go-tools/clock"
 	"github.com/goblimey/go-tools/dailylogger"
 )
@@ -225,10 +225,10 @@ func (writer *Writer) maybePush(now time.Time) {
 // except for today's log file into the subdirectory for old logs.
 func (writer *Writer) pushLogs(now time.Time) {
 	todaysLogFile := getTodaysLogFilename(now)
-	files, err := os.ReadDir(writer.CFG.DirectoryForOldLogs)
+	files, err := os.ReadDir(writer.CFG.DirectoryForOldMessageLogs)
 	if err != nil {
 		log.Fatal("pushOldLogs: cannot open logging directory " +
-			writer.CFG.DirectoryForOldLogs + " - " + err.Error())
+			writer.CFG.DirectoryForOldMessageLogs + " - " + err.Error())
 	}
 
 	for _, fileInfo := range files {
@@ -241,7 +241,7 @@ func (writer *Writer) pushLogs(now time.Time) {
 			continue
 		}
 
-		writer.pushLogfile(writer.CFG.DirectoryForOldLogs, fileInfo.Name())
+		writer.pushLogfile(writer.CFG.DirectoryForOldMessageLogs, fileInfo.Name())
 	}
 }
 
@@ -315,13 +315,13 @@ func (writer *Writer) pushOldLogs(logDirectory string, now time.Time) {
 // old log files.
 func (writer *Writer) pushLogfile(logDirectory, logFilename string) {
 	// Ensure that the destination directory exists.
-	err := os.MkdirAll(writer.CFG.DirectoryForOldLogs, os.ModePerm)
+	err := os.MkdirAll(writer.CFG.DirectoryForOldMessageLogs, os.ModePerm)
 	if err != nil {
-		log.Fatal("pushLogFile: cannot create directory " +
-			logDirectory + " - " + err.Error())
+		log.Fatal("pushLogFile: cannot create directory '" +
+			writer.CFG.DirectoryForOldMessageLogs + "' - " + err.Error())
 	}
 	logFilePath := logDirectory + "/" + logFilename
-	newLogFilePath := writer.CFG.DirectoryForOldLogs + "/" + logFilename
+	newLogFilePath := writer.CFG.DirectoryForOldMessageLogs + "/" + logFilename
 	err = os.Rename(logFilePath, newLogFilePath)
 	if err != nil {
 		log.Printf("pushLogfile - warning - failed to move logfile %s to directory %s - %v\n",

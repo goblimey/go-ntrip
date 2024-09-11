@@ -1,0 +1,8 @@
+{
+    "log_events": true,
+    "display_messages": true,
+    "record_messages": true,
+    "message_log_directory": "./logs/rtcm",
+    "directory_for_old_message_logs": "./logs/rtcm/ready",
+    "event_log_directory": "./events"
+}
