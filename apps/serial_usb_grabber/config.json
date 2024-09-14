@@ -1,0 +1,12 @@
+{
+    "speed": 115200,
+    "read_timeout_milliseconds": 3000,
+    "sleep_time_after_failed_open_milliseconds": 1000,
+    "wait_time_on_EOF_millis": 1000,
+    "filenames": [
+        "/dev/ttyACM0",
+        "/dev/ttyACM1",
+        "/dev/ttyACM2",
+        "/dev/ttyACM3"
+    ]
+}
