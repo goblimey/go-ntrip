@@ -163,7 +163,7 @@ var MessageFrameType1077 = []byte{
 	// 0110 00|1|0 00|00 0000
 	//
 	// The header is 185 bits long with 16 cell mask bits.
-	//               | 30-bit timestamp 0x6700976 - 432023000 -
+	//               | 30-bit timestamp 0x6700976 - 432023000 (5 days and 23 seconds)
 	0x43, 0x50, 0x00, 0x67, 0x00, 0x97, 0x62, 0x00, // 0-7 of embedded message
 	//                   64 bit satellite mask
 	// 0|00|0 0|0|00   0|000 1000   0100 0000   1010 0000
@@ -219,16 +219,19 @@ var MessageFrameType1077 = []byte{
 // these values have to be set manually by the test.  These are the expected times in
 // the display of the message when StartOfWeek is set to 2023-05-13 23:59:42 +0000 UTC
 // (18 seconds before midnight at the end of Saturday, the start of the GPS week).
-var StartTimeOfMessageFrameType1077 = time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
+var StartOfWeekForMessageFrameType1077 = time.Date(2023, time.May, 13, 23, 59, 42, 0, utils.LocationUTC)
 var UTCTimeOfMessageFrameType1077 = time.Date(2023, time.May, 18, 0, 0, 5, 0, utils.LocationUTC)
 
 const MessageFrameType1077Heading = `Message type 1077, GPS Full Pseudoranges and PhaseRanges plus Carrier to Noise Ratio (high resolution)
 The type 7 Multiple Signal Message format for the USA’s GPS system.
 `
 
-const MessageFrameType1077SentAt = "Time: 2023-05-13 23:59:42.002 +0000 UTC\n"
+// Start time plus 5 days and 23 seconds.
+const MessageFrameType1077SentAt = "Time 2023-05-19 00:00:05 +0000 UTC\n"
 
-const MessageFrameType1077StartOfWeek = "Start of GPS week 2023-05-13 23:59:42.000 UTC plus timestamp 2 (0d 0h 0m 0s 2ms)\n"
+const MessageFrameType1077DebugStartOfWeek = "Start of GPS week 2023-05-13 23:59:42 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)\n"
+
+const MessageFrameType1077InfoStartOfWeek = "Start of GPS week 2023-05-13 23:59:42 +0000 UTC\n"
 
 const MessageFrameType1077HexDump = `Frame length 225 bytes:
 00000000  d3 00 db 43 50 00 67 00  97 62 00 00 08 40 a0 65  |...CP.g..b...@.e|
@@ -249,9 +252,9 @@ const MessageFrameType1077HexDump = `Frame length 225 bytes:
 
 `
 
-// The expected display of the header of the message in MessageFrameType1077 when the
-// StartOfWeek is set to 2023-05-13 23:59:42 +0000 UTC.
-const WantHeaderFromMessageFrameType1077 = `stationID 0, multiple message, issue of data station 0
+// The expected display of the header of the message in
+// MessageFrameType1077 at logging level slog.LevelDebug.
+const WantDebugHeaderFromMessageFrameType1077 = `stationID 0, multiple message, issue of data station 0
 session transmit time 0, clock steering 0, external clock 0
 divergence free smoothing false, smoothing interval 0
 Satellite mask:
@@ -259,6 +262,14 @@ Satellite mask:
 Signal mask: 0100 0000 0000 0001  0000 0000 0000 0000
 cell mask: tt ft tf tt tt tt tt tt
 8 satellites, 2 signal types, 14 signals`
+
+// The expected display of the header of the message in
+// MessageFrameType1077 at logging level slog.LevelInfo
+const WantInfoHeaderFromMessageFrameType1077 = `stationID 0, multiple message, issue of data station 0
+session transmit time 0, clock steering 0, external clock 0
+divergence free smoothing false, smoothing interval 0
+8 satellites, 2 signal types, 14 signals
+`
 
 // The expected display of the satellite list of the message in MessageFrameType1077.
 const WantSatelliteListFromMessageFrameType1077 = `Satellite ID {approx range - whole, frac, millis, metres, extended info, phase range rate}:
@@ -271,8 +282,9 @@ const WantSatelliteListFromMessageFrameType1077 = `Satellite ID {approx range - 
 29 {70, 514, 70.502, 21135953.821, 0, -383}
 31 {72, 293, 72.286, 21670837.435, 0, -442}`
 
-// The expected display of the signal list of the message in MessageFrameType1077
-const WantSignalListFromMessageFrameType1077 = `Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength}:
+// The expected display of the signal list of the message in
+// MessageFrameType1077 with slog.LevelDebug
+const WantDebugSignalListFromMessageFrameType1077 = `Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength}:
  4  2 {(-26835, -14.985, 24410527.355), (-117960, 128278179.264), 709.992, (-1070, -0.107, -135.107), 582, false, 640, 0.190}
  4 16 {(-34073, -19.027, 24410523.313), (-209715, 99956970.352), 553.242, (-1074, -0.107, -135.107), 581, false, 608, 0.244}
  9 16 {(-146464, -81.787, 25264751.952), (-586368, 103454935.508), -745.762, (1227, 0.123, 182.123), 179, false, 464, 0.244}
@@ -288,13 +300,45 @@ const WantSignalListFromMessageFrameType1077 = `Signals: sat ID sig ID {range m,
 31  2 {(-115909, -64.724, 21670772.711), (-602908, 113880577.055), 2325.559, (-5391, -0.539, -442.539), 624, false, 736, 0.190}
 31 16 {(-124734, -69.652, 21670767.783), (-527266, 88738155.231), 1812.168, (-5499, -0.550, -442.550), 624, false, 640, 0.244}`
 
-const WantMessageFrameType1077Display = MessageFrameType1077Heading +
+// The expected display of the signal list of the message in
+// MessageFrameType1077 with slog.LevelInfo
+const WantInfoSignalListFromMessageFrameType1077 = `sat sig range m,    phase range mS, doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength m:
+ 4  2 24410527.355, 128278179.264,   709.992, -135.107, 582, false, 640, 0.190
+ 4 16 24410523.313,  99956970.352,   553.242, -135.107, 581, false, 608, 0.244
+ 9 16 25264751.952, 103454935.508,  -745.762,  182.123, 179, false, 464, 0.244
+16  2 22915780.724, 120423177.179, -3139.070,  597.345, 529, false, 640, 0.190
+18  2 21506547.550, 113017684.727, -2482.645,  472.432, 579, false, 704, 0.190
+18 16 21506542.760,  88065739.822, -1934.473,  472.418, 578, false, 608, 0.244
+25  2 23345103.037, 122679365.321,  3327.570, -633.216, 646, false, 640, 0.190
+25 16 23345100.838,  95594272.692,  2592.793, -633.187, 623, false, 560, 0.244
+26  2 20662003.308, 108579565.367, -1538.436,  292.755, 596, false, 736, 0.190
+26 16 20662000.914,  84607418.613, -1198.760,  292.749, 596, false, 672, 0.244
+29  2 21136079.188, 111070868.860,  2016.750, -383.775, 628, false, 736, 0.190
+29 16 21136074.598,  86548719.034,  1571.474, -383.770, 628, false, 656, 0.244
+31  2 21670772.711, 113880577.055,  2325.559, -442.539, 624, false, 736, 0.190
+31 16 21670767.783,  88738155.231,  1812.168, -442.550, 624, false, 640, 0.244
+`
+
+// The expected result when MessageFrameType1077 is converted
+// to a message and message.String() is applied at logging
+// level slog.LevelDebug.
+const WantDebugMessageFrameType1077Display = MessageFrameType1077Heading +
 	MessageFrameType1077SentAt +
-	MessageFrameType1077StartOfWeek +
+	MessageFrameType1077DebugStartOfWeek +
 	MessageFrameType1077HexDump +
-	WantHeaderFromMessageFrameType1077 + "\n" +
+	WantDebugHeaderFromMessageFrameType1077 + "\n" +
 	WantSatelliteListFromMessageFrameType1077 + "\n" +
-	WantSignalListFromMessageFrameType1077 + "\n"
+	WantDebugSignalListFromMessageFrameType1077 + "\n"
+
+// The expected result when MessageFrameType1077 is converted
+// to a message and message.String() is applied at logging
+// level slog.LevelInfo.
+const WantInfoMessageFrameType1077Display = MessageFrameType1077HexDump +
+	MessageFrameType1077Heading +
+	MessageFrameType1077SentAt +
+	MessageFrameType1077InfoStartOfWeek +
+	WantInfoHeaderFromMessageFrameType1077 +
+	WantInfoSignalListFromMessageFrameType1077
 
 var MessageBatchWith1077 = []byte{
 

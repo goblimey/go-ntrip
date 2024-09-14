@@ -3,6 +3,7 @@ package message
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/type_msm7/satellite"
@@ -23,23 +24,43 @@ type Message struct {
 	// of signals at different frequencies observed by the base
 	// station from the satellites in the Satellite list.
 	Signals [][]signal.Cell
+
+	// logLevel is a SLOG logging level.
+	logLevel slog.Level
 }
 
 // New creates an MSM7 Message.
-func New(header *header.Header, satellites []satellite.Cell, signals [][]signal.Cell) *Message {
-	message := Message{Header: header, Satellites: satellites, Signals: signals}
+func New(
+	header *header.Header,
+	satellites []satellite.Cell,
+	signals [][]signal.Cell,
+	logLevel slog.Level,
+) *Message {
+
+	message := Message{
+		Header:     header,
+		Satellites: satellites,
+		Signals:    signals,
+		logLevel:   logLevel,
+	}
 
 	return &message
 }
 
 // String return a text version of the MSM7 Message.
 func (message *Message) String() string {
-	result :=
-		message.Header.String() +
-			message.DisplaySatelliteCells() +
-			message.DisplaySignalCells()
-
-	return result
+	if message.logLevel == slog.LevelDebug {
+		result :=
+			message.Header.String() +
+				message.DisplaySatelliteCells() +
+				message.DisplaySignalCells()
+		return result
+	} else {
+		result :=
+			message.Header.String() +
+				message.DisplaySignalCells()
+		return result
+	}
 }
 
 // DisplaySatelliteCells returns a text version of the satellite cells in the
@@ -70,7 +91,12 @@ func (message *Message) DisplaySignalCells() string {
 		return "No signals\n"
 	}
 
-	heading := "Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength}:\n"
+	// This is the heading for all but slog.LevelDebug
+	heading := "sat sig range m,    phase range mS, doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength m:\n"
+
+	if message.logLevel == slog.LevelDebug {
+		heading = "Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase range rate m/s, lock time ind, half cycle ambiguity, Carrier Noise Ratio, wavelength}:\n"
+	}
 
 	body := ""
 
@@ -84,9 +110,10 @@ func (message *Message) DisplaySignalCells() string {
 }
 
 // GetMSM7Message presents an MSM7 (type 1077, 1087 etc) as broken out fields.
-func GetMessage(bitStream []byte) (*Message, error) {
+func GetMessage(bitStream []byte, logLevel slog.Level) (*Message, error) {
 
-	header, bitPosition, headerError := header.GetMSMHeader(bitStream)
+	header, bitPosition, headerError :=
+		header.GetMSMHeader(bitStream, logLevel)
 
 	if headerError != nil {
 		return nil, headerError
@@ -98,21 +125,21 @@ func GetMessage(bitStream []byte) (*Message, error) {
 		return nil, errors.New(em)
 	}
 
-	satellites, fetchSatellitesError :=
-		satellite.GetSatelliteCells(bitStream, bitPosition, header.Satellites)
+	satellites, fetchSatellitesError := satellite.GetSatelliteCells(
+		bitStream, bitPosition, header.Satellites, logLevel)
 	if fetchSatellitesError != nil {
 		return nil, fetchSatellitesError
 	}
 
 	bitPosition += uint(len(satellites) * satellite.CellLengthInBits)
 
-	signals, fetchSignalsError :=
-		signal.GetSignalCells(bitStream, bitPosition, header, satellites)
+	signals, fetchSignalsError := signal.GetSignalCells(
+		bitStream, bitPosition, header, satellites, logLevel)
 	if fetchSignalsError != nil {
 		return nil, fetchSignalsError
 	}
 
-	message := New(header, satellites, signals)
+	message := New(header, satellites, signals, logLevel)
 
 	return message, nil
 }

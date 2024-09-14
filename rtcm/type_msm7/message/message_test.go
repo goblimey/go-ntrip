@@ -1,6 +1,7 @@
 package message
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -42,16 +43,21 @@ func TestString(t *testing.T) {
 
 	// Satellite and signal cells to match the masks.
 	satelliteCell1 := satellite.New(1, rangeWhole, rangeFractional,
-		extendedInfo, wholePhaseRangeRate)
+		extendedInfo, wholePhaseRangeRate,
+		slog.LevelDebug)
 	satelliteCell2 := satellite.New(2, utils.InvalidRange, rangeFractional,
-		extendedInfo, invalidPhaseRangeRate)
+		extendedInfo, invalidPhaseRangeRate,
+		slog.LevelDebug)
 	satellites := []satellite.Cell{*satelliteCell1, *satelliteCell2}
 	signalCell1 := signal.New(signalID1, satelliteCell1, rangeDelta, phaseRangeDelta,
-		lockTimeIndicator, halfCycleAmbiguity, 5, phaseRangeRateDelta, wavelength)
+		lockTimeIndicator, halfCycleAmbiguity, 5, phaseRangeRateDelta, wavelength,
+		slog.LevelDebug)
 	signalCell2 := signal.New(signalID2, satelliteCell2, rangeDelta, phaseRangeDelta,
-		lockTimeIndicator, halfCycleAmbiguity, 6, phaseRangeRateDelta, wavelength)
+		lockTimeIndicator, halfCycleAmbiguity, 6, phaseRangeRateDelta, wavelength,
+		slog.LevelDebug)
 	signalCell3 := signal.New(signalID2, satelliteCell2, rangeDelta, phaseRangeDelta,
-		7, false, 8, phaseRangeRateDelta, wavelength)
+		7, false, 8, phaseRangeRateDelta, wavelength,
+		slog.LevelDebug)
 
 	signalRow1 := []signal.Cell{*signalCell1}
 	signalRow2 := []signal.Cell{*signalCell2, *signalCell3}
@@ -74,10 +80,11 @@ Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase
  2  5 {invalid, invalid, invalid, invalid, 7, false, 8, 0.244}
 `
 
-	header :=
-		header.New(1077, 2, 3, false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask)
+	header := header.New(
+		1077, 2, 3, false, 1, 5, 6, 7, true, 9,
+		satMask, sigMask, cellMask, slog.LevelDebug)
 
-	message := New(header, satellites, signals)
+	message := New(header, satellites, signals, slog.LevelDebug)
 
 	got := message.String()
 
@@ -89,7 +96,8 @@ Signals: sat ID sig ID {range m, phase range, phase range rate doppler Hz, phase
 // TestGetMessage checks GetMessage.
 func TestGetMessage(t *testing.T) {
 
-	gotMessage, gotError := GetMessage(testdata.MessageFrame1077)
+	gotMessage, gotError := GetMessage(
+		testdata.MessageFrame1077, slog.LevelDebug)
 	if gotError != nil {
 		t.Errorf(gotError.Error())
 	}
@@ -128,7 +136,8 @@ func TestGetMessageWithErrors(t *testing.T) {
 		},
 	}
 	for _, td := range testData {
-		gotMessage, gotError := GetMessage(td.BitStream)
+		gotMessage, gotError := GetMessage(
+			td.BitStream, slog.LevelDebug)
 		if gotMessage != nil {
 			t.Error("On error, the message should be nil")
 		}
@@ -193,11 +202,12 @@ func TestDisplaySignalCellsWithError(t *testing.T) {
 // TestGetMessageFromRealData is a regression test using real data.
 func TestGetMessageFromRealData(t *testing.T) {
 
-	const want = testdata.WantHeaderFromMessageFrameType1077 + "\n" +
+	const want = testdata.WantDebugHeaderFromMessageFrameType1077 + "\n" +
 		testdata.WantSatelliteListFromMessageFrameType1077 + "\n" +
-		testdata.WantSignalListFromMessageFrameType1077 + "\n"
+		testdata.WantDebugSignalListFromMessageFrameType1077 + "\n"
 
-	message, err := GetMessage(testdata.MessageFrameType1077)
+	message, err := GetMessage(
+		testdata.MessageFrameType1077, slog.LevelDebug)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +239,7 @@ func TestGlonassBugFix(t *testing.T) {
 		0x22, 0x39, 0x8d, 0x43, 0x18, 0x40, 0x1c, 0x54, 0xe8,
 	}
 
-	m, err := GetMessage(bitStream)
+	m, err := GetMessage(bitStream, slog.LevelDebug)
 	if err != nil {
 		t.Error(err)
 	}

@@ -19,6 +19,7 @@ package satellite
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
@@ -63,16 +64,26 @@ type Cell struct {
 
 	// PhaseRangeRate - int14.  The approximate phase range rate for all signals
 	// that come later in this MSM7 message.  The value is in metres per second.
-	// Invalid if the top bit is set and all the others are zero 
-	// (InvalidPhaseRangeRate).  The value is signed, so the invalid value is a 
-	// negative number.  If the value is valid, the true phase range rate for a 
-	// signal is derived by merging this (positive or negative) value with the 
+	// Invalid if the top bit is set and all the others are zero
+	// (InvalidPhaseRangeRate).  The value is signed, so the invalid value is a
+	// negative number.  If the value is valid, the true phase range rate for a
+	// signal is derived by merging this (positive or negative) value with the
 	// signal's PhaseRangeRateDelta value.
 	PhaseRangeRate int
+
+	// LogLevel controls the data output by String.
+	LogLevel slog.Level
 }
 
 // New creates an MSM7 satellite cell from the given values.
-func New(id, wholeMillis, fractionalMillis, extendedInfo uint, phaseRangeRate int) *Cell {
+func New(
+	id,
+	wholeMillis,
+	fractionalMillis,
+	extendedInfo uint,
+	phaseRangeRate int,
+	logLevel slog.Level,
+) *Cell {
 
 	cell := Cell{
 		ID:                    id,
@@ -80,6 +91,7 @@ func New(id, wholeMillis, fractionalMillis, extendedInfo uint, phaseRangeRate in
 		RangeFractionalMillis: fractionalMillis,
 		ExtendedInfo:          extendedInfo,
 		PhaseRangeRate:        phaseRangeRate,
+		LogLevel:              logLevel,
 	}
 
 	return &cell
@@ -113,7 +125,11 @@ func (cell *Cell) String() string {
 // GetSatelliteCells extracts the satellite cell data from an MSM7 message.
 // It returns a slice of cell data.  If the bitstream is not long enough to
 // contain the message, it returns an error.
-func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites []uint) ([]Cell, error) {
+func GetSatelliteCells(
+	bitStream []byte,
+	startOfSatelliteData uint,
+	Satellites []uint,
+	logLevel slog.Level) ([]Cell, error) {
 	// The bitStream contains the variable length header, the satellite cells and
 	// then the signal cells.  startOfSatelliteData gives the bit position of the
 	// start of the satellite cells.  Satellites gives the number of satellites
@@ -179,8 +195,15 @@ func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites [
 	// Create a slice of satellite cells using the data that we just gathered.
 	satData := make([]Cell, 0)
 	for i := range Satellites {
-		satCell := New(Satellites[i], wholeMillis[i],
-			fractionalMillis[i], extendedInfo[i], phaseRangeRate[i])
+		satCell := New(
+			Satellites[i],
+			wholeMillis[i],
+			fractionalMillis[i],
+			extendedInfo[i],
+			phaseRangeRate[i],
+			logLevel,
+		)
+
 		satData = append(satData, *satCell)
 	}
 

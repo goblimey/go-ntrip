@@ -7,6 +7,7 @@ package signal
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	msmHeader "github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/type_msm7/satellite"
@@ -82,10 +83,24 @@ type Cell struct {
 	PhaseRangeRateDelta int
 
 	Satellite *satellite.Cell
+
+	// LogLevel controls the data output by String.
+	LogLevel slog.Level
 }
 
 // New creates an MSM7 Signal Cell.
-func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, phaseRangeRateDelta int, wavelength float64) *Cell {
+func New(
+	signalID uint,
+	satelliteCell *satellite.Cell,
+	rangeDelta int,
+	phaseRangeDelta int,
+	lockTimeIndicator uint,
+	halfCycleAmbiguity bool,
+	cnr uint,
+	phaseRangeRateDelta int,
+	wavelength float64,
+	logLevel slog.Level,
+) *Cell {
 
 	cell := Cell{
 		ID:                  signalID,
@@ -97,6 +112,7 @@ func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDel
 		CarrierToNoiseRatio: cnr,
 		PhaseRangeRateDelta: phaseRangeRateDelta,
 		Satellite:           satelliteCell,
+		LogLevel:            logLevel,
 	}
 
 	return &cell
@@ -104,69 +120,124 @@ func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDel
 
 // String returns a readable version of a signal cell.
 func (cell *Cell) String() string {
-	var rangeMillisecs string
-	if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
-		rangeMillisecs = "invalid"
+	if cell.LogLevel == slog.LevelDebug {
+		var rangeMillisecs string
+		if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
+			rangeMillisecs = "invalid"
+		} else {
+			// Convert the delta to float and divide by two to the power 29 to restore
+			// the scale.  That gives the delta in milliseconds.
+			rangeDeltaInMillis := float64(cell.RangeDelta) / float64(utils.TwoToThePower29)
+
+			rangeDeltaInMetres := rangeDeltaInMillis * utils.OneLightMillisecond
+
+			rangeMillisecs = fmt.Sprintf("(%d, %.3f, %.3f)",
+				cell.RangeDelta, rangeDeltaInMetres, cell.RangeInMetres())
+		}
+
+		var phaseRangeMillisecs string
+		switch {
+		case cell.Satellite.RangeWholeMillis == utils.InvalidRange:
+			phaseRangeMillisecs = "invalid"
+		case cell.Wavelength == 0:
+			// The calculation involves dividing by the frequency
+			// so that must be non-zero.
+			phaseRangeMillisecs = "no wavelength"
+		default:
+			phaseRangeMillisecs = fmt.Sprintf("(%d, %.3f)",
+				cell.PhaseRangeDelta, cell.PhaseRange())
+		}
+
+		var phaseRangeRateMetresPerSecond string
+		switch {
+		case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
+			phaseRangeRateMetresPerSecond = "invalid"
+		case cell.Wavelength == 0:
+			// The calculation involves dividing by the frequency
+			// so that must be non-zero.
+			phaseRangeRateMetresPerSecond = "no wavelength"
+		default:
+			scaledDelta := utils.GetScaledPhaseRangeRate(0, cell.PhaseRangeRateDelta)
+			// The delta is metres per second  scaled up by 10,000.
+			deltaMPerSec := float64(scaledDelta) / 10000
+			// The phase range rate value is rendered as the "doppler"
+			// value - the rate in metres per second divided by the wavelength.
+			phaseRangeRateMetresPerSecond = fmt.Sprintf("(%d, %.3f, %.3f)",
+				cell.PhaseRangeRateDelta, deltaMPerSec, cell.PhaseRangeRate())
+		}
+
+		// The phase range rate doppler matches the doppler value in Rinex format.
+		var phaseRangeRateDoppler string
+		switch {
+		case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
+			phaseRangeRateDoppler = "invalid"
+		case cell.Wavelength == 0:
+			// The calculation involves dividing by the frequency
+			// so that must be non-zero.
+			phaseRangeRateDoppler = "no wavelength"
+		default:
+			phaseRangeRateDoppler = fmt.Sprintf("%.3f", cell.PhaseRangeRateDoppler())
+		}
+
+		return fmt.Sprintf("%2d %2d {%s, %s, %s, %s, %d, %v, %d, %.3f}",
+			cell.Satellite.ID, cell.ID, rangeMillisecs, phaseRangeMillisecs,
+			phaseRangeRateDoppler, phaseRangeRateMetresPerSecond,
+			cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
+			cell.CarrierToNoiseRatio, cell.Wavelength)
 	} else {
-		// Convert the delta to float and divide by two to the power 29 to restore
-		// the scale.  That gives the delta in milliseconds.
-		rangeDeltaInMillis := float64(cell.RangeDelta) / float64(utils.TwoToThePower29)
 
-		rangeDeltaInMetres := rangeDeltaInMillis * utils.OneLightMillisecond
+		var rangeMetres string
+		if cell.Satellite.RangeWholeMillis == utils.InvalidRange {
+			rangeMetres = "invalid"
+		} else {
+			rangeMetres = fmt.Sprintf("%12.3f", cell.RangeInMetres())
+		}
 
-		rangeMillisecs = fmt.Sprintf("(%d, %.3f, %.3f)",
-			cell.RangeDelta, rangeDeltaInMetres, cell.RangeInMetres())
+		var phaseRangeMillisecs string
+		switch {
+		case cell.Satellite.RangeWholeMillis == utils.InvalidRange:
+			phaseRangeMillisecs = "invalid"
+		case cell.Wavelength == 0:
+			// The calculation involves dividing by the frequency
+			// so that must be non-zero.
+			phaseRangeMillisecs = "no wavelength"
+		default:
+			phaseRangeMillisecs = fmt.Sprintf("%13.3f", cell.PhaseRange())
+		}
+
+		// The phase range rate doppler matches the doppler value in Rinex format.
+		var phaseRangeRateDoppler string
+		switch {
+		case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
+			phaseRangeRateDoppler = "invalid"
+		case cell.Wavelength == 0:
+			// The calculation involves dividing by the frequency
+			// so that must be non-zero.
+			phaseRangeRateDoppler = "no wavelength"
+		default:
+			phaseRangeRateDoppler = fmt.Sprintf("%9.3f", cell.PhaseRangeRateDoppler())
+		}
+
+		var phaseRangeRateMetresPerSecond string
+		switch {
+		case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
+			phaseRangeRateMetresPerSecond = "invalid"
+		case cell.Wavelength == 0:
+			// The calculation involves dividing by the frequency
+			// so that must be non-zero.
+			phaseRangeRateMetresPerSecond = "no wavelength"
+		default:
+			// The phase range rate value is rendered as the "doppler"
+			// value - the rate in metres per second divided by the wavelength.
+			phaseRangeRateMetresPerSecond = fmt.Sprintf("%8.3f", cell.PhaseRangeRate())
+		}
+
+		return fmt.Sprintf("%2d %2d %s, %s, %s, %s, %d, %v, %d, %.3f",
+			cell.Satellite.ID, cell.ID, rangeMetres, phaseRangeMillisecs,
+			phaseRangeRateDoppler, phaseRangeRateMetresPerSecond,
+			cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
+			cell.CarrierToNoiseRatio, cell.Wavelength)
 	}
-
-	var phaseRangeMillisecs string
-	switch {
-	case cell.Satellite.RangeWholeMillis == utils.InvalidRange:
-		phaseRangeMillisecs = "invalid"
-	case cell.Wavelength == 0:
-		// The calculation involves dividing by the frequency
-		// so that must be non-zero.
-		phaseRangeMillisecs = "no wavelength"
-	default:
-		phaseRangeMillisecs = fmt.Sprintf("(%d, %.3f)",
-			cell.PhaseRangeDelta, cell.PhaseRange())
-	}
-
-	var phaseRangeRateMetresPerSecond string
-	switch {
-	case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
-		phaseRangeRateMetresPerSecond = "invalid"
-	case cell.Wavelength == 0:
-		// The calculation involves dividing by the frequency
-		// so that must be non-zero.
-		phaseRangeRateMetresPerSecond = "no wavelength"
-	default:
-		scaledDelta := utils.GetScaledPhaseRangeRate(0, cell.PhaseRangeRateDelta)
-		// The delta is metres per second  scaled up by 10,000.
-		deltaMPerSec := float64(scaledDelta) / 10000
-		// The phase range rate value is rendered as the "doppler"
-		// value - the rate in metres per second divided by the wavelength.
-		phaseRangeRateMetresPerSecond = fmt.Sprintf("(%d, %.3f, %.3f)",
-			cell.PhaseRangeRateDelta, deltaMPerSec, cell.PhaseRangeRate())
-	}
-
-	// The phase range rate doppler matches the doppler value in Rinex format.
-	var phaseRangeRateDoppler string
-	switch {
-	case cell.Satellite.PhaseRangeRate == InvalidPhaseRangeRate:
-		phaseRangeRateDoppler = "invalid"
-	case cell.Wavelength == 0:
-		// The calculation involves dividing by the frequency
-		// so that must be non-zero.
-		phaseRangeRateDoppler = "no wavelength"
-	default:
-		phaseRangeRateDoppler = fmt.Sprintf("%.3f", cell.PhaseRangeRateDoppler())
-	}
-
-	return fmt.Sprintf("%2d %2d {%s, %s, %s, %s, %d, %v, %d, %.3f}",
-		cell.Satellite.ID, cell.ID, rangeMillisecs, phaseRangeMillisecs,
-		phaseRangeRateDoppler, phaseRangeRateMetresPerSecond,
-		cell.LockTimeIndicator, cell.HalfCycleAmbiguity,
-		cell.CarrierToNoiseRatio, cell.Wavelength)
 }
 
 // GetAggregateRange takes the range values from an MSM7 signal cell (including some
@@ -319,7 +390,13 @@ func (cell *Cell) GetAggregatePhaseRangeRate() int64 {
 }
 
 // GetSignalCells gets the data from the signal cells of an MSM7 message.
-func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader.Header, satCells []satellite.Cell) ([][]Cell, error) {
+func GetSignalCells(
+	bitStream []byte,
+	startOfSignalCells uint,
+	header *msmHeader.Header,
+	satCells []satellite.Cell,
+	logLevel slog.Level,
+) ([][]Cell, error) {
 	// The third part of the message bit stream is the signal data.  Each satellite can
 	// send many signals, each on a different frequency.  For example, if we observe one
 	// signal from satellite 2, two from satellite 3 and 2 from satellite 15, there will
@@ -439,9 +516,18 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 					wavelength := utils.GetSignalWavelength(header.Constellation, signalID)
 
-					cell := New(signalID, &satCells[i], rangeDelta[c], phaseRangeDelta[c],
-						lockTimeIndicator[c], halfCycleAmbiguity[c], cnr[c],
-						phaseRangeRateDelta[c], wavelength)
+					cell := New(
+						signalID,
+						&(satCells[i]),
+						rangeDelta[c],
+						phaseRangeDelta[c],
+						lockTimeIndicator[c],
+						halfCycleAmbiguity[c],
+						cnr[c],
+						phaseRangeRateDelta[c],
+						wavelength,
+						logLevel,
+					)
 
 					signalCells[i] = append(signalCells[i], *cell)
 

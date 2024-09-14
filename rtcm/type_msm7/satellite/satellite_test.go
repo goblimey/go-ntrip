@@ -2,6 +2,7 @@ package satellite
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
@@ -32,19 +33,28 @@ func TestNew(t *testing.T) {
 		{"MSM7 all valid", 3, rangeWhole, rangeFractional, extendedInfo, phaseRangeRate,
 			Cell{ID: 3,
 				RangeWholeMillis: rangeWhole, RangeFractionalMillis: rangeFractional,
-				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate}},
+				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate,
+				LogLevel: slog.LevelDebug}},
 		{"MSM7 with invalid range", 4, utils.InvalidRange, rangeFractional, extendedInfo, phaseRangeRate,
 			Cell{ID: 4,
 				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional,
-				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate}},
+				ExtendedInfo: extendedInfo, PhaseRangeRate: phaseRangeRate,
+				LogLevel: slog.LevelDebug}},
 		{"MSM7 with invalid range and phase range rate", 5, utils.InvalidRange, rangeFractional, extendedInfo, invalidPhaseRangeRate,
 			Cell{ID: 5,
 				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional,
-				ExtendedInfo: extendedInfo, PhaseRangeRate: invalidPhaseRangeRate}},
+				ExtendedInfo: extendedInfo, PhaseRangeRate: invalidPhaseRangeRate,
+				LogLevel: slog.LevelDebug}},
 	}
 	for _, td := range testData {
 		got := *New(
-			td.ID, td.WholeMillis, td.FractionalMillis, td.ExtendedInfo, td.PhaseRangeRate)
+			td.ID,
+			td.WholeMillis,
+			td.FractionalMillis,
+			td.ExtendedInfo,
+			td.PhaseRangeRate,
+			slog.LevelDebug,
+		)
 		if got != td.Want {
 			t.Errorf("%s: want %v, got %v", td.Description, td.Want, got)
 		}
@@ -74,13 +84,19 @@ func TestGetSatelliteCells(t *testing.T) {
 	want := []Cell{
 		Cell{ID: satelliteID1,
 			RangeWholeMillis: 0x81, RangeFractionalMillis: 0x201,
-			ExtendedInfo: 9, PhaseRangeRate: -1},
+			ExtendedInfo: 9, PhaseRangeRate: -1,
+			LogLevel: slog.LevelDebug,
+		},
 		Cell{ID: satelliteID2,
 			RangeWholeMillis: 1, RangeFractionalMillis: 1,
-			ExtendedInfo: 6, PhaseRangeRate: 4097},
+			ExtendedInfo: 6, PhaseRangeRate: 4097,
+			LogLevel: slog.LevelDebug,
+		},
 	}
 
-	got, satError := GetSatelliteCells(bitstream, startPosition, satellites)
+	got, satError := GetSatelliteCells(
+		bitstream, startPosition, satellites, slog.LevelDebug,
+	)
 
 	if satError != nil {
 		t.Error(satError)
@@ -113,7 +129,8 @@ func TestGetSatelliteCellsShortMessage(t *testing.T) {
 	bitstream := []byte{0x81, 0x01, 0x96, 0x80, 0x40,
 		0x1f, 0xff, 0xd0, 0x01}
 
-	got, gotError := GetSatelliteCells(bitstream, 8, satellites)
+	got, gotError := GetSatelliteCells(
+		bitstream, 8, satellites, slog.LevelDebug)
 
 	if gotError == nil {
 		t.Error("expected an overrun error")
@@ -142,7 +159,11 @@ func TestString(t *testing.T) {
 
 	const wantDisplay = " 1 {2, 512, 2.500, 749481.145, 3, 4}"
 
-	satellite := New(1, wholeMillis, fracMillis, extendedInfo, phaseRangeRate)
+	satellite := New(
+		1, wholeMillis, fracMillis,
+		extendedInfo, phaseRangeRate,
+		slog.LevelDebug,
+	)
 
 	display := satellite.String()
 
@@ -162,7 +183,10 @@ func TestStringWithInvalidRange(t *testing.T) {
 
 	const wantDisplay = " 1 {invalid, 2, 3}"
 
-	satellite := New(1, invalidWhole, fracMillis, extendedInfo, phaseRangeRate)
+	satellite := New(1, invalidWhole, fracMillis,
+		extendedInfo, phaseRangeRate,
+		slog.LevelDebug,
+	)
 
 	display := satellite.String()
 
@@ -185,7 +209,10 @@ func TestStringWithInvalidPhaseRangeRate(t *testing.T) {
 
 	const wantDisplay = " 1 {2, 1, 2.001, 599877.682, 3, invalid}"
 
-	satellite := New(1, rangeWhole, rangeFrac, extendedInfo, phaseRangeRate)
+	satellite := New(1, rangeWhole, rangeFrac,
+		extendedInfo, phaseRangeRate,
+		slog.LevelDebug,
+	)
 
 	display := satellite.String()
 

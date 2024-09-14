@@ -405,8 +405,8 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 	messageLength, messageType, formatError := rtcmHandler.getMessageLengthAndType(bitStream)
 	if formatError != nil {
 		return NewMessage(
-				messageType, formatError.Error(), bitStream, rtcmHandler.logLevel),
-			formatError
+			messageType, formatError.Error(), bitStream,
+			rtcmHandler.logLevel), formatError
 	}
 
 	// The message frame should contain a header, the variable-length message and
@@ -441,7 +441,7 @@ func (rtcmHandler *Handler) GetMessage(bitStream []byte) (*Message, error) {
 		messageType,
 		"",
 		bitStream[:expectedFrameLength],
-		slog.LevelDebug)
+		rtcmHandler.logLevel)
 
 	// If the message is an MSM7, get the timestamp (for the heading if displaying)
 	// The message frame is: 3 bytes of leader, a 12-bit message type, a 12-bit
@@ -509,39 +509,44 @@ func (rtcmHandler Handler) getStartTimeDisplay(messageType int, timestamp uint) 
 	startTime, startTimeError := rtcmHandler.getStartOfWeek(messageType)
 	if startTimeError != nil {
 		// This is one of the constellations we don't handle.
-		display += fmt.Sprintf("(%s) plus ", startTimeError.Error())
+		display += fmt.Sprintf("(%s)", startTimeError.Error())
 	} else {
-		display += fmt.Sprintf("%s plus ", startTime.Format(utils.DateLayout))
+		display += startTime.Format(utils.DateLayout)
 	}
 
-	days, millisInTimestamp, err := utils.ParseTimestamp(constellation, timestamp)
-	if err != nil {
-		// The timestamp is illegal, for example it's out of range.
-		if utils.GetConstellation(messageType) == "Glonass" {
-			// Illegal Glonass timestamp.  It's in two parts, a
-			// 3-bit day and a 27-bit millisecond offset.
-			display += fmt.Sprintf("%s - 0x%x (%d/%d)",
-				err.Error(), timestamp, timestamp>>27,
-				timestamp&^utils.GlonassDayBitMask)
+	if rtcmHandler.logLevel == slog.LevelDebug {
+
+		display += " plus "
+
+		days, millisInTimestamp, err := utils.ParseTimestamp(constellation, timestamp)
+		if err != nil {
+			// The timestamp is illegal, for example it's out of range.
+			if utils.GetConstellation(messageType) == "Glonass" {
+				// Illegal Glonass timestamp.  It's in two parts, a
+				// 3-bit day and a 27-bit millisecond offset.
+				display += fmt.Sprintf("%s - 0x%x (%d/%d)",
+					err.Error(), timestamp, timestamp>>27,
+					timestamp&^utils.GlonassDayBitMask)
+				return display
+
+			}
+			// Not Glonass and timestamp out of range.  The timestamp
+			// is a millisecond offset from the start of the week.
+			const millisInOneDay = 24 * 3600 * 1000
+			display += fmt.Sprintf("%s - %d (%d/%d)",
+				err.Error(), timestamp, timestamp/millisInOneDay,
+				timestamp%millisInOneDay)
 			return display
-
 		}
-		// Not Glonass and timestamp out of range.  The timestamp
-		// is a millisecond offset from the start of the week.
-		const millisInOneDay = 24 * 3600 * 1000
-		display += fmt.Sprintf("%s - %d (%d/%d)",
-			err.Error(), timestamp, timestamp/millisInOneDay,
-			timestamp%millisInOneDay)
-		return display
+
+		// The timestamp is valid.
+
+		hours, minutes, seconds, millis :=
+			utils.ParseMilliseconds(millisInTimestamp)
+
+		display += fmt.Sprintf("timestamp %d (%dd %dh %dm %ds %dms)",
+			timestamp, days, hours, minutes, seconds, millis)
 	}
-
-	// The timestamp is valid.
-
-	hours, minutes, seconds, millis :=
-		utils.ParseMilliseconds(millisInTimestamp)
-
-	display += fmt.Sprintf("timestamp %d (%dd %dh %dm %ds %dms)",
-		timestamp, days, hours, minutes, seconds, millis)
 
 	return display
 }
@@ -575,7 +580,8 @@ func Analyse(message *Message) {
 }
 
 func analyseMSM4(messageBitStream []byte, message *Message) {
-	msm4Message, msm4Error := msm4Message.GetMessage(messageBitStream)
+	msm4Message, msm4Error :=
+		msm4Message.GetMessage(messageBitStream, message.logLevel)
 
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
@@ -586,7 +592,9 @@ func analyseMSM4(messageBitStream []byte, message *Message) {
 }
 
 func analyseMSM7(messageBitStream []byte, message *Message) {
-	msm7Message, msm7Error := msm7Message.GetMessage(messageBitStream)
+	msm7Message, msm7Error :=
+		msm7Message.GetMessage(messageBitStream, message.logLevel)
+
 	if msm7Error != nil {
 		message.ErrorMessage = msm7Error.Error()
 		return
@@ -940,63 +948,126 @@ func (message *Message) String() string {
 		PrepareForDisplay(message)
 	}
 
-	titleAndComment := utils.GetTitleAndComment(message.MessageType)
+	if message.logLevel == slog.LevelDebug {
 
-	display := fmt.Sprintf("Message type %d, %s\n",
-		message.MessageType, titleAndComment.Title)
+		titleAndComment := utils.GetTitleAndComment(message.MessageType)
 
-	if len(titleAndComment.Comment) > 0 {
-		display += titleAndComment.Comment + "\n"
-	}
+		display := fmt.Sprintf("Message type %d, %s\n",
+			message.MessageType, titleAndComment.Title)
 
-	if utils.MSM(message.MessageType) {
-		// A Multiple Signal Message (MSM) has a timestamp which gives
-		// the duration since the start of the constellation's week and
-		// the time that the message was sent.  When the handler created
-		// the message it set two strings containing readable versions
-		// of these times.
+		if len(titleAndComment.Comment) > 0 {
+			display += titleAndComment.Comment + "\n"
+		}
 
-		display += message.SentAt + "\n"
-		display += message.StartOfWeek + "\n"
-	}
+		if utils.MSM(message.MessageType) {
+			// A Multiple Signal Message (MSM) has a timestamp which gives
+			// the duration since the start of the constellation's week and
+			// the time that the message was sent.  When the handler created
+			// the message it set two strings containing readable versions
+			// of these times.
 
-	display += fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
+			display += message.SentAt + "\n"
+			display += message.StartOfWeek + "\n"
+		}
 
-	display += hex.Dump(message.RawData) + "\n"
+		display += fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
 
-	if len(message.ErrorMessage) > 0 {
-		display += message.ErrorMessage + "\n"
+		display += hex.Dump(message.RawData) + "\n"
+
+		if len(message.ErrorMessage) > 0 {
+			display += message.ErrorMessage + "\n"
+			return display
+		}
+
+		if message.MessageType == utils.NonRTCMMessage {
+			return display
+		}
+
+		s, isString := message.Readable.(string)
+		m1005, is1005 := message.Readable.(*type1005.Message)
+		m1006, is1006 := message.Readable.(*type1006.Message)
+		msm4, isMSM4 := message.Readable.(*msm4Message.Message)
+		msm7, isMSM7 := message.Readable.(*msm7Message.Message)
+		switch {
+		case isString:
+			display += s + "\n"
+		case is1005:
+			// The message is type 1005 - base position.
+			display += m1005.String()
+			return display
+		case is1006:
+			// The message is type 1006 - base position and height.
+			display += m1006.String()
+			return display
+		case isMSM4:
+			display += msm4.String()
+
+		case isMSM7:
+			display += msm7.String()
+		}
+
+		return display
+
+	} else {
+
+		display := fmt.Sprintf("Frame length %d bytes:\n", len(message.RawData))
+
+		display += hex.Dump(message.RawData) + "\n"
+
+		titleAndComment := utils.GetTitleAndComment(message.MessageType)
+
+		display += fmt.Sprintf("Message type %d, %s\n",
+			message.MessageType, titleAndComment.Title)
+
+		if len(titleAndComment.Comment) > 0 {
+			display += titleAndComment.Comment + "\n"
+		}
+
+		if utils.MSM(message.MessageType) {
+			// A Multiple Signal Message (MSM) has a timestamp which gives
+			// the duration since the start of the constellation's week and
+			// the time that the message was sent.  When the handler created
+			// the message it set two strings containing readable versions
+			// of these times.
+
+			display += message.SentAt + "\n"
+			display += message.StartOfWeek + "\n"
+		}
+
+		if len(message.ErrorMessage) > 0 {
+			display += message.ErrorMessage + "\n"
+			return display
+		}
+
+		if message.MessageType == utils.NonRTCMMessage {
+			return display
+		}
+
+		s, isString := message.Readable.(string)
+		m1005, is1005 := message.Readable.(*type1005.Message)
+		m1006, is1006 := message.Readable.(*type1006.Message)
+		msm4, isMSM4 := message.Readable.(*msm4Message.Message)
+		msm7, isMSM7 := message.Readable.(*msm7Message.Message)
+		switch {
+		case isString:
+			display += s + "\n"
+		case is1005:
+			// The message is type 1005 - base position.
+			display += m1005.String()
+			return display
+		case is1006:
+			// The message is type 1006 - base position and height.
+			display += m1006.String()
+			return display
+		case isMSM4:
+			display += msm4.String()
+
+		case isMSM7:
+			display += msm7.String()
+		}
+
 		return display
 	}
-
-	if message.MessageType == utils.NonRTCMMessage {
-		return display
-	}
-
-	s, isString := message.Readable.(string)
-	m1005, is1005 := message.Readable.(*type1005.Message)
-	m1006, is1006 := message.Readable.(*type1006.Message)
-	msm4, isMSM4 := message.Readable.(*msm4Message.Message)
-	msm7, isMSM7 := message.Readable.(*msm7Message.Message)
-	switch {
-	case isString:
-		display += s + "\n"
-	case is1005:
-		// The message is type 1005 - base position.
-		display += m1005.String()
-		return display
-	case is1006:
-		// The message is type 1006 - base position and height.
-		display += m1006.String()
-		return display
-	case isMSM4:
-		display += msm4.String()
-
-	case isMSM7:
-		display += msm7.String()
-	}
-
-	return display
 }
 
 // displayable is true if the message type is one that we know how

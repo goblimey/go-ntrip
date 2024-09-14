@@ -128,7 +128,7 @@ func main() {
 	// from the byte channel and turns them into messages on the
 	// message channel.  The incoming data is sent to the byte channel
 	// by handleClientMessages.
-	rtcmHandler = rtcm.New(time.Now(), slog.LevelDebug)
+	rtcmHandler = rtcm.New(time.Now(), slog.LevelInfo)
 	go rtcmHandler.HandleMessages(byteChan, messageChan)
 
 	// Create a circular queue to hold the recent messages from the message

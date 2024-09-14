@@ -2,6 +2,7 @@ package header
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -28,11 +29,14 @@ func TestNew(t *testing.T) {
 	const wantSmoothing = true
 	const wantSmoothingInterval = 7
 
-	gotHeader := New(wantMessageType, wantStationID, wantTimestamp,
+	gotHeader := New(
+		wantMessageType, wantStationID, wantTimestamp,
 		wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator,
 		wantExternalClockSteeringIndicator, true, wantSmoothingInterval,
-		wantSatelliteMask, wantSignalMask, wantCellMask)
+		wantSatelliteMask, wantSignalMask, wantCellMask,
+		slog.LevelDebug,
+	)
 
 	if gotHeader.MessageType != wantMessageType {
 		t.Errorf("want %d got %d", wantMessageType, gotHeader.MessageType)
@@ -306,7 +310,7 @@ func TestGetMSMHeader(t *testing.T) {
 		NumSignalCells:                       6,
 	}
 
-	header, gotPos, err := GetMSMHeader(bitStream)
+	header, gotPos, err := GetMSMHeader(bitStream, slog.LevelDebug)
 
 	if err != nil {
 		t.Error(err)
@@ -462,7 +466,7 @@ func TestGetMSMHeaderWithShortBitStream(t *testing.T) {
 	const wantError = "bitstream is too short for an MSM header - got 168 bits, expected at least 169"
 	const wantPos = 0
 
-	gotHeader, gotPos, gotError := GetMSMHeader(bitStream)
+	gotHeader, gotPos, gotError := GetMSMHeader(bitStream, slog.LevelDebug)
 
 	if gotError == nil {
 		t.Error("expected an error")
@@ -522,7 +526,7 @@ func TestGetMSMHeaderWithShortCellMask(t *testing.T) {
 	const wantError = "bitstream is too short for an MSM header with 12 cell mask bits - got 224 bits, expected at least 229"
 	const wantPos = 0
 
-	gotHeader, gotPos, gotError := GetMSMHeader(bitStream)
+	gotHeader, gotPos, gotError := GetMSMHeader(bitStream, slog.LevelDebug)
 
 	if gotError == nil {
 		t.Error("expected an error")
@@ -576,7 +580,7 @@ func TestGetMSMHeaderWithWrongMessageType(t *testing.T) {
 
 	const wantError = "message type 1073 is not an MSM4 or an MSM7"
 
-	_, _, err := GetMSMHeader(bitStream)
+	_, _, err := GetMSMHeader(bitStream, slog.LevelDebug)
 
 	// The call is expected to fail and return an error.
 	if err == nil {
@@ -629,7 +633,7 @@ func TestGetMSMHeaderWithCellMaskTooLong(t *testing.T) {
 
 	wantError := "GetMSMHeader: cellMask is 112 bits - expected <= 64"
 
-	_, _, err := GetMSMHeader(bitStream)
+	_, _, err := GetMSMHeader(bitStream, slog.LevelDebug)
 
 	// The call is expected to fail and return an error.
 	if err == nil {
@@ -798,11 +802,14 @@ cell mask: fff fft
 		{"illegal Glonass", 1084, wantIllegalGlonassTimestamp, wantStartOfGlonassWeek, wantStartOfGlonassWeek, wantGlonassDisplayIllegalDay},
 	}
 	for _, td := range testData {
-		header := New(wantMessageType, wantStationID, wantGPSTimestamp,
+		header := New(
+			wantMessageType, wantStationID, wantGPSTimestamp,
 			wantMultipleMessage,
 			wantIssue, wantTransTime, wantClockSteeringIndicator,
 			wantExternalClockSteeringIndicator, wantSmoothing, wantSmoothingInterval,
-			wantSatelliteMask, wantSignalMask, wantCellMask)
+			wantSatelliteMask, wantSignalMask, wantCellMask,
+			slog.LevelDebug,
+		)
 
 		gotDisplay := header.String()
 
@@ -831,17 +838,23 @@ cell mask: fff fft
 `
 
 	var testData = []struct {
-		hdr                  *Header
-		want                 string
+		hdr  *Header
+		want string
 	}{
 		{
 			New(1074, 2, 3,
-				false, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+				false, 1, 5, 6, 7, true,
+				9, satMask, sigMask, cellMask,
+				slog.LevelDebug,
+			),
 			fmt.Sprintf(resultTemplate, "single message"),
 		},
 
 		{
-			New(1074, 2, 3, true, 1, 5, 6, 7, true, 9, satMask, sigMask, cellMask),
+			New(1074, 2, 3, true, 1, 5, 6, 7,
+				true, 9, satMask, sigMask, cellMask,
+				slog.LevelDebug,
+			),
 			fmt.Sprintf(resultTemplate, "multiple message"),
 		},
 	}

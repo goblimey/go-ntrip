@@ -7,6 +7,7 @@ package signal
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	msmHeader "github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
@@ -53,34 +54,35 @@ type Cell struct {
 
 	// The satellite that sent the signal.
 	Satellite *satellite.Cell
+
+	// LogLevel controls the data output by String.
+	LogLevel slog.Level
 }
 
 // New creates an MSM Signal Cell.
-func New(signalID uint, satelliteCell *satellite.Cell, rangeDelta, phaseRangeDelta int, lockTimeIndicator uint, halfCycleAmbiguity bool, cnr uint, wavelength float64) *Cell {
-
-	// Default values if satellite is nil.
-	// var satelliteID uint = 0
-	// var rangeWhole uint = utils.InvalidRange
-	// var rangeFractional uint = 0
-
-	// if satelliteCell != nil {
-	// 	satelliteID = satelliteCell.SatelliteID
-	// 	rangeWhole = satelliteCell.RangeWholeMillis
-	// 	rangeFractional = satelliteCell.RangeFractionalMillis
-	// }
+func New(
+	signalID uint,
+	satelliteCell *satellite.Cell,
+	rangeDelta,
+	phaseRangeDelta int,
+	lockTimeIndicator uint,
+	halfCycleAmbiguity bool,
+	cnr uint,
+	wavelength float64,
+	logLevel slog.Level,
+) *Cell {
 
 	cell := Cell{
-		// SatelliteID:                            satelliteID,
-		ID:         signalID,
-		Wavelength: wavelength,
-		// RangeWholeMillisFromSatelliteCell:      rangeWhole,
-		// RangeFractionalMillisFromSatelliteCell: rangeFractional,
+		ID:                  signalID,
+		Wavelength:          wavelength,
 		RangeDelta:          rangeDelta,
 		PhaseRangeDelta:     phaseRangeDelta,
 		LockTimeIndicator:   lockTimeIndicator,
 		HalfCycleAmbiguity:  halfCycleAmbiguity,
 		CarrierToNoiseRatio: cnr,
-		Satellite:           satelliteCell}
+		Satellite:           satelliteCell,
+		LogLevel:            logLevel,
+	}
 
 	return &cell
 }
@@ -121,7 +123,13 @@ func (cell *Cell) String() string {
 }
 
 // GetSignalCells gets the data from the signal cells of an MSM4 message.
-func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader.Header, satCells []satellite.Cell) ([][]Cell, error) {
+func GetSignalCells(
+	bitStream []byte,
+	startOfSignalCells uint,
+	header *msmHeader.Header,
+	satCells []satellite.Cell,
+	logLevel slog.Level,
+) ([][]Cell, error) {
 	// The third part of the message bit stream is the signal data.  Each satellite can
 	// send many signals, each on a different frequency.  For example, if we observe one
 	// signal from satellite 2, two from satellite 3 and 2 from satellite 15, there will
@@ -253,8 +261,11 @@ func GetSignalCells(bitStream []byte, startOfSignalCells uint, header *msmHeader
 
 					wavelength := utils.GetSignalWavelength(header.Constellation, signalID)
 
-					cell := New(signalID, &satCells[i], rangeDelta[c], phaseRangeDelta[c],
-						lockTimeIndicator[c], halfCycleAmbiguity[c], cnr[c], wavelength)
+					cell := New(signalID, &satCells[i], rangeDelta[c],
+						phaseRangeDelta[c], lockTimeIndicator[c],
+						halfCycleAmbiguity[c], cnr[c], wavelength,
+						logLevel,
+					)
 
 					signalCells[i] = append(signalCells[i], *cell)
 

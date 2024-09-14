@@ -4,6 +4,7 @@ package header
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
@@ -156,6 +157,9 @@ type Header struct {
 	// this count avoids having to rummage through the masks when you need to know
 	// its value.
 	NumSignalCells int
+
+	// LogLevel controls the data output by String.
+	LogLevel slog.Level
 }
 
 // New creates a Header.
@@ -173,6 +177,7 @@ func New(
 	satelliteMask uint64,
 	signalMask uint32,
 	cellMask uint64,
+	logLevel slog.Level,
 ) *Header {
 
 	constellation := utils.GetConstellation(messageType)
@@ -201,6 +206,7 @@ func New(
 		Satellites:                           satellites,
 		Signals:                              signals,
 		Cells:                                cells,
+		LogLevel:                             logLevel,
 	}
 
 	// Set the number of signal cells.
@@ -230,46 +236,48 @@ func (header *Header) String() string {
 	display += fmt.Sprintf("divergence free smoothing %v, smoothing interval %d\n",
 		header.GNSSDivergenceFreeSmoothingIndicator, header.GNSSSmoothingInterval)
 
-	// Display the 64-bit satellite mask in 4 bit chunks.
-	display += "Satellite mask:\n"
-	for s := 60; s >= 0; s -= 4 {
-		display += fmt.Sprintf("%04b", (header.SatelliteMask>>s)&0xf)
-		if s > 0 {
+	if header.LogLevel != slog.LevelInfo {
+		// Display the 64-bit satellite mask in 4 bit chunks.
+		display += "Satellite mask:\n"
+		for s := 60; s >= 0; s -= 4 {
+			display += fmt.Sprintf("%04b", (header.SatelliteMask>>s)&0xf)
+			if s > 0 {
+				display += " "
+				if s%16 == 0 {
+					display += " " // An extra space every 16 bits.
+				}
+			}
+		}
+		display += "\n"
+
+		// Display the 32-bit signal mask in 4 bit chunks.
+		display += "Signal mask: "
+		for s := 28; s >= 0; s -= 4 {
+			display += fmt.Sprintf("%04b", (header.SignalMask>>s)&0xf)
+			if s > 0 {
+				display += " "
+				if s%16 == 0 {
+					display += " " // An extra space every 16 bits.
+				}
+			}
+		}
+		display += "\n"
+
+		// Display the cell mask which is a slice of slices of bools.
+		display += "cell mask:"
+		for i, _ := range header.Cells {
 			display += " "
-			if s%16 == 0 {
-				display += " " // An extra space every 16 bits.
+			for j, _ := range header.Cells[i] {
+				if header.Cells[i][j] {
+					display += "t"
+				} else {
+					display += "f"
+				}
 			}
-		}
-	}
-	display += "\n"
 
-	// Display the 32-bit signal mask in 4 bit chunks.
-	display += "Signal mask: "
-	for s := 28; s >= 0; s -= 4 {
-		display += fmt.Sprintf("%04b", (header.SignalMask>>s)&0xf)
-		if s > 0 {
-			display += " "
-			if s%16 == 0 {
-				display += " " // An extra space every 16 bits.
-			}
 		}
+		display += "\n"
 	}
-	display += "\n"
-
-	// Display the cell mask which is a slice of slices of bools.
-	display += "cell mask:"
-	for i, _ := range header.Cells {
-		display += " "
-		for j, _ := range header.Cells[i] {
-			if header.Cells[i][j] {
-				display += "t"
-			} else {
-				display += "f"
-			}
-		}
-
-	}
-	display += "\n"
 
 	display += fmt.Sprintf("%d satellites, %d signal types, %d signals\n",
 		len(header.Satellites), len(header.Signals), header.NumSignalCells)
@@ -288,7 +296,7 @@ func (header *Header) GetTitle() string {
 // It returns the header data and the bit position of the start of the
 // satellite data (which comes next in the bit stream).  If the bit stream
 // is not long enough to hold the header, an error is returned.
-func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
+func GetMSMHeader(bitStream []byte, logLevel slog.Level) (*Header, uint, error) {
 
 	// The bit stream contains a 3-byte leader, a Multiple Signal Message and a
 	// 3-byte CRC.  The MSM starts with an MSMHeader.
@@ -449,10 +457,22 @@ func GetMSMHeader(bitStream []byte) (*Header, uint, error) {
 
 	pos += lenCellMaskBits
 
-	header := New(messageType, stationID, timestamp, multipleMessage, issueOfDataStation,
-		sessionTransmissionTime, clockSteeringIndicator, externalClockIndicator,
-		gnssDivergenceFreeSmoothingIndicator, gnssSmoothingInterval,
-		satelliteMask, signalMask, cellMask)
+	header := New(
+		messageType,
+		stationID,
+		timestamp,
+		multipleMessage,
+		issueOfDataStation,
+		sessionTransmissionTime,
+		clockSteeringIndicator,
+		externalClockIndicator,
+		gnssDivergenceFreeSmoothingIndicator,
+		gnssSmoothingInterval,
+		satelliteMask,
+		signalMask,
+		cellMask,
+		logLevel,
+	)
 
 	header.Satellites = satellites
 	header.Signals = signals

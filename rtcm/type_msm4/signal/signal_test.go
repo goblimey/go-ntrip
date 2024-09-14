@@ -2,6 +2,8 @@ package signal
 
 import (
 	"fmt"
+	"log/slog"
+
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -26,7 +28,8 @@ func TestNew(t *testing.T) {
 	const rangeFractional = 3
 	const wavelength = 4.0
 
-	satCell := satellite.New(satelliteID, rangeWhole, rangeFractional)
+	satCell := satellite.New(
+		satelliteID, rangeWhole, rangeFractional, slog.LevelDebug)
 
 	var testData = []struct {
 		Comment            string
@@ -61,8 +64,10 @@ func TestNew(t *testing.T) {
 	}
 	for _, td := range testData {
 		got := *New(
-			td.ID, td.SatelliteCell, td.RangeDelta, td.PhaseRangeDelta, td.LockTimeIndicator,
-			td.HalfCycleAmbiguity, td.Want.CarrierToNoiseRatio, td.Wavelength)
+			td.ID, td.SatelliteCell, td.RangeDelta,
+			td.PhaseRangeDelta, td.LockTimeIndicator,
+			td.HalfCycleAmbiguity, td.Want.CarrierToNoiseRatio,
+			td.Wavelength, slog.LevelInfo)
 		if got != td.Want {
 			t.Errorf("%s: want %v, got %v", td.Comment, td.Want, got)
 		}
@@ -127,8 +132,18 @@ func TestGetSignalCells(t *testing.T) {
 	wantRangeFractional := []uint{rangeFractional0, rangeFractional1}
 
 	satCell := []*satellite.Cell{
-		satellite.New(wantSatelliteID[0], wantRangeWhole[0], wantRangeFractional[0]),
-		satellite.New(wantSatelliteID[1], wantRangeWhole[1], wantRangeFractional[1]),
+		satellite.New(
+			wantSatelliteID[0],
+			wantRangeWhole[0],
+			wantRangeFractional[0],
+			slog.LevelInfo,
+		),
+		satellite.New(
+			wantSatelliteID[1],
+			wantRangeWhole[1],
+			wantRangeFractional[1],
+			slog.LevelInfo,
+		),
 	}
 
 	wantID := []uint{signalID0, signalID1, signalID0}
@@ -158,7 +173,8 @@ func TestGetSignalCells(t *testing.T) {
 	want[1].Satellite = satCell[0]
 	want[2].Satellite = satCell[1]
 
-	got, err := GetSignalCells(bitStream, startPosition, &header, satData)
+	got, err := GetSignalCells(
+		bitStream, startPosition, &header, satData, slog.LevelInfo)
 
 	if err != nil {
 		t.Errorf(err.Error())
@@ -246,7 +262,8 @@ func TestGetMS4SignalCellsWithShortBitStream(t *testing.T) {
 	for _, td := range testData {
 
 		// Expect an error.
-		gotMessage, gotError := GetSignalCells(td.bitStream, 0, td.header, satData)
+		gotMessage, gotError := GetSignalCells(
+			td.bitStream, 0, td.header, satData, slog.LevelInfo)
 
 		if gotMessage != nil {
 			t.Errorf("%s: expected a nil message and an error", td.description)
@@ -392,7 +409,8 @@ func TestGetAggregatePhaseRange(t *testing.T) {
 	//                         000 0000 0000 0000 0000 0100
 	const maxDelta4 = 0x7f7fe00004
 
-	satelliteWithMax := satellite.New(1, maxWhole, maxFractional)
+	satelliteWithMax := satellite.New(
+		1, maxWhole, maxFractional, slog.LevelInfo)
 
 	cellWithInvalidPhaseRangeDelta := Cell{
 		PhaseRangeDelta: invalidDelta22,
@@ -403,7 +421,8 @@ func TestGetAggregatePhaseRange(t *testing.T) {
 		PhaseRangeDelta: 1,
 	}
 
-	satelliteWithInvalidRange := satellite.New(2, utils.InvalidRange, 1)
+	satelliteWithInvalidRange := satellite.New(
+		2, utils.InvalidRange, 1, slog.LevelInfo)
 
 	cellWithInvalidRange := Cell{
 		PhaseRangeDelta: 1,
@@ -487,7 +506,8 @@ func TestGetPhaseRange(t *testing.T) {
 		}
 	}
 
-	satelliteCell := satellite.New(1, rangeMillisWhole, rangeMillisFractional)
+	satelliteCell := satellite.New(
+		1, rangeMillisWhole, rangeMillisFractional, slog.LevelInfo)
 	signalCell := Cell{
 		ID:              signalID,
 		Wavelength:      wavelength,
@@ -578,7 +598,8 @@ func TestString(t *testing.T) {
 
 	const wantNilSatelliteDisplay = "<nil>  2 {invalid, invalid, 7, true, 8, 0.244}"
 
-	satCell := satellite.New(satelliteID, rangeWhole, rangeFractional)
+	satCell := satellite.New(
+		satelliteID, rangeWhole, rangeFractional, slog.LevelDebug)
 
 	var testData = []struct {
 		Comment            string
@@ -598,9 +619,11 @@ func TestString(t *testing.T) {
 			wantNilSatelliteDisplay},
 	}
 	for _, td := range testData {
+
 		cell := *New(
-			td.ID, td.SatelliteCell, td.RangeDelta, td.PhaseRangeDelta, td.LockTimeIndicator,
-			td.HalfCycleAmbiguity, td.CNR, wavelength)
+			td.ID, td.SatelliteCell, td.RangeDelta, td.PhaseRangeDelta,
+			td.LockTimeIndicator, td.HalfCycleAmbiguity, td.CNR,
+			wavelength, slog.LevelDebug)
 		got := cell.String()
 		if got != td.Want {
 			t.Errorf("%s: want %s, got %s", td.Comment, td.Want, got)
@@ -650,24 +673,25 @@ func signalsEqual(cell, otherCell Cell) bool {
 
 // TestEqual checks the Equal method field by field
 func TestEqual(t *testing.T) {
-	testSatellite := satellite.New(1, 2, 3)
-	testSignal := New(6, testSatellite, 7, 8, 9, true, 10, 11.0)
+	testSatellite := satellite.New(1, 2, 3, slog.LevelWarn)
+	testSignal := New(
+		6, testSatellite, 7, 8, 9, true, 10, 11.0, slog.LevelDebug)
 
 	satelliteCell := []*satellite.Cell{
-		satellite.New(1, 2, 3),  // Same as the test satellite.
-		satellite.New(1, 20, 3), // Different from the test satellite.
+		satellite.New(1, 2, 3, slog.LevelWarn),   // Same as the test satellite.
+		satellite.New(1, 20, 3, slog.LevelDebug), // Different from the test satellite.
 	}
 
 	// These each differ from the test signal by one field.
 	signalCell := []*Cell{
-		New(20, satelliteCell[0], 7, 8, 9, true, 10, 11.0),
-		New(6, satelliteCell[1], 7, 8, 9, true, 10, 11.0),
-		New(6, satelliteCell[0], 20, 8, 9, true, 10, 11.0),
-		New(6, satelliteCell[0], 7, 20, 9, true, 10, 11.0),
-		New(6, satelliteCell[0], 7, 8, 20, true, 10, 11.0),
-		New(6, satelliteCell[0], 7, 8, 9, false, 10, 11.0),
-		New(6, satelliteCell[0], 7, 8, 9, true, 20, 11.0),
-		New(6, satelliteCell[0], 7, 8, 9, true, 10, 20.0),
+		New(20, satelliteCell[0], 7, 8, 9, true, 10, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[1], 7, 8, 9, true, 10, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[0], 20, 8, 9, true, 10, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[0], 7, 20, 9, true, 10, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[0], 7, 8, 20, true, 10, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[0], 7, 8, 9, false, 10, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[0], 7, 8, 9, true, 20, 11.0, slog.LevelDebug),
+		New(6, satelliteCell[0], 7, 8, 9, true, 10, 11.0, slog.LevelWarn),
 	}
 
 	for i := range signalCell {

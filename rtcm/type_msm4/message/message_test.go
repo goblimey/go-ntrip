@@ -1,6 +1,7 @@
 package message
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -37,22 +38,38 @@ const wantLockTimeIndicator = 14
 const wantHalfCycleAmbiguity = true
 const wantCNR = 15
 const wantWavelength = 16.0
+const wantLogLevel = slog.LevelDebug
 
 // createMessage is a helper function.  It creates a message with known contents.
 func createMessage() *Message {
-	h := header.New(wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
+	h := header.New(
+		wantMessageType, wantStationID,
+		wantTimestamp, wantMultipleMessage,
 		wantIssue, wantTransTime, wantClockSteeringIndicator,
-		wantExternalClockSteeringIndicator, true, wantSmoothingInterval,
-		wantSatelliteMask, wantSignalMask, wantCellMask)
+		wantExternalClockSteeringIndicator, true,
+		wantSmoothingInterval, wantSatelliteMask,
+		wantSignalMask, wantCellMask, wantLogLevel)
 
-	sat := satellite.New(wantSatelliteID, wantRangeWhole, wantRangeFractional)
+	sat := satellite.New(
+		wantSatelliteID, wantRangeWhole, wantRangeFractional, wantLogLevel)
+
 	sats := []satellite.Cell{*sat}
 
-	sig := signal.New(wantSignalID, sat, wantRangeDelta, wantPhaseRangeDelta,
-		wantLockTimeIndicator, wantHalfCycleAmbiguity, wantCNR, wantWavelength)
+	sig := signal.New(
+		wantSignalID,
+		sat,
+		wantRangeDelta,
+		wantPhaseRangeDelta,
+		wantLockTimeIndicator,
+		wantHalfCycleAmbiguity,
+		wantCNR,
+		wantWavelength,
+		wantLogLevel,
+	)
+
 	sigs := [][]signal.Cell{{*sig}}
 
-	return New(h, sats, sigs)
+	return New(h, sats, sigs, wantLogLevel)
 }
 func TestNew(t *testing.T) {
 
@@ -246,7 +263,8 @@ func TestGetMessage(t *testing.T) {
 	const wantWholeMillis = 1
 	const wantFractionalMillis = 0x100 // 0001 0000 0000
 
-	message, err := GetMessage(testdata.MessageFrameType1074_1)
+	message, err := GetMessage(
+		testdata.MessageFrameType1074_1, slog.LevelDebug)
 
 	if err != nil {
 		t.Error(err)
@@ -414,27 +432,35 @@ func TestGetMessageWithErrors(t *testing.T) {
 	var testData = []struct {
 		description string
 		bitStream   []byte
+		logLevel    slog.Level
 		Want        string
 	}{
 		{
 			"header too short", testdata.MessageFrameType1074_1[:26],
+			slog.LevelDebug,
 			"bitstream is too short for an MSM header - got 160 bits, expected at least 169",
 		},
 		{
 			"satellite cells too short", testdata.MessageFrameType1074_1[:29],
+			slog.LevelDebug,
 			"overrun - not enough data for 1 MSM4 satellite cells - need 18 bits, got 13",
 		},
 		{
 			"Signal cells too short", testdata.MessageFrameType1074_1[:34],
+			slog.LevelDebug,
 			"overrun - want 2 MSM4 signals, got 1",
 		},
 		{
 			"not MSM4", testdata.MessageFrameType1077,
+			slog.LevelDebug,
 			"message type 1077 is not an MSM4",
 		},
 	}
 	for _, td := range testData {
-		gotMessage, gotError := GetMessage(td.bitStream)
+
+		gotMessage, gotError :=
+			GetMessage(td.bitStream, td.logLevel)
+
 		if gotMessage != nil {
 			t.Errorf("%s: On error, the message should be nil", td.description)
 		}

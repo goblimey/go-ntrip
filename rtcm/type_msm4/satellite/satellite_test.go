@@ -2,6 +2,7 @@ package satellite
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
@@ -24,13 +25,19 @@ func TestNew(t *testing.T) {
 	}{
 		{"MSM4, all valid", 1, rangeWhole, rangeFractional,
 			Cell{ID: 1,
-				RangeWholeMillis: 1, RangeFractionalMillis: 2}},
+				RangeWholeMillis: 1, RangeFractionalMillis: 2,
+				LogLevel: slog.LevelDebug}},
+
 		{"MSM4 with invalid range", 2, utils.InvalidRange, rangeFractional,
 			Cell{ID: 2,
-				RangeWholeMillis: utils.InvalidRange, RangeFractionalMillis: rangeFractional}},
+				RangeWholeMillis:      utils.InvalidRange,
+				RangeFractionalMillis: rangeFractional,
+				LogLevel:              slog.LevelDebug}},
 	}
 	for _, td := range testData {
-		got := *New(td.ID, td.WholeMillis, td.FractionalMillis)
+		got := *New(td.ID, td.WholeMillis,
+			td.FractionalMillis, td.Want.LogLevel,
+		)
 		if got != td.Want {
 			t.Errorf("%s: want %v, got %v", td.Description, td.Want, got)
 		}
@@ -53,13 +60,22 @@ func TestGetSatelliteCells(t *testing.T) {
 	const startPosition = 16
 
 	want := []Cell{
-		Cell{ID: satelliteID1,
-			RangeWholeMillis: 0x81, RangeFractionalMillis: 0},
-		Cell{ID: satelliteID2,
-			RangeWholeMillis: 1, RangeFractionalMillis: 1023},
+		Cell{
+			ID:                    satelliteID1,
+			RangeWholeMillis:      0x81,
+			RangeFractionalMillis: 0,
+			LogLevel:              slog.LevelDebug,
+		},
+		Cell{
+			ID:                    satelliteID2,
+			RangeWholeMillis:      1,
+			RangeFractionalMillis: 1023,
+			LogLevel:              slog.LevelDebug,
+		},
 	}
 
-	got, satError := GetSatelliteCells(bitstream, startPosition, satellites)
+	got, satError :=
+		GetSatelliteCells(bitstream, startPosition, satellites, slog.LevelDebug)
 
 	if satError != nil {
 		t.Error(satError)
@@ -93,7 +109,7 @@ func TestGetSatelliteCellsShortMessage(t *testing.T) {
 		// CRC
 		0, 0, 0}
 
-	got, gotError := GetSatelliteCells(bitstream, 8, satellites)
+	got, gotError := GetSatelliteCells(bitstream, 8, satellites, slog.LevelDebug)
 
 	if gotError == nil {
 		t.Error("expected an overrun error")
@@ -119,7 +135,7 @@ func TestString(t *testing.T) {
 
 	const wantDisplay = " 1 {2, 512, 2.500, 749481.145}"
 
-	satellite := New(1, 2, fracMillis)
+	satellite := New(1, 2, fracMillis, slog.LevelDebug)
 
 	display := satellite.String()
 
@@ -137,7 +153,7 @@ func TestStringWithInvalidRange(t *testing.T) {
 
 	const wantDisplay = " 1 {invalid}"
 
-	satellite := New(1, invalidWhole, fracMillis)
+	satellite := New(1, invalidWhole, fracMillis, slog.LevelDebug)
 
 	display := satellite.String()
 

@@ -22,8 +22,9 @@ import (
 	"github.com/kylelemons/godebug/diff"
 )
 
-// A complete message frame (including 3-byte leader and 3-byte CRC).  The message
-// type is the bottom half of byte 3 and all of byte 4 - 0x449 - decimal 1097.
+// A complete message frame (including 3-byte leader and 3-byte CRC).
+// The message type is the bottom half of byte 3 and all of byte 4 -
+// 0x449 - decimal 1097.
 var validMessageFrame = []byte{
 	0xd3, 0x00, 0xaa, 0x44, 0x90, 0x00, 0x33, 0xf6, 0xea, 0xe2, 0x00, 0x00, 0x0c, 0x50, 0x00, 0x10,
 	0x08, 0x00, 0x00, 0x00, 0x20, 0x01, 0x00, 0x00, 0x3f, 0xaa, 0xaa, 0xb2, 0x42, 0x8a, 0xea, 0x68,
@@ -429,8 +430,9 @@ func TestReadGetMessageWithShortBitStream(t *testing.T) {
 	}
 }
 
-// TestPrepareForDisplayWithRealData reads the first message from the real data,
-// prepares it for display and checks the result in detail.
+// TestPrepareForDisplayWithRealData reads the first message
+// from data captured from a real device, prepares it for
+// display and checks the result in detail.
 func TestPrepareForDisplayWithRealData(t *testing.T) {
 
 	const wantRangeWholeMilliSecs = 81
@@ -1007,7 +1009,9 @@ func TestAnalyseWith1230(t *testing.T) {
 }
 
 func createHeader(messageType int, timestamp uint) *header.Header {
-	return header.New(messageType, 0, timestamp, false, 0, 0, 0, 0, false, 0, 0, 0, 0)
+	return header.New(
+		messageType, 0, timestamp, false, 0, 0, 0, 0,
+		false, 0, 0, 0, 0, slog.LevelDebug)
 }
 
 // TestConversionOfTimeToUTC checks that the converting a timestamp to
@@ -1398,6 +1402,7 @@ const wantClockSteeringIndicator = 5
 const wantExternalClockSteeringIndicator = 6
 const wantSmoothing = true
 const wantSmoothingInterval = 7
+const wantLogLevel = slog.LevelDebug
 
 const wantSatelliteID = 8
 const wantRangeWhole uint = 9
@@ -1412,15 +1417,32 @@ const wantCNR = 15
 const wantWavelength = 16.0
 
 func createMSM4() *msm4message.Message {
-	hdr := header.New(wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
-		wantIssue, wantTransTime, wantClockSteeringIndicator, wantExternalClockSteeringIndicator,
-		wantSmoothing, wantSmoothingInterval, wantSatelliteMask, wantSignalMask, wantCellMask)
-	sat := msm4satellite.New(wantSatelliteID, wantRangeWhole, wantRangeFractional)
+	hdr := header.New(
+		wantMessageType, wantStationID, wantTimestamp, wantMultipleMessage,
+		wantIssue, wantTransTime, wantClockSteeringIndicator,
+		wantExternalClockSteeringIndicator,
+		wantSmoothing, wantSmoothingInterval,
+		wantSatelliteMask, wantSignalMask,
+		wantCellMask, wantLogLevel)
+
+	sat := msm4satellite.New(
+		wantSatelliteID, wantRangeWhole,
+		wantRangeFractional, wantLogLevel,
+	)
+
 	satellites := []msm4satellite.Cell{*sat}
-	sig := msm4signal.New(wantSignalID, sat, wantRangeDelta, wantPhaseRangeDelta,
-		wantLockTimeIndicator, wantHalfCycleAmbiguity, wantCNR, wantWavelength)
+
+	sig := msm4signal.New(
+		wantSignalID, sat, wantRangeDelta, wantPhaseRangeDelta,
+		wantLockTimeIndicator, wantHalfCycleAmbiguity, wantCNR,
+		wantWavelength, wantLogLevel,
+	)
+
 	signals := [][]msm4signal.Cell{{*sig}}
-	return msm4message.New(hdr, satellites, signals)
+
+	return msm4message.New(
+		hdr, satellites, signals, wantLogLevel,
+	)
 }
 
 // createRTCMWithMSM4 creates an RTCM message containing the given MSM4,
@@ -1596,9 +1618,9 @@ No Signals
 		"Time 2023-02-17 00:00:05 +0000 UTC\n" +
 		"Start of GPS week 2023-02-11 23:59:42 +0000 UTC plus timestamp 432023000 (5d 0h 0m 23s 0ms)\n" +
 		testdata.MessageFrameType1077HexDump +
-		testdata.WantHeaderFromMessageFrameType1077 + "\n" +
+		testdata.WantDebugHeaderFromMessageFrameType1077 + "\n" +
 		testdata.WantSatelliteListFromMessageFrameType1077 + "\n" +
-		testdata.WantSignalListFromMessageFrameType1077 + "\n"
+		testdata.WantDebugSignalListFromMessageFrameType1077 + "\n"
 
 	const wantCrazy1005 = `Message type 1005, Stationary RTK Reference Station Antenna Reference Point (ARP)
 Commonly called the Station Description this message includes the ECEF location of the ARP of the antenna (not the phase center) and also the quarter phase alignment details.  The datum field is not used/defined, which often leads to confusion if a local datum is used. See message types 1006 and 1032. The 1006 message also adds a height about the ARP value.
@@ -1778,8 +1800,8 @@ message type 1074 is not an MSM7
 		message     *Message
 		want        string
 	}{
-		{"complete MSM4", completeMSM4Message, wantCompleteMSM4},
 		{"complete MSM7", completeMSM7Message, wantComplete1077Display},
+		{"complete MSM4", completeMSM4Message, wantCompleteMSM4},
 		{"glonass with illegal day", glonassMSM7WithIllegalDay, testdata.GlonassMSM7WithIllegalDayDisplay},
 		{"1005", message1005, testdata.MessageFrameType1005Display},
 		{"1006", message1006, testdata.MessageFrameType1006Display},
@@ -1801,6 +1823,54 @@ message type 1074 is not an MSM7
 			t.Errorf("%s\n%s", td.description, diff.Diff(td.want, got))
 		}
 	}
+}
+
+// TestStringAtInfoLevel checks the String method at info level.
+func TestStringAtInfoLevel(t *testing.T) {
+
+	// The start times for MSM messages.
+	// 13h May 2023, 23:59:42
+	startTime := testdata.UTCTimeOfMessageFrameType1077
+
+	rtcmHandler := New(startTime, slog.LevelInfo)
+
+	msg, err := rtcmHandler.GetMessage(
+
+		testdata.MessageFrameType1077)
+
+	if err != nil {
+		t.Error(err)
+	}
+
+	msm7, isMSM7 := PrepareForDisplay(msg).(*msm7message.Message)
+
+	if !isMSM7 {
+		t.Errorf("message is not MSM7")
+		return
+	}
+
+	// Get the sub displays first, to quickly see any breaking changes.
+	gotHeaderDisplay := msm7.Header.String()
+	if gotHeaderDisplay != testdata.WantInfoHeaderFromMessageFrameType1077 {
+		t.Error(diff.Diff(testdata.WantInfoHeaderFromMessageFrameType1077, gotHeaderDisplay))
+		return
+	}
+
+	gotSignalDisplay := msm7.DisplaySignalCells()
+
+	if gotSignalDisplay != testdata.WantInfoSignalListFromMessageFrameType1077 {
+		t.Error(diff.Diff(testdata.WantInfoSignalListFromMessageFrameType1077, gotSignalDisplay))
+		return
+	}
+
+	// Now check the main display.
+	gotMessageDisplay := msg.String()
+
+	if gotMessageDisplay != testdata.WantInfoMessageFrameType1077Display {
+		t.Error(diff.Diff(testdata.WantInfoMessageFrameType1077Display, gotMessageDisplay))
+		return
+	}
+
 }
 
 // TestStringWithNilReadable checks that a String fills in the Readable field

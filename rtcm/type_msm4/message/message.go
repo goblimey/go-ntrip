@@ -3,6 +3,7 @@ package message
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
 	"github.com/goblimey/go-ntrip/rtcm/type_msm4/satellite"
@@ -23,11 +24,23 @@ type Message struct {
 	// of signals at different frequencies observed by the base
 	// station from the satellites in the Satellite list.
 	Signals [][]signal.Cell
+
+	// LogLevel controls the data output by String.
+	LogLevel slog.Level
 }
 
 // New creates an MSM4 Message.
-func New(header *header.Header, satellites []satellite.Cell, signals [][]signal.Cell) *Message {
-	message := Message{Header: header, Satellites: satellites, Signals: signals}
+func New(
+	header *header.Header,
+	satellites []satellite.Cell,
+	signals [][]signal.Cell,
+	logLevel slog.Level) *Message {
+	message := Message{
+		Header:     header,
+		Satellites: satellites,
+		Signals:    signals,
+		LogLevel:   logLevel,
+	}
 
 	return &message
 }
@@ -82,9 +95,10 @@ func (message *Message) DisplaySignalCells() string {
 }
 
 // GetMessage presents an MSM4 (type 1074, 1084 etc) as  broken out fields.
-func GetMessage(bitStream []byte) (*Message, error) {
+func GetMessage(bitStream []byte, logLevel slog.Level) (*Message, error) {
 
-	header, bitPosition, headerError := header.GetMSMHeader(bitStream)
+	header, bitPosition, headerError := header.GetMSMHeader(
+		bitStream, logLevel)
 
 	if headerError != nil {
 		return nil, headerError
@@ -96,21 +110,25 @@ func GetMessage(bitStream []byte) (*Message, error) {
 		return nil, errors.New(em)
 	}
 
-	satellites, fetchSatellitesError :=
-		satellite.GetSatelliteCells(bitStream, bitPosition, header.Satellites)
+	satellites, fetchSatellitesError := satellite.GetSatelliteCells(
+		bitStream, bitPosition, header.Satellites, logLevel,
+	)
+
 	if fetchSatellitesError != nil {
 		return nil, fetchSatellitesError
 	}
 
 	bitPosition += uint(len(satellites) * satellite.CellLengthInBits)
 
-	signals, fetchSignalsError :=
-		signal.GetSignalCells(bitStream, bitPosition, header, satellites)
+	signals, fetchSignalsError := signal.GetSignalCells(
+		bitStream, bitPosition, header, satellites, logLevel,
+	)
+
 	if fetchSignalsError != nil {
 		return nil, fetchSignalsError
 	}
 
-	msm4Message := New(header, satellites, signals)
+	msm4Message := New(header, satellites, signals, logLevel)
 
 	return msm4Message, nil
 }

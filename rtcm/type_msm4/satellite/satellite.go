@@ -12,6 +12,7 @@ package satellite
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/goblimey/go-ntrip/rtcm/utils"
 )
@@ -43,15 +44,19 @@ type Cell struct {
 	// RangeFractionalMillis - unit10.  The fractional part of the range
 	// in units of 1/1024 milliseconds.
 	RangeFractionalMillis uint
+
+	// LogLevel controls the data output by String.
+	LogLevel slog.Level
 }
 
 // New creates an MSM4 satellite cell from the given values.
-func New(id, wholeMillis, fractionalMillis uint) *Cell {
+func New(id, wholeMillis, fractionalMillis uint, logLevel slog.Level) *Cell {
 
 	cell := Cell{
 		ID:                    id,
 		RangeWholeMillis:      wholeMillis,
 		RangeFractionalMillis: fractionalMillis,
+		LogLevel:              logLevel,
 	}
 
 	return &cell
@@ -77,7 +82,13 @@ func (cell *Cell) String() string {
 // GetSatelliteCells extracts the satellite cell data from an MSM4 message.
 // It returns a slice of cell data.  If the bitstream is not long enough to
 // contain the message, it returns an error.
-func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites []uint) ([]Cell, error) {
+func GetSatelliteCells(
+	bitStream []byte,
+	startOfSatelliteData uint,
+	Satellites []uint,
+	logLevel slog.Level,
+) ([]Cell, error) {
+
 	// The bitStream contains the variable length header, the satellite cells and
 	// then the signal cells.  startOfSatelliteData gives the bit position of the
 	// start of the satellite cells.  Satellites gives the number of satellites
@@ -96,8 +107,10 @@ func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites [
 	bitsNeededForCells := len(Satellites) * (lenWholeMillis + lenFractionalMillis)
 
 	if bitsLeftInMessage < bitsNeededForCells {
+
 		message := fmt.Sprintf("overrun - not enough data for %d MSM4 satellite cells - need %d bits, got %d",
 			len(Satellites), bitsNeededForCells, bitsLeftInMessage)
+
 		return nil, errors.New(message)
 	}
 
@@ -123,7 +136,9 @@ func GetSatelliteCells(bitStream []byte, startOfSatelliteData uint, Satellites [
 	// Create a slice of satellite cells initialised from those data.
 	satData := make([]Cell, 0)
 	for i := range Satellites {
-		satCell := New(Satellites[i], wholeMillis[i], fractionalMillis[i])
+		satCell := New(Satellites[i], wholeMillis[i],
+			fractionalMillis[i], logLevel)
+
 		satData = append(satData, *satCell)
 	}
 

@@ -1,6 +1,7 @@
 package signal
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/goblimey/go-ntrip/rtcm/header"
@@ -28,7 +29,8 @@ func TestNew(t *testing.T) {
 	const halfCycleAmbiguity = true
 	const cnr = 10
 
-	satCell := satellite.New(satelliteID, rangeWhole, rangeFractional, 0, phaseRangeRate)
+	satCell := satellite.New(
+		satelliteID, rangeWhole, rangeFractional, 0, phaseRangeRate, slog.LevelWarn)
 
 	var testData = []struct {
 		Comment             string
@@ -41,9 +43,12 @@ func TestNew(t *testing.T) {
 		HalfCycleAmbiguity  bool
 		CNR                 uint
 		Wavelength          float64
+		logLevel            slog.Level
 		Want                Cell // expected result
 	}{
-		{"all values", 1, satCell, rangeDelta, phaseRangeDelta, phaseRangeRateDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, wavelength,
+		{"all values", 1, satCell, rangeDelta, phaseRangeDelta,
+			phaseRangeRateDelta, lockTimeIndicator, halfCycleAmbiguity,
+			cnr, wavelength, slog.LevelDebug,
 			Cell{ID: 1,
 				Wavelength:          wavelength,
 				RangeDelta:          rangeDelta,
@@ -53,9 +58,12 @@ func TestNew(t *testing.T) {
 				CarrierToNoiseRatio: cnr,
 				PhaseRangeRateDelta: phaseRangeRateDelta,
 				Satellite:           satCell,
+				LogLevel:            slog.LevelDebug,
 			},
 		},
-		{"nil satellite", 2, nil, rangeDelta, phaseRangeDelta, phaseRangeRateDelta, lockTimeIndicator, halfCycleAmbiguity, cnr, 0.0,
+		{"nil satellite", 2, nil, rangeDelta, phaseRangeDelta,
+			phaseRangeRateDelta, lockTimeIndicator, halfCycleAmbiguity,
+			cnr, 0.0, slog.LevelWarn,
 			Cell{
 				ID:                  2,
 				Wavelength:          0.0,
@@ -66,13 +74,16 @@ func TestNew(t *testing.T) {
 				CarrierToNoiseRatio: cnr,
 				PhaseRangeRateDelta: phaseRangeRateDelta,
 				Satellite:           nil,
+				LogLevel:            slog.LevelWarn,
 			},
 		},
 	}
 	for _, td := range testData {
 		got := *New(
-			td.ID, td.SatelliteCell, td.RangeDelta, td.PhaseRangeDelta, td.LockTimeIndicator,
-			td.HalfCycleAmbiguity, td.Want.CarrierToNoiseRatio, td.PhaseRangeRateDelta, td.Wavelength)
+			td.ID, td.SatelliteCell, td.RangeDelta, td.PhaseRangeDelta,
+			td.LockTimeIndicator, td.HalfCycleAmbiguity,
+			td.Want.CarrierToNoiseRatio, td.PhaseRangeRateDelta,
+			td.Wavelength, td.logLevel)
 		if got != td.Want {
 			t.Errorf("%s: want %v, got %v", td.Comment, td.Want, got)
 		}
@@ -107,9 +118,17 @@ func TestGetAggregateRange(t *testing.T) {
 	// 0 0000 0010 0000 0000 1000 0000 0000 0000 0001
 	const allOne = 0x20080001
 
-	satelliteWithInvalidRange := satellite.New(1, utils.InvalidRange, maxFractional, 3, 4)
-	satelliteWithMaxValues := satellite.New(2, maxWhole, maxFractional, 3, 4)
-	satelliteWithRangeOne := satellite.New(5, 1, 1, 3, 4)
+	satelliteWithInvalidRange := satellite.New(
+		1, utils.InvalidRange, maxFractional, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteWithMaxValues := satellite.New(
+		2, maxWhole, maxFractional, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteWithRangeOne := satellite.New(
+		5, 1, 1, 3, 4, slog.LevelInfo,
+	)
 
 	cellWithNoSatellite := Cell{RangeDelta: invalidDelta}
 
@@ -182,12 +201,29 @@ func TestRangeInMetres(t *testing.T) {
 
 	const wantBig float64 = (128.5 + twoToPowerMinus11) * utils.OneLightMillisecond // 38523477.236036
 
-	satelliteRangeOneFracZero := satellite.New(1, 1, 0, 3, 4)
-	satelliteRangeOneFracOne := satellite.New(2, 1, 1, 3, 4)
-	satelliteBigValues := satellite.New(3, bigRangeMillisWhole, bigRangeMillisFractional, 3, 4)
-	satelliteMaxValues := satellite.New(4, maxWhole, maxFractional, 3, 4)
-	satelliteRealValues := satellite.New(5, 81, 435, 3, 4)
-	satelliteBigWholeFracOne := satellite.New(3, bigRangeMillisWhole, 1, 3, 4)
+	satelliteRangeOneFracZero := satellite.New(
+		1, 1, 0, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteRangeOneFracOne := satellite.New(
+		2, 1, 1, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteBigValues := satellite.New(
+		3, bigRangeMillisWhole, bigRangeMillisFractional, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteMaxValues := satellite.New(
+		4, maxWhole, maxFractional, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteRealValues := satellite.New(
+		5, 81, 435, 3, 4, slog.LevelInfo,
+	)
+
+	satelliteBigWholeFracOne := satellite.New(
+		3, bigRangeMillisWhole, 1, 3, 4, slog.LevelInfo,
+	)
 
 	sigCellWithRangeOneMilli := Cell{
 		RangeDelta: 0,
@@ -319,26 +355,47 @@ func TestGetAggregatePhaseRange(t *testing.T) {
 	//                         000 0000 0000 0000 0000 0001
 	const allOne = 0x80200001
 
-	satelliteCellWithRangeBothOne := satellite.New(1, 1, 1, filler3, filler4)
-	satelliteCellWithMaxValues :=
-		satellite.New(1, maxRangeWhole, maxRangeFractional, filler3, filler4)
-	satelliteCellWithInvalidRange :=
-		satellite.New(1, invalidRangeWhole, maxRangeFractional, filler3, filler4)
+	satelliteCellWithRangeBothOne := satellite.New(
+		1, 1, 1, filler3, filler4, slog.LevelInfo,
+	)
 
-	cellWithInvalidRange := New(1, satelliteCellWithInvalidRange, filler5, 1,
-		filler6, fillerFalse, filler7, filler8, filler9)
+	satelliteCellWithMaxValues := satellite.New(
+		1, maxRangeWhole, maxRangeFractional,
+		filler3, filler4, slog.LevelInfo,
+	)
 
-	cellWithMaxRange := New(2, satelliteCellWithMaxValues, filler5, 0,
-		filler6, fillerFalse, filler7, filler8, filler9)
+	satelliteCellWithInvalidRange := satellite.New(
+		1, invalidRangeWhole, maxRangeFractional,
+		filler3, filler4, slog.LevelInfo,
+	)
 
-	cellWithInvalidPhaseRangeDelta := New(3, satelliteCellWithMaxValues, filler5,
-		invalidPhaseRangeDelta, filler6, fillerFalse, filler7, filler8, filler9)
+	cellWithInvalidRange := New(
+		1, satelliteCellWithInvalidRange, filler5, 1,
+		filler6, fillerFalse, filler7, filler8, filler9, slog.LevelInfo,
+	)
 
-	cellWithRangeAndPhaseRangeDeltaOne := New(3, satelliteCellWithRangeBothOne,
-		filler5, 1, filler6, fillerFalse, filler7, filler8, filler9)
+	cellWithMaxRange := New(
+		2, satelliteCellWithMaxValues, filler5, 0,
+		filler6, fillerFalse, filler7, filler8, filler9, slog.LevelInfo,
+	)
 
-	cellWithMaxRangeAndPhaseRangeDeltaOne := New(4, satelliteCellWithMaxValues, filler5, 1,
-		filler6, fillerFalse, filler7, filler8, filler9)
+	cellWithInvalidPhaseRangeDelta := New(
+		3, satelliteCellWithMaxValues, filler5,
+		invalidPhaseRangeDelta, filler6, fillerFalse,
+		filler7, filler8, filler9, slog.LevelInfo,
+	)
+
+	cellWithRangeAndPhaseRangeDeltaOne := New(
+		3, satelliteCellWithRangeBothOne,
+		filler5, 1, filler6, fillerFalse, filler7,
+		filler8, filler9, slog.LevelInfo,
+	)
+
+	cellWithMaxRangeAndPhaseRangeDeltaOne := New(
+		4, satelliteCellWithMaxValues, filler5, 1,
+		filler6, fillerFalse, filler7, filler8,
+		filler9, slog.LevelInfo,
+	)
 
 	var testData = []struct {
 		Signal *Cell
@@ -406,7 +463,9 @@ func TestGetAggregatePhaseRangeRate(t *testing.T) {
 	// If the whole and the delta are both -1, the result should be:
 	const wantBothNeg = -10001
 
-	satWithInvalidPhaseRangeRate := satellite.New(1, 2, 3, 0, invalidPhaseRangeRate)
+	satWithInvalidPhaseRangeRate := satellite.New(
+		1, 2, 3, 0, invalidPhaseRangeRate, slog.LevelInfo,
+	)
 
 	cellWithNoSatellite := Cell{PhaseRangeRateDelta: 1}
 
@@ -415,7 +474,9 @@ func TestGetAggregatePhaseRangeRate(t *testing.T) {
 		Satellite:           satWithInvalidPhaseRangeRate,
 	}
 
-	satWithMaxPhaseRangeRate := satellite.New(1, 2, 3, 0, maxPhaseRangeRate)
+	satWithMaxPhaseRangeRate := satellite.New(
+		1, 2, 3, 0, maxPhaseRangeRate, slog.LevelInfo,
+	)
 
 	cellWithMaxWholeAndDeltaZero := Cell{
 		PhaseRangeRateDelta: 0,
@@ -427,7 +488,9 @@ func TestGetAggregatePhaseRangeRate(t *testing.T) {
 		Satellite:           satWithMaxPhaseRangeRate,
 	}
 
-	satWithPhaseRangeRateOne := satellite.New(1, 2, 3, 0, 1)
+	satWithPhaseRangeRateOne := satellite.New(
+		1, 2, 3, 0, 1, slog.LevelInfo,
+	)
 
 	cellWithBothOne := Cell{
 		PhaseRangeRateDelta: 1,
@@ -444,7 +507,9 @@ func TestGetAggregatePhaseRangeRate(t *testing.T) {
 		Satellite:           satWithMaxPhaseRangeRate,
 	}
 
-	satWithNegativePhaseRangeRate := satellite.New(1, 2, 3, 0, -1)
+	satWithNegativePhaseRangeRate := satellite.New(
+		1, 2, 3, 0, -1, slog.LevelInfo,
+	)
 
 	cellWithBothNegative := Cell{
 		PhaseRangeRateDelta: -1,
@@ -530,12 +595,16 @@ func TestGetPhaseRange(t *testing.T) {
 		}
 	}
 
-	satelliteCell := satellite.New(1, rangeMillisWhole, rangeMillisFractional,
-		extendedInfo, phaseRangeRate)
+	satelliteCell := satellite.New(
+		1, rangeMillisWhole, rangeMillisFractional,
+		extendedInfo, phaseRangeRate, slog.LevelInfo,
+	)
 
-	signalCell := New(signalID, satelliteCell, rangeDelta, phaseRangeDelta,
-		lockTimeIndicator, halfCycleAmbiguity, cnr, phaseRangeRateDelta,
-		wavelength)
+	signalCell := New(
+		signalID, satelliteCell, rangeDelta, phaseRangeDelta,
+		lockTimeIndicator, halfCycleAmbiguity, cnr,
+		phaseRangeRateDelta, wavelength, slog.LevelInfo,
+	)
 
 	agg := signalCell.GetAggregatePhaseRange()
 
@@ -597,7 +666,10 @@ func TestGetPhaseRangeRealValues(t *testing.T) {
 
 	wavelength := utils.GetSignalWavelength("GPS", signalID)
 
-	satelliteWithRealValues := satellite.New(1, 81, 435, 3, 4)
+	satelliteWithRealValues := satellite.New(
+		1, 81, 435, 3, 4, slog.LevelInfo,
+	)
+
 	signalCell := Cell{
 		ID:              signalID,
 		Wavelength:      wavelength,
@@ -624,7 +696,10 @@ func TestMSM7DopplerWithRealData(t *testing.T) {
 
 	wavelength := utils.GetSignalWavelength("GPS", signalID)
 
-	satelliteCell := satellite.New(1, 2, 3, 4, -135)
+	satelliteCell := satellite.New(
+		1, 2, 3, 4, -135, slog.LevelInfo,
+	)
+
 	sigCell := Cell{
 		ID: 2,
 		// PhaseRangeRateFromSatelliteCell: -135,
@@ -641,8 +716,9 @@ func TestMSM7DopplerWithRealData(t *testing.T) {
 	}
 }
 
-// TestGetSignalCells checks that getSignalCells correctly interprets a
-// bit stream from an MSM7 message containing two signal cells.
+// TestGetSignalCells checks that getSignalCells correctly
+// interprets a bit stream from an MSM7 message containing
+// two signal cells.
 func TestGetSignalCells(t *testing.T) {
 	const signalID0 = 5
 	const signalID1 = 7
@@ -688,8 +764,8 @@ func TestGetSignalCells(t *testing.T) {
 	const startPosition = 48 // Byte 6.
 
 	satCell := []*satellite.Cell{
-		satellite.New(satelliteID0, 0, 0, 0, 0),
-		satellite.New(satelliteID1, 0, 0, 0, 0),
+		satellite.New(satelliteID0, 0, 0, 0, 0, slog.LevelInfo),
+		satellite.New(satelliteID1, 0, 0, 0, 0, slog.LevelInfo),
 	}
 	want := []Cell{
 		{
@@ -718,7 +794,9 @@ func TestGetSignalCells(t *testing.T) {
 		},
 	}
 
-	got, err := GetSignalCells(bitStream, startPosition, &header, satData)
+	got, err := GetSignalCells(
+		bitStream, startPosition, &header, satData, slog.LevelInfo,
+	)
 
 	if err != nil {
 		t.Errorf(err.Error())
@@ -808,7 +886,9 @@ func TestGetSignalCellsWithShortBitStream(t *testing.T) {
 	for _, td := range testData {
 
 		// Expect an error.
-		gotMessage, gotError := GetSignalCells(td.bitStream, 0, td.header, satData)
+		gotMessage, gotError := GetSignalCells(
+			td.bitStream, 0, td.header, satData, slog.LevelInfo,
+		)
 
 		if gotMessage != nil {
 			t.Error("expected a nil message with an error")
@@ -859,31 +939,49 @@ func TestString(t *testing.T) {
 	invalidPhaseRangeRate := int(utils.GetBitsAsInt64(invalidPhaseRangeRateBytes, 0, 14))
 
 	// A satellite cell with valid range and phase range rate.
-	satelliteCellAllValid := satellite.New(1, rangeWhole, rangeFractional,
-		extendedInfo, approxPhaseRangeRate)
+	satelliteCellAllValid := satellite.New(
+		1, rangeWhole, rangeFractional,
+		extendedInfo, approxPhaseRangeRate, slog.LevelDebug,
+	)
 
 	// A satellite cell with invalid range.
-	satelliteCellWithInvalidRange := satellite.New(1, rangeWholeInvalid, rangeFractional,
-		extendedInfo, approxPhaseRangeRate)
+	satelliteCellWithInvalidRange := satellite.New(
+		1, rangeWholeInvalid, rangeFractional,
+		extendedInfo, approxPhaseRangeRate, slog.LevelDebug,
+	)
 
 	// A satellite cell with invalid phase range rate
 	satelliteCellWithInvalidPhaseRangeRate :=
 		satellite.New(1, rangeWhole, rangeFractional,
-			extendedInfo, invalidPhaseRangeRate)
+			extendedInfo, invalidPhaseRangeRate, slog.LevelDebug,
+		)
 
-	signalCellAllValid := New(signalID, satelliteCellAllValid, rangeDelta, phaseRangeDelta,
-		lockTimeIndicator, halfCycleAmbiguity, cnr, phaseRangeRateDelta, wavelength)
+	signalCellAllValid := New(
+		signalID, satelliteCellAllValid, rangeDelta,
+		phaseRangeDelta,
+		lockTimeIndicator, halfCycleAmbiguity, cnr,
+		phaseRangeRateDelta, wavelength, slog.LevelDebug,
+	)
 
-	signalCellWithInvalidRange := New(signalID, satelliteCellWithInvalidRange,
-		invalidRangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity,
-		cnr, phaseRangeRateDelta, wavelength)
+	signalCellWithInvalidRange := New(
+		signalID, satelliteCellWithInvalidRange,
+		invalidRangeDelta, phaseRangeDelta,
+		lockTimeIndicator, halfCycleAmbiguity,
+		cnr, phaseRangeRateDelta, wavelength, slog.LevelDebug,
+	)
 
-	signalCellWithInvalidPhaseRangeRate := New(signalID, satelliteCellWithInvalidPhaseRangeRate,
-		rangeDelta, phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity, cnr,
-		phaseRangeRateDelta, wavelength)
+	signalCellWithInvalidPhaseRangeRate := New(
+		signalID, satelliteCellWithInvalidPhaseRangeRate,
+		rangeDelta, phaseRangeDelta, lockTimeIndicator,
+		halfCycleAmbiguity, cnr,
+		phaseRangeRateDelta, wavelength, slog.LevelDebug,
+	)
 
-	signalCellWithZeroWavelength := New(signalID, satelliteCellAllValid, rangeDelta, phaseRangeDelta,
-		lockTimeIndicator, halfCycleAmbiguity, cnr, phaseRangeRateDelta, 0)
+	signalCellWithZeroWavelength := New(
+		signalID, satelliteCellAllValid, rangeDelta,
+		phaseRangeDelta, lockTimeIndicator, halfCycleAmbiguity,
+		cnr, phaseRangeRateDelta, 0, slog.LevelDebug,
+	)
 
 	var testData = []struct {
 		description string
@@ -916,27 +1014,31 @@ func TestString(t *testing.T) {
 
 // TestEqual checks the Equal method field by field
 func TestEqual(t *testing.T) {
-	testSatellite := satellite.New(1, 2, 3, 4, 5)
-	testSignal := New(6, testSatellite, 7, 8, 9, true, 10, 11, 12.0)
+	testSatellite := satellite.New(1, 2, 3, 4, 5, slog.LevelDebug)
+	testSignal := New(
+		6, testSatellite, 7, 8, 9, true, 10, 11, 12.0, slog.LevelWarn,
+	)
 
 	satelliteCell := []*satellite.Cell{
-		satellite.New(1, 2, 3, 4, 5),  // Same as the test satellite.
-		satellite.New(1, 20, 3, 4, 5), // Different from the test satellite.
+		// Same as the test satellite.
+		satellite.New(1, 2, 3, 4, 5, slog.LevelDebug),
+		// Different from the test satellite.
+		satellite.New(1, 20, 3, 4, 5, slog.LevelWarn),
 	}
 
 	signalCell := []*Cell{
 		// This is the same as testSignal.
-		New(6, satelliteCell[0], 7, 8, 9, true, 10, 11, 12.0),
+		New(6, satelliteCell[0], 7, 8, 9, true, 10, 11, 12.0, slog.LevelWarn),
 		// These each differ from the test signal by one field.
-		New(20, satelliteCell[0], 7, 8, 9, true, 10, 11, 12.0),
-		New(6, satelliteCell[1], 7, 8, 9, true, 10, 11, 12.0),
-		New(6, satelliteCell[0], 20, 8, 9, true, 10, 11, 12.0),
-		New(6, satelliteCell[0], 7, 20, 9, true, 10, 11, 12.0),
-		New(6, satelliteCell[0], 7, 8, 20, true, 10, 11, 12.0),
-		New(6, satelliteCell[0], 7, 8, 9, false, 10, 11, 12.0),
-		New(6, satelliteCell[0], 7, 8, 9, true, 20, 11, 12.0),
-		New(6, satelliteCell[0], 7, 8, 9, true, 10, 20, 12.0),
-		New(6, satelliteCell[0], 7, 8, 9, true, 10, 11, 20.0),
+		New(20, satelliteCell[0], 7, 8, 9, true, 10, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[1], 7, 8, 9, true, 10, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 20, 8, 9, true, 10, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 7, 20, 9, true, 10, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 7, 8, 20, true, 10, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 7, 8, 9, false, 10, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 7, 8, 9, true, 20, 11, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 7, 8, 9, true, 10, 20, 12.0, slog.LevelWarn),
+		New(6, satelliteCell[0], 7, 8, 9, true, 10, 11, 12.0, slog.LevelDebug),
 	}
 
 	if !cmp.Equal(testSatellite, satelliteCell[0]) {
