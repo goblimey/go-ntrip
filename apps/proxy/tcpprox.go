@@ -116,6 +116,11 @@ func main() {
 	if quiet {
 		rtcmLog.DisableLogging() // quiet trumps verbose.
 	}
+
+	start(isTLS)
+}
+
+func start(isTLS bool) {
 	byteChan = make(chan byte)
 	// Ensure that the byte channel is closed on return.
 	defer close(byteChan)
