@@ -564,10 +564,10 @@ func Analyse(message *Message) {
 		analyseMSM7(message.RawData, message)
 
 	case message.MessageType == 1005:
-		analyse1005(message.RawData, message, message.logLevel)
+		analyse1005(message.RawData, message, message.LogLevel)
 
 	case message.MessageType == 1006:
-		analyse1006(message.RawData, message, message.logLevel)
+		analyse1006(message.RawData, message, message.LogLevel)
 
 	case message.MessageType == 1230:
 		readable = "(Message type 1230 - GLONASS code-phase biases - don't know how to decode this)"
@@ -581,7 +581,7 @@ func Analyse(message *Message) {
 
 func analyseMSM4(messageBitStream []byte, message *Message) {
 	msm4Message, msm4Error :=
-		msm4Message.GetMessage(messageBitStream, message.logLevel)
+		msm4Message.GetMessage(messageBitStream, message.LogLevel)
 
 	if msm4Error != nil {
 		message.ErrorMessage = msm4Error.Error()
@@ -593,7 +593,7 @@ func analyseMSM4(messageBitStream []byte, message *Message) {
 
 func analyseMSM7(messageBitStream []byte, message *Message) {
 	msm7Message, msm7Error :=
-		msm7Message.GetMessage(messageBitStream, message.logLevel)
+		msm7Message.GetMessage(messageBitStream, message.LogLevel)
 
 	if msm7Error != nil {
 		message.ErrorMessage = msm7Error.Error()
@@ -894,8 +894,8 @@ type Message struct {
 	// via the Readable method.
 	Readable interface{}
 
-	// logLevel controls the data produced by String.
-	logLevel slog.Level
+	// LogLevel controls the data produced by String.
+	LogLevel slog.Level
 }
 
 // NewMessage creates a new message.
@@ -905,7 +905,7 @@ func NewMessage(messageType int, errorMessage string, bitStream []byte, logLevel
 		MessageType:  messageType,
 		RawData:      bitStream,
 		ErrorMessage: errorMessage,
-		logLevel:     logLevel,
+		LogLevel:     logLevel,
 	}
 
 	return &message
@@ -948,7 +948,7 @@ func (message *Message) String() string {
 		PrepareForDisplay(message)
 	}
 
-	if message.logLevel == slog.LevelDebug {
+	if message.LogLevel == slog.LevelDebug {
 
 		titleAndComment := utils.GetTitleAndComment(message.MessageType)
 
